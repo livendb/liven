@@ -594,21 +594,20 @@ pub fn parse_query(input: &str) -> Result<Query, String> {
         return Ok(Query::Status);
     }
 
-    if trimmed.starts_with("drop") {
-        if let Ok((remaining, stream_name)) = delimited(
+    if trimmed.starts_with("drop")
+        && let Ok((remaining, stream_name)) = delimited(
             tuple((tag("drop"), char('('))),
             ws(parse_string_or_ident),
             char(')'),
         )(trimmed)
-        {
-            if remaining.trim().is_empty() {
-                return Ok(Query::Drop { stream_name });
-            } else {
-                return Err(format!(
-                    "Unexpected trailing characters after drop: '{}'",
-                    remaining.trim()
-                ));
-            }
+    {
+        if remaining.trim().is_empty() {
+            return Ok(Query::Drop { stream_name });
+        } else {
+            return Err(format!(
+                "Unexpected trailing characters after drop: '{}'",
+                remaining.trim()
+            ));
         }
     }
 
@@ -660,113 +659,106 @@ pub fn parse_query(input: &str) -> Result<Query, String> {
             let arg_str = action_part.strip_prefix(".delete").unwrap().trim();
             if arg_str.starts_with('(') && arg_str.ends_with(')') {
                 let inner = arg_str[1..arg_str.len() - 1].trim();
-                if !inner.is_empty() {
-                    if pipeline.len() == 1 {
-                        if let PipelineStage::From { stream_name } = &pipeline[0] {
-                            let key = inner.trim_matches('"').to_string();
-                            return Ok(Query::DeleteKey {
-                                stream_name: stream_name.clone(),
-                                key,
-                            });
-                        }
-                    }
+                if !inner.is_empty()
+                    && pipeline.len() == 1
+                    && let PipelineStage::From { stream_name } = &pipeline[0]
+                {
+                    let key = inner.trim_matches('"').to_string();
+                    return Ok(Query::DeleteKey {
+                        stream_name: stream_name.clone(),
+                        key,
+                    });
                 }
             }
             return Ok(Query::PipelineDelete { pipeline });
         } else if action_part.starts_with(".empty") {
-            if pipeline.len() == 1 {
-                if let PipelineStage::From { stream_name } = &pipeline[0] {
-                    return Ok(Query::Empty {
-                        stream_name: stream_name.clone(),
-                    });
-                }
+            if pipeline.len() == 1
+                && let PipelineStage::From { stream_name } = &pipeline[0]
+            {
+                return Ok(Query::Empty {
+                    stream_name: stream_name.clone(),
+                });
             }
             return Err("Empty action must be applied directly to from(stream)".to_string());
         } else if action_part.starts_with(".insert") {
-            if pipeline.len() == 1 {
-                if let PipelineStage::From { stream_name } = &pipeline[0] {
-                    let arg_str = action_part.strip_prefix(".insert").unwrap().trim();
-                    if arg_str.starts_with('(') && arg_str.ends_with(')') {
-                        let inner = arg_str[1..arg_str.len() - 1].trim();
-                        if inner.starts_with('[') {
-                            if let Ok((_, batch_val)) = parse_js_array(inner) {
-                                if let serde_json::Value::Array(arr) = batch_val {
-                                    let mut batch = Vec::new();
-                                    for item in arr {
-                                        if let serde_json::Value::Array(pair) = item {
-                                            if pair.len() == 2 {
-                                                let key = match &pair[0] {
-                                                    serde_json::Value::String(s) => s.clone(),
-                                                    other => other.to_string(),
-                                                };
-                                                batch.push((key, pair[1].clone()));
-                                            }
-                                        }
-                                    }
-                                    return Ok(Query::InsertBatch {
-                                        stream_name: stream_name.clone(),
-                                        batch,
-                                    });
+            if pipeline.len() == 1
+                && let PipelineStage::From { stream_name } = &pipeline[0]
+            {
+                let arg_str = action_part.strip_prefix(".insert").unwrap().trim();
+                if arg_str.starts_with('(') && arg_str.ends_with(')') {
+                    let inner = arg_str[1..arg_str.len() - 1].trim();
+                    if inner.starts_with('[') {
+                        if let Ok((_, batch_val)) = parse_js_array(inner)
+                            && let serde_json::Value::Array(arr) = batch_val
+                        {
+                            let mut batch = Vec::new();
+                            for item in arr {
+                                if let serde_json::Value::Array(pair) = item
+                                    && pair.len() == 2
+                                {
+                                    let key = match &pair[0] {
+                                        serde_json::Value::String(s) => s.clone(),
+                                        other => other.to_string(),
+                                    };
+                                    batch.push((key, pair[1].clone()));
                                 }
                             }
-                        } else {
-                            if let Some(comma_idx) = find_outer_comma(inner) {
-                                let key_part =
-                                    inner[..comma_idx].trim().trim_matches('"').to_string();
-                                let val_part = inner[comma_idx + 1..].trim();
-                                if let Ok((_, value)) = parse_js_any_val(val_part) {
-                                    return Ok(Query::Insert {
-                                        stream_name: stream_name.clone(),
-                                        key: key_part,
-                                        value,
-                                    });
-                                }
-                            }
+                            return Ok(Query::InsertBatch {
+                                stream_name: stream_name.clone(),
+                                batch,
+                            });
+                        }
+                    } else if let Some(comma_idx) = find_outer_comma(inner) {
+                        let key_part = inner[..comma_idx].trim().trim_matches('"').to_string();
+                        let val_part = inner[comma_idx + 1..].trim();
+                        if let Ok((_, value)) = parse_js_any_val(val_part) {
+                            return Ok(Query::Insert {
+                                stream_name: stream_name.clone(),
+                                key: key_part,
+                                value,
+                            });
                         }
                     }
                 }
             }
             return Err("Insert action must be applied directly to from(stream)".to_string());
         } else if action_part.starts_with(".upsert") {
-            if pipeline.len() == 1 {
-                if let PipelineStage::From { stream_name } = &pipeline[0] {
-                    let arg_str = action_part.strip_prefix(".upsert").unwrap().trim();
-                    if arg_str.starts_with('(') && arg_str.ends_with(')') {
-                        let inner = arg_str[1..arg_str.len() - 1].trim();
-                        if inner.starts_with('[') {
-                            if let Ok((_, batch_val)) = parse_js_array(inner) {
-                                if let serde_json::Value::Array(arr) = batch_val {
-                                    let mut batch = Vec::new();
-                                    for item in arr {
-                                        if let serde_json::Value::Array(pair) = item {
-                                            if pair.len() == 2 {
-                                                let key = match &pair[0] {
-                                                    serde_json::Value::String(s) => s.clone(),
-                                                    other => other.to_string(),
-                                                };
-                                                batch.push((key, pair[1].clone()));
-                                            }
-                                        }
-                                    }
-                                    return Ok(Query::UpsertBatch {
-                                        stream_name: stream_name.clone(),
-                                        batch,
-                                    });
+            if pipeline.len() == 1
+                && let PipelineStage::From { stream_name } = &pipeline[0]
+            {
+                let arg_str = action_part.strip_prefix(".upsert").unwrap().trim();
+                if arg_str.starts_with('(') && arg_str.ends_with(')') {
+                    let inner = arg_str[1..arg_str.len() - 1].trim();
+                    if inner.starts_with('[') {
+                        if let Ok((_, batch_val)) = parse_js_array(inner)
+                            && let serde_json::Value::Array(arr) = batch_val
+                        {
+                            let mut batch = Vec::new();
+                            for item in arr {
+                                if let serde_json::Value::Array(pair) = item
+                                    && pair.len() == 2
+                                {
+                                    let key = match &pair[0] {
+                                        serde_json::Value::String(s) => s.clone(),
+                                        other => other.to_string(),
+                                    };
+                                    batch.push((key, pair[1].clone()));
                                 }
                             }
-                        } else {
-                            if let Some(comma_idx) = find_outer_comma(inner) {
-                                let key_part =
-                                    inner[..comma_idx].trim().trim_matches('"').to_string();
-                                let val_part = inner[comma_idx + 1..].trim();
-                                if let Ok((_, value)) = parse_js_any_val(val_part) {
-                                    return Ok(Query::Upsert {
-                                        stream_name: stream_name.clone(),
-                                        key: key_part,
-                                        value,
-                                    });
-                                }
-                            }
+                            return Ok(Query::UpsertBatch {
+                                stream_name: stream_name.clone(),
+                                batch,
+                            });
+                        }
+                    } else if let Some(comma_idx) = find_outer_comma(inner) {
+                        let key_part = inner[..comma_idx].trim().trim_matches('"').to_string();
+                        let val_part = inner[comma_idx + 1..].trim();
+                        if let Ok((_, value)) = parse_js_any_val(val_part) {
+                            return Ok(Query::Upsert {
+                                stream_name: stream_name.clone(),
+                                key: key_part,
+                                value,
+                            });
                         }
                     }
                 }
@@ -776,19 +768,18 @@ pub fn parse_query(input: &str) -> Result<Query, String> {
             let arg_str = action_part.strip_prefix(".update").unwrap().trim();
             if arg_str.starts_with('(') && arg_str.ends_with(')') {
                 let inner = arg_str[1..arg_str.len() - 1].trim();
-                if pipeline.len() == 1 {
-                    if let PipelineStage::From { stream_name } = &pipeline[0] {
-                        if let Some(comma_idx) = find_outer_comma(inner) {
-                            let key_part = inner[..comma_idx].trim().trim_matches('"').to_string();
-                            let val_part = inner[comma_idx + 1..].trim();
-                            if let Ok((_, value)) = parse_js_any_val(val_part) {
-                                return Ok(Query::Update {
-                                    stream_name: stream_name.clone(),
-                                    key: key_part,
-                                    value,
-                                });
-                            }
-                        }
+                if pipeline.len() == 1
+                    && let PipelineStage::From { stream_name } = &pipeline[0]
+                    && let Some(comma_idx) = find_outer_comma(inner)
+                {
+                    let key_part = inner[..comma_idx].trim().trim_matches('"').to_string();
+                    let val_part = inner[comma_idx + 1..].trim();
+                    if let Ok((_, value)) = parse_js_any_val(val_part) {
+                        return Ok(Query::Update {
+                            stream_name: stream_name.clone(),
+                            key: key_part,
+                            value,
+                        });
                     }
                 }
                 if let Ok((_, value)) = parse_js_any_val(inner) {

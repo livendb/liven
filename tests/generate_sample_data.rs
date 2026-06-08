@@ -93,12 +93,12 @@ impl AppendTarget {
     }
 
     fn flush(&mut self) -> Result<(), String> {
-        if let AppendTarget::Http { addr, batch } = self {
-            if !batch.is_empty() {
-                let json_str = serde_json::to_string(batch).map_err(|e| e.to_string())?;
-                post_http_json(addr, "/api/ingest", &json_str)?;
-                batch.clear();
-            }
+        if let AppendTarget::Http { addr, batch } = self
+            && !batch.is_empty()
+        {
+            let json_str = serde_json::to_string(batch).map_err(|e| e.to_string())?;
+            post_http_json(addr, "/api/ingest", &json_str)?;
+            batch.clear();
         }
         Ok(())
     }
@@ -131,13 +131,13 @@ fn test_generate_sample_data() {
         let mut locked = false;
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("liven") {
-                if let Ok(file) = fs::File::open(&path) {
-                    if file.try_lock_shared().is_err() {
-                        locked = true;
-                        break;
-                    }
-                }
+            if path.is_file()
+                && path.extension().and_then(|s| s.to_str()) == Some("liven")
+                && let Ok(file) = fs::File::open(&path)
+                && file.try_lock_shared().is_err()
+            {
+                locked = true;
+                break;
             }
         }
         locked

@@ -212,10 +212,10 @@ impl StorageEngine {
                     if !sync_running.load(Ordering::Relaxed) {
                         break;
                     }
-                    if let Ok(mut file_guard) = active_file_clone.try_lock() {
-                        if let Some(file) = file_guard.as_mut() {
-                            let _ = file.sync_data();
-                        }
+                    if let Ok(mut file_guard) = active_file_clone.try_lock()
+                        && let Some(file) = file_guard.as_mut()
+                    {
+                        let _ = file.sync_data();
                     }
                 }
             });
@@ -279,12 +279,12 @@ impl StorageEngine {
         for entry in fs::read_dir(&self.data_dir).map_err(|e| e.to_string())? {
             let entry = entry.map_err(|e| e.to_string())?;
             let path = entry.path();
-            if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("liven") {
-                if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                    if let Ok(segment_id) = stem.parse::<u64>() {
-                        segments.push((segment_id, path));
-                    }
-                }
+            if path.is_file()
+                && path.extension().and_then(|s| s.to_str()) == Some("liven")
+                && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
+                && let Ok(segment_id) = stem.parse::<u64>()
+            {
+                segments.push((segment_id, path));
             }
         }
 
@@ -743,12 +743,12 @@ impl StorageEngine {
         for entry in fs::read_dir(&self.data_dir).map_err(|e| e.to_string())? {
             let entry = entry.map_err(|e| e.to_string())?;
             let path = entry.path();
-            if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("liven") {
-                if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                    if let Ok(segment_id) = stem.parse::<u64>() {
-                        segments.push((segment_id, path));
-                    }
-                }
+            if path.is_file()
+                && path.extension().and_then(|s| s.to_str()) == Some("liven")
+                && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
+                && let Ok(segment_id) = stem.parse::<u64>()
+            {
+                segments.push((segment_id, path));
             }
         }
 
@@ -824,22 +824,20 @@ impl StorageEngine {
                         .map_err(|e| e.to_string())?;
 
                     let actual_crc = crc32fast::hash(target_slice);
-                    if actual_crc == crc32 {
-                        if let Ok((stream_name, key, value)) =
+                    if actual_crc == crc32
+                        && let Ok((stream_name, key, value)) =
                             deserialize_payload_borrowed(target_slice, type_tag)
-                        {
-                            if let Ok(stream_key) = crate::storage::key::StreamKey::from_str(key) {
-                                return Ok(Some(Record {
-                                    sequence_id: seq_id,
-                                    timestamp,
-                                    type_tag,
-                                    flags,
-                                    stream_name: stream_name.to_string(),
-                                    key: stream_key,
-                                    value,
-                                }));
-                            }
-                        }
+                        && let Ok(stream_key) = crate::storage::key::StreamKey::from_str(key)
+                    {
+                        return Ok(Some(Record {
+                            sequence_id: seq_id,
+                            timestamp,
+                            type_tag,
+                            flags,
+                            stream_name: stream_name.to_string(),
+                            key: stream_key,
+                            value,
+                        }));
                     }
                     Ok::<Option<Record>, String>(None)
                 })?;
@@ -865,14 +863,13 @@ impl StorageEngine {
         for entry in fs::read_dir(&self.data_dir).map_err(|e| e.to_string())? {
             let entry = entry.map_err(|e| e.to_string())?;
             let path = entry.path();
-            if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("liven") {
-                if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                    if let Ok(segment_id) = stem.parse::<u64>() {
-                        if segment_id < active_id {
-                            inactive_segments.push((segment_id, path));
-                        }
-                    }
-                }
+            if path.is_file()
+                && path.extension().and_then(|s| s.to_str()) == Some("liven")
+                && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
+                && let Ok(segment_id) = stem.parse::<u64>()
+                && segment_id < active_id
+            {
+                inactive_segments.push((segment_id, path));
             }
         }
 
@@ -932,7 +929,7 @@ impl StorageEngine {
                     &record.stream_name,
                     record.key.as_str(),
                     &record.value,
-                    &mut *local_buf,
+                    &mut local_buf,
                 );
                 let payload_len = local_buf.len() as u32;
                 let crc32 = crc32fast::hash(&local_buf);
@@ -1002,14 +999,12 @@ fn get_process_memory() -> u64 {
     #[cfg(target_os = "macos")]
     {
         if let Ok(output) = std::process::Command::new("ps")
-            .args(&["-o", "rss=", "-p", &std::process::id().to_string()])
+            .args(["-o", "rss=", "-p", &std::process::id().to_string()])
             .output()
+            && let Ok(stdout) = String::from_utf8(output.stdout)
+            && let Ok(rss_kb) = stdout.trim().parse::<u64>()
         {
-            if let Ok(stdout) = String::from_utf8(output.stdout) {
-                if let Ok(rss_kb) = stdout.trim().parse::<u64>() {
-                    return rss_kb * 1024;
-                }
-            }
+            return rss_kb * 1024;
         }
     }
 
@@ -1184,7 +1179,7 @@ fn execute_batch_append(
                     let flags = if *is_tombstone { 0x02 } else { 0x01 };
                     let type_tag = value.type_tag();
 
-                    serialize_payload_into(stream_name, key.as_str(), value, &mut *local_buf);
+                    serialize_payload_into(stream_name, key.as_str(), value, &mut local_buf);
                     let payload_len = local_buf.len() as u32;
                     let crc32 = crc32fast::hash(&local_buf);
 
@@ -1238,7 +1233,7 @@ fn execute_batch_append(
                             stream_name,
                             key.as_str(),
                             &DataValue::Null,
-                            &mut *local_buf,
+                            &mut local_buf,
                         );
                         let payload_len = local_buf.len() as u32;
                         let crc32 = crc32fast::hash(&local_buf);
@@ -1419,10 +1414,10 @@ pub fn serialize_payload_into(stream_name: &str, key: &str, value: &DataValue, b
     }
 }
 
-fn deserialize_payload_borrowed<'a>(
-    payload: &'a [u8],
+fn deserialize_payload_borrowed(
+    payload: &[u8],
     type_tag: u8,
-) -> Result<(&'a str, &'a str, DataValue), String> {
+) -> Result<(&str, &str, DataValue), String> {
     if payload.len() < 4 {
         return Err("Payload too short".to_string());
     }
@@ -1535,11 +1530,11 @@ impl StorageEngine {
 impl Drop for StorageEngine {
     fn drop(&mut self) {
         self.is_running.store(false, Ordering::Relaxed);
-        if let Ok(mut active_file_guard) = self.active_file.lock() {
-            if let Some(file) = active_file_guard.take() {
-                let _ = file.unlock();
-                let _ = file.sync_all();
-            }
+        if let Ok(mut active_file_guard) = self.active_file.lock()
+            && let Some(file) = active_file_guard.take()
+        {
+            let _ = file.unlock();
+            let _ = file.sync_all();
         }
     }
 }

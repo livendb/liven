@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct StreamKey {
     bytes: [u8; 32],
     len: u8,
@@ -80,15 +80,6 @@ impl StreamKey {
     /// Convert to a raw byte slice.
     pub fn as_bytes(&self) -> &[u8] {
         &self.bytes[..self.len as usize]
-    }
-}
-
-impl Default for StreamKey {
-    fn default() -> Self {
-        Self {
-            bytes: [0u8; 32],
-            len: 0,
-        }
     }
 }
 

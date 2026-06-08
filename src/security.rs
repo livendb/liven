@@ -15,7 +15,7 @@ pub fn generate_nonce() -> [u8; 32] {
 
 pub fn hex_decode(s: &str) -> Result<Vec<u8>, String> {
     let s = s.trim();
-    if s.len() % 2 != 0 {
+    if !s.len().is_multiple_of(2) {
         return Err("Odd hex length".to_string());
     }
     let mut bytes = Vec::with_capacity(s.len() / 2);

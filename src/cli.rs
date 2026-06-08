@@ -141,7 +141,7 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
 
             let raw_key = {
                 // Open direct engine (scoped block ensures lock is released before restart)
-                let engine = storage::StorageEngine::new(&get_data_dir(), max_segment_size as u64)?;
+                let engine = storage::StorageEngine::new(get_data_dir(), max_segment_size as u64)?;
 
                 // 1. Remove all keys by listing keys and appending tombstones
                 let keys = engine.list_keys("auth_keys");
@@ -220,14 +220,14 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
         }
         "start" => {
             // Check if already running
-            if is_server_running() {
-                if let Ok(pid) = read_pid() {
-                    println!(
-                        "\x1b[31mError: LIVEN is already running with PID {}\x1b[0m",
-                        pid
-                    );
-                    exit(1);
-                }
+            if is_server_running()
+                && let Ok(pid) = read_pid()
+            {
+                println!(
+                    "\x1b[31mError: LIVEN is already running with PID {}\x1b[0m",
+                    pid
+                );
+                exit(1);
             }
 
             let run_ui = !args.contains(&"--no-ui".to_string());
@@ -346,23 +346,20 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                     println!("  Engine Host: {}", host);
                     println!("  Database Port: {}", db_p);
                     println!("  Web UI Port: {}", web_p);
-                    if let Ok(meta) = fs::metadata(get_pid_file()) {
-                        if let Ok(modified) = meta.modified() {
-                            if let Ok(duration) = modified.elapsed() {
-                                println!("  Uptime: {}s", duration.as_secs());
-                            }
-                        }
+                    if let Ok(meta) = fs::metadata(get_pid_file())
+                        && let Ok(modified) = meta.modified()
+                        && let Ok(duration) = modified.elapsed()
+                    {
+                        println!("  Uptime: {}s", duration.as_secs());
                     }
                 }
+            } else if Path::new(&get_pid_file()).exists() {
+                println!(
+                    "\x1b[33m● LIVEN status: Stale PID file found (process is not active).\x1b[0m"
+                );
+                let _ = fs::remove_file(get_pid_file());
             } else {
-                if Path::new(&get_pid_file()).exists() {
-                    println!(
-                        "\x1b[33m● LIVEN status: Stale PID file found (process is not active).\x1b[0m"
-                    );
-                    let _ = fs::remove_file(get_pid_file());
-                } else {
-                    println!("\x1b[37m● LIVEN is stopped.\x1b[0m");
-                }
+                println!("\x1b[37m● LIVEN is stopped.\x1b[0m");
             }
         }
         "list" => {
@@ -430,7 +427,7 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                 }
             } else {
                 let max_segment_size = config.storage.max_segment_size_mb * 1024 * 1024;
-                let engine = storage::StorageEngine::new(&get_data_dir(), max_segment_size as u64)?;
+                let engine = storage::StorageEngine::new(get_data_dir(), max_segment_size as u64)?;
                 engine.list_streams()
             };
 
@@ -711,7 +708,7 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                         (format!("import_{}", count + 1), parsed.clone())
                     };
 
-                    pairs.push(format!("[\"{}\", {}]", key, payload.to_string()));
+                    pairs.push(format!("[\"{}\", {}]", key, payload));
                     count += 1;
                 }
                 let batch_str = pairs.join(",");
@@ -777,7 +774,7 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                     }
 
                     let payload = serde_json::Value::Object(map);
-                    pairs.push(format!("[\"{}\", {}]", key, payload.to_string()));
+                    pairs.push(format!("[\"{}\", {}]", key, payload));
                     count += 1;
                 }
                 let batch_str = pairs.join(",");

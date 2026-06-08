@@ -274,7 +274,7 @@ async fn test_rest_auth_key_challenge_login_lifecycle() {
         send_http_request(webui_port, "GET", "/api/system/auth/status", vec![], None).await;
     assert_eq!(code, 200);
     let status_json: serde_json::Value = serde_json::from_str(&body).unwrap();
-    assert_eq!(status_json["authenticated"].as_bool().unwrap(), false);
+    assert!(!status_json["authenticated"].as_bool().unwrap());
 
     // 2. Post to login endpoint with the pre-populated key
     let login_payload = serde_json::json!({ "token": raw_key }).to_string();
@@ -319,7 +319,7 @@ async fn test_rest_auth_key_challenge_login_lifecycle() {
     .await;
     assert_eq!(code, 200);
     let status_json: serde_json::Value = serde_json::from_str(&body).unwrap();
-    assert_eq!(status_json["authenticated"].as_bool().unwrap(), true);
+    assert!(status_json["authenticated"].as_bool().unwrap());
     assert_eq!(status_json["user_id"].as_str().unwrap(), "default-admin");
 
     // 4. Generate a new key identity using the authenticated session
@@ -459,7 +459,7 @@ async fn test_rest_auth_key_challenge_login_lifecycle() {
     .await;
     assert_eq!(code, 200);
     let status_json2: serde_json::Value = serde_json::from_str(&body).unwrap();
-    assert_eq!(status_json2["authenticated"].as_bool().unwrap(), false);
+    assert!(!status_json2["authenticated"].as_bool().unwrap());
 
     // Clean up directory
     let _ = fs::remove_dir_all(&test_dir);

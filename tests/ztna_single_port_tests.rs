@@ -30,7 +30,7 @@ keyUsage = critical, digitalSignature, cRLSign, keyCertSign
 
     // 1. Generate CA key and certificate
     let status = std::process::Command::new("openssl")
-        .args(&[
+        .args([
             "req",
             "-x509",
             "-newkey",
@@ -51,7 +51,7 @@ keyUsage = critical, digitalSignature, cRLSign, keyCertSign
 
     // 2. Generate Server key and CSR
     let status = std::process::Command::new("openssl")
-        .args(&[
+        .args([
             "genrsa",
             "-out",
             &dir.join("server.key").to_string_lossy(),
@@ -62,7 +62,7 @@ keyUsage = critical, digitalSignature, cRLSign, keyCertSign
     assert!(status.success());
 
     let status = std::process::Command::new("openssl")
-        .args(&[
+        .args([
             "req",
             "-new",
             "-key",
@@ -88,7 +88,7 @@ subjectAltName = DNS:127.0.0.1,IP:127.0.0.1
 
     // 3. Sign Server CSR with CA
     let status = std::process::Command::new("openssl")
-        .args(&[
+        .args([
             "x509",
             "-req",
             "-in",
@@ -113,7 +113,7 @@ subjectAltName = DNS:127.0.0.1,IP:127.0.0.1
 
     // 4. Generate Client key and CSR for CN "alice"
     let status = std::process::Command::new("openssl")
-        .args(&[
+        .args([
             "genrsa",
             "-out",
             &dir.join("client.key").to_string_lossy(),
@@ -124,7 +124,7 @@ subjectAltName = DNS:127.0.0.1,IP:127.0.0.1
     assert!(status.success());
 
     let status = std::process::Command::new("openssl")
-        .args(&[
+        .args([
             "req",
             "-new",
             "-key",
@@ -149,7 +149,7 @@ extendedKeyUsage = clientAuth
 
     // 5. Sign Client CSR with CA
     let status = std::process::Command::new("openssl")
-        .args(&[
+        .args([
             "x509",
             "-req",
             "-in",

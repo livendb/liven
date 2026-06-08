@@ -10,51 +10,47 @@ use std::time::SystemTime;
 pub fn extract_field(value: &DataValue, field: &str) -> Option<DataValue> {
     match value {
         DataValue::String(s) => {
-            if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(s) {
-                if let Some(field_val) = json_val.get(field) {
-                    return match field_val {
-                        serde_json::Value::Null => Some(DataValue::Null),
-                        serde_json::Value::Bool(b) => Some(DataValue::Bool(*b)),
-                        serde_json::Value::Number(n) => {
-                            if let Some(i) = n.as_i64() {
-                                Some(DataValue::Int(i))
-                            } else if let Some(u) = n.as_u64() {
-                                Some(DataValue::UInt(u))
-                            } else {
-                                n.as_f64()
-                                    .map(|f| DataValue::Float(ordered_float::OrderedFloat(f)))
-                            }
+            if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(s)
+                && let Some(field_val) = json_val.get(field)
+            {
+                return match field_val {
+                    serde_json::Value::Null => Some(DataValue::Null),
+                    serde_json::Value::Bool(b) => Some(DataValue::Bool(*b)),
+                    serde_json::Value::Number(n) => {
+                        if let Some(i) = n.as_i64() {
+                            Some(DataValue::Int(i))
+                        } else if let Some(u) = n.as_u64() {
+                            Some(DataValue::UInt(u))
+                        } else {
+                            n.as_f64()
+                                .map(|f| DataValue::Float(ordered_float::OrderedFloat(f)))
                         }
-                        serde_json::Value::String(str_val) => {
-                            Some(DataValue::String(str_val.clone()))
-                        }
-                        _ => Some(DataValue::String(field_val.to_string())),
-                    };
-                }
+                    }
+                    serde_json::Value::String(str_val) => Some(DataValue::String(str_val.clone())),
+                    _ => Some(DataValue::String(field_val.to_string())),
+                };
             }
         }
         DataValue::Binary(b) => {
-            if let Ok(msg_val) = rmp_serde::from_slice::<serde_json::Value>(b) {
-                if let Some(field_val) = msg_val.get(field) {
-                    return match field_val {
-                        serde_json::Value::Null => Some(DataValue::Null),
-                        serde_json::Value::Bool(b) => Some(DataValue::Bool(*b)),
-                        serde_json::Value::Number(n) => {
-                            if let Some(i) = n.as_i64() {
-                                Some(DataValue::Int(i))
-                            } else if let Some(u) = n.as_u64() {
-                                Some(DataValue::UInt(u))
-                            } else {
-                                n.as_f64()
-                                    .map(|f| DataValue::Float(ordered_float::OrderedFloat(f)))
-                            }
+            if let Ok(msg_val) = rmp_serde::from_slice::<serde_json::Value>(b)
+                && let Some(field_val) = msg_val.get(field)
+            {
+                return match field_val {
+                    serde_json::Value::Null => Some(DataValue::Null),
+                    serde_json::Value::Bool(b) => Some(DataValue::Bool(*b)),
+                    serde_json::Value::Number(n) => {
+                        if let Some(i) = n.as_i64() {
+                            Some(DataValue::Int(i))
+                        } else if let Some(u) = n.as_u64() {
+                            Some(DataValue::UInt(u))
+                        } else {
+                            n.as_f64()
+                                .map(|f| DataValue::Float(ordered_float::OrderedFloat(f)))
                         }
-                        serde_json::Value::String(str_val) => {
-                            Some(DataValue::String(str_val.clone()))
-                        }
-                        _ => Some(DataValue::String(field_val.to_string())),
-                    };
-                }
+                    }
+                    serde_json::Value::String(str_val) => Some(DataValue::String(str_val.clone())),
+                    _ => Some(DataValue::String(field_val.to_string())),
+                };
             }
         }
         _ => {}
@@ -353,10 +349,11 @@ fn extract_key_from_filter(expr: &FilterExpr) -> Option<String> {
             operator,
             value,
         } => {
-            if field == "key" && *operator == Op::Eq {
-                if let DataValue::String(k) = value {
-                    return Some(k.clone());
-                }
+            if field == "key"
+                && *operator == Op::Eq
+                && let DataValue::String(k) = value
+            {
+                return Some(k.clone());
             }
             None
         }
@@ -397,10 +394,10 @@ pub fn json_to_datavalue(val: serde_json::Value) -> DataValue {
 pub fn execute_query(engine: &StorageEngine, query: &Query) -> Result<Vec<Record>, String> {
     match query {
         Query::Pipeline(stages) => {
-            if let Some(PipelineStage::From { stream_name }) = stages.first() {
-                if !engine.list_streams().contains(stream_name) {
-                    return Err(format!("Stream '{}' does not exist", stream_name));
-                }
+            if let Some(PipelineStage::From { stream_name }) = stages.first()
+                && !engine.list_streams().contains(stream_name)
+            {
+                return Err(format!("Stream '{}' does not exist", stream_name));
             }
             let mut records = engine.scan_historical()?;
             apply_pipeline_stages_to_vec(&mut records, engine, stages);
@@ -779,12 +776,11 @@ pub fn apply_pipeline_stages_to_vec(
                 threshold,
             } => {
                 records.retain(|r| {
-                    if let Some(val) = evaluate_record_field(r, field) {
-                        if let Some(record_vec) = to_vector(&val) {
-                            if let Some(sim) = cosine_similarity(&record_vec, query_vector) {
-                                return sim >= threshold.into_inner();
-                            }
-                        }
+                    if let Some(val) = evaluate_record_field(r, field)
+                        && let Some(record_vec) = to_vector(&val)
+                        && let Some(sim) = cosine_similarity(&record_vec, query_vector)
+                    {
+                        return sim >= threshold.into_inner();
                     }
                     false
                 });
@@ -880,10 +876,10 @@ pub fn apply_pipeline_stages_to_vec(
                             let arg = &agg[4..agg.len() - 1];
                             let mut sum_val = 0.0;
                             for r in &group_records {
-                                if let Some(v) = evaluate_record_field(r, arg) {
-                                    if let Some(n) = to_f64(&v) {
-                                        sum_val += n;
-                                    }
+                                if let Some(v) = evaluate_record_field(r, arg)
+                                    && let Some(n) = to_f64(&v)
+                                {
+                                    sum_val += n;
                                 }
                             }
                             obj.insert(
@@ -897,11 +893,11 @@ pub fn apply_pipeline_stages_to_vec(
                             let mut sum_val = 0.0;
                             let mut count = 0;
                             for r in &group_records {
-                                if let Some(v) = evaluate_record_field(r, arg) {
-                                    if let Some(n) = to_f64(&v) {
-                                        sum_val += n;
-                                        count += 1;
-                                    }
+                                if let Some(v) = evaluate_record_field(r, arg)
+                                    && let Some(n) = to_f64(&v)
+                                {
+                                    sum_val += n;
+                                    count += 1;
                                 }
                             }
                             let avg = if count > 0 {
@@ -920,13 +916,12 @@ pub fn apply_pipeline_stages_to_vec(
                             let mut min_val = f64::MAX;
                             let mut found = false;
                             for r in &group_records {
-                                if let Some(v) = evaluate_record_field(r, arg) {
-                                    if let Some(n) = to_f64(&v) {
-                                        if n < min_val {
-                                            min_val = n;
-                                            found = true;
-                                        }
-                                    }
+                                if let Some(v) = evaluate_record_field(r, arg)
+                                    && let Some(n) = to_f64(&v)
+                                    && n < min_val
+                                {
+                                    min_val = n;
+                                    found = true;
                                 }
                             }
                             let val = if found {
@@ -942,13 +937,12 @@ pub fn apply_pipeline_stages_to_vec(
                             let mut max_val = f64::MIN;
                             let mut found = false;
                             for r in &group_records {
-                                if let Some(v) = evaluate_record_field(r, arg) {
-                                    if let Some(n) = to_f64(&v) {
-                                        if n > max_val {
-                                            max_val = n;
-                                            found = true;
-                                        }
-                                    }
+                                if let Some(v) = evaluate_record_field(r, arg)
+                                    && let Some(n) = to_f64(&v)
+                                    && n > max_val
+                                {
+                                    max_val = n;
+                                    found = true;
                                 }
                             }
                             let val = if found {
@@ -1018,17 +1012,15 @@ pub fn apply_pipeline_stages_to_vec(
                             for r in &group {
                                 let num_val = to_f64(&r.value).or_else(|| {
                                     // Try to extract any field inside JSON if record value itself is not a numeric scalar
-                                    if let DataValue::String(s) = &r.value {
-                                        if let Ok(json) =
+                                    if let DataValue::String(s) = &r.value
+                                        && let Ok(json) =
                                             serde_json::from_str::<serde_json::Value>(s)
-                                        {
-                                            if let Some(obj) = json.as_object() {
-                                                // Find first numeric field
-                                                for (_, v) in obj {
-                                                    if let Some(f) = v.as_f64() {
-                                                        return Some(f);
-                                                    }
-                                                }
+                                        && let Some(obj) = json.as_object()
+                                    {
+                                        // Find first numeric field
+                                        for (_, v) in obj {
+                                            if let Some(f) = v.as_f64() {
+                                                return Some(f);
                                             }
                                         }
                                     }
@@ -1051,16 +1043,14 @@ pub fn apply_pipeline_stages_to_vec(
                             let mut count = 0;
                             for r in &group {
                                 let num_val = to_f64(&r.value).or_else(|| {
-                                    if let DataValue::String(s) = &r.value {
-                                        if let Ok(json) =
+                                    if let DataValue::String(s) = &r.value
+                                        && let Ok(json) =
                                             serde_json::from_str::<serde_json::Value>(s)
-                                        {
-                                            if let Some(obj) = json.as_object() {
-                                                for (_, v) in obj {
-                                                    if let Some(f) = v.as_f64() {
-                                                        return Some(f);
-                                                    }
-                                                }
+                                        && let Some(obj) = json.as_object()
+                                    {
+                                        for (_, v) in obj {
+                                            if let Some(f) = v.as_f64() {
+                                                return Some(f);
                                             }
                                         }
                                     }

@@ -203,10 +203,11 @@ max_segment_size_mb = 16
             if security_sec_idx.is_some() && next_section_idx.is_none() {
                 next_section_idx = Some(i);
             }
-        } else if trimmed.starts_with("master_key") {
-            if security_sec_idx.is_some() && next_section_idx.is_none() {
-                master_key_idx = Some(i);
-            }
+        } else if trimmed.starts_with("master_key")
+            && security_sec_idx.is_some()
+            && next_section_idx.is_none()
+        {
+            master_key_idx = Some(i);
         }
     }
 

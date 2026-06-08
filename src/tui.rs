@@ -121,10 +121,10 @@ fn format_error_card(err_msg: &str) -> Vec<String> {
                 break;
             } else {
                 let mut split_at = 70;
-                if let Some(space_idx) = remaining[..70].rfind(' ') {
-                    if space_idx > 30 {
-                        split_at = space_idx;
-                    }
+                if let Some(space_idx) = remaining[..70].rfind(' ')
+                    && space_idx > 30
+                {
+                    split_at = space_idx;
                 }
                 lines.push(remaining[..split_at].to_string());
                 remaining = remaining[split_at..].trim_start();
@@ -176,7 +176,7 @@ fn format_records_table(records: &[Record]) -> Vec<String> {
         return format_error_card(&err_msg);
     }
 
-    let headers = vec!["seq_id".to_string(), "key".to_string(), "value".to_string()];
+    let headers = ["seq_id".to_string(), "key".to_string(), "value".to_string()];
 
     let mut rows: Vec<Vec<String>> = Vec::new();
     for r in records {
@@ -266,27 +266,28 @@ fn build_border_line(left: char, middle: char, right: char, widths: &[usize]) ->
 
 fn format_mutation_card(records: &[Record]) -> Vec<String> {
     let mut output = Vec::new();
-    if records.len() == 1 && records[0].key.as_str() == "status" {
-        if let Some(map) = get_record_json_object(&records[0]) {
-            let status = map
-                .get("status")
-                .and_then(|v| v.as_str())
-                .unwrap_or("success");
-            let affected = map
-                .get("affected_rows")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0);
-            let stream = &records[0].stream_name;
+    if records.len() == 1
+        && records[0].key.as_str() == "status"
+        && let Some(map) = get_record_json_object(&records[0])
+    {
+        let status = map
+            .get("status")
+            .and_then(|v| v.as_str())
+            .unwrap_or("success");
+        let affected = map
+            .get("affected_rows")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let stream = &records[0].stream_name;
 
-            output.push("┌────────────────────────────────────────────────────────┐".to_string());
-            output.push("│                 TRANSACTION COMMITTED                  │".to_string());
-            output.push("├────────────────────────────────────────────────────────┤".to_string());
-            output.push(format!("│  Stream Name: {: <41}│", stream));
-            output.push(format!("│  Status:      {: <41}│", status));
-            output.push(format!("│  Rows Mutated:{: <41}│", affected));
-            output.push("└────────────────────────────────────────────────────────┘".to_string());
-            return output;
-        }
+        output.push("┌────────────────────────────────────────────────────────┐".to_string());
+        output.push("│                 TRANSACTION COMMITTED                  │".to_string());
+        output.push("├────────────────────────────────────────────────────────┤".to_string());
+        output.push(format!("│  Stream Name: {: <41}│", stream));
+        output.push(format!("│  Status:      {: <41}│", status));
+        output.push(format!("│  Rows Mutated:{: <41}│", affected));
+        output.push("└────────────────────────────────────────────────────────┘".to_string());
+        return output;
     }
     format_records_table(records)
 }
@@ -457,347 +458,337 @@ pub async fn run_shell(auth_key: Option<String>) -> Result<(), Box<dyn std::erro
 
         // Process User Inputs asynchronously without blocking
         while event::poll(Duration::from_millis(0))? {
-            if let Event::Key(key) = event::read()? {
-                if key.kind == KeyEventKind::Press {
-                    match key.code {
-                        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                            // Ctrl+C aborts terminal
-                            return Ok(());
+            if let Event::Key(key) = event::read()?
+                && key.kind == KeyEventKind::Press
+            {
+                match key.code {
+                    KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        // Ctrl+C aborts terminal
+                        return Ok(());
+                    }
+                    KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        // Ctrl+D acts like Exit
+                        return Ok(());
+                    }
+                    KeyCode::Char(c) => {
+                        insert_char_at(&mut input_buffer, cursor_position, c);
+                        cursor_position += 1;
+                    }
+                    KeyCode::Backspace => {
+                        if cursor_position > 0 {
+                            remove_char_at(&mut input_buffer, cursor_position);
+                            cursor_position -= 1;
                         }
-                        KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                            // Ctrl+D acts like Exit
-                            return Ok(());
+                    }
+                    KeyCode::Delete => {
+                        if cursor_position < input_buffer.chars().count() {
+                            remove_char_at(&mut input_buffer, cursor_position + 1);
                         }
-                        KeyCode::Char(c) => {
-                            insert_char_at(&mut input_buffer, cursor_position, c);
-                            cursor_position += 1;
-                        }
-                        KeyCode::Backspace => {
-                            if cursor_position > 0 {
-                                remove_char_at(&mut input_buffer, cursor_position);
-                                cursor_position -= 1;
-                            }
-                        }
-                        KeyCode::Delete => {
-                            if cursor_position < input_buffer.chars().count() {
-                                remove_char_at(&mut input_buffer, cursor_position + 1);
-                            }
-                        }
-                        KeyCode::Left => {
-                            cursor_position = cursor_position.saturating_sub(1);
-                        }
-                        KeyCode::Right => {
-                            cursor_position =
-                                std::cmp::min(cursor_position + 1, input_buffer.chars().count());
-                        }
-                        KeyCode::Up => {
-                            if !command_history.is_empty() {
-                                if history_index.is_none() {
-                                    temp_saved_buffer = input_buffer.clone();
-                                    history_index = Some(command_history.len() - 1);
-                                } else {
-                                    let idx = history_index.unwrap();
-                                    if idx > 0 {
-                                        history_index = Some(idx - 1);
-                                    }
-                                }
-                                if let Some(idx) = history_index {
-                                    input_buffer = command_history[idx].clone();
-                                    cursor_position = input_buffer.chars().count();
+                    }
+                    KeyCode::Left => {
+                        cursor_position = cursor_position.saturating_sub(1);
+                    }
+                    KeyCode::Right => {
+                        cursor_position =
+                            std::cmp::min(cursor_position + 1, input_buffer.chars().count());
+                    }
+                    KeyCode::Up => {
+                        if !command_history.is_empty() {
+                            if history_index.is_none() {
+                                temp_saved_buffer = input_buffer.clone();
+                                history_index = Some(command_history.len() - 1);
+                            } else {
+                                let idx = history_index.unwrap();
+                                if idx > 0 {
+                                    history_index = Some(idx - 1);
                                 }
                             }
-                        }
-                        KeyCode::Down => {
                             if let Some(idx) = history_index {
-                                if idx + 1 < command_history.len() {
-                                    history_index = Some(idx + 1);
-                                    input_buffer = command_history[idx + 1].clone();
-                                } else {
-                                    history_index = None;
-                                    input_buffer = temp_saved_buffer.clone();
-                                }
+                                input_buffer = command_history[idx].clone();
                                 cursor_position = input_buffer.chars().count();
                             }
                         }
-                        KeyCode::PageUp => {
-                            logs_scroll = logs_scroll.saturating_sub(5);
-                        }
-                        KeyCode::PageDown => {
-                            logs_scroll = std::cmp::min(
-                                logs_scroll + 5,
-                                logs.len().saturating_sub(logs_height),
-                            );
-                        }
-                        KeyCode::Home => {
-                            cursor_position = 0;
-                        }
-                        KeyCode::End => {
+                    }
+                    KeyCode::Down => {
+                        if let Some(idx) = history_index {
+                            if idx + 1 < command_history.len() {
+                                history_index = Some(idx + 1);
+                                input_buffer = command_history[idx + 1].clone();
+                            } else {
+                                history_index = None;
+                                input_buffer = temp_saved_buffer.clone();
+                            }
                             cursor_position = input_buffer.chars().count();
                         }
-                        KeyCode::Enter => {
-                            let query_trimmed = input_buffer.trim().to_string();
-                            if !query_trimmed.is_empty() {
-                                command_history.push(input_buffer.clone());
-                                history_index = None;
-                                input_buffer.clear();
-                                cursor_position = 0;
+                    }
+                    KeyCode::PageUp => {
+                        logs_scroll = logs_scroll.saturating_sub(5);
+                    }
+                    KeyCode::PageDown => {
+                        logs_scroll =
+                            std::cmp::min(logs_scroll + 5, logs.len().saturating_sub(logs_height));
+                    }
+                    KeyCode::Home => {
+                        cursor_position = 0;
+                    }
+                    KeyCode::End => {
+                        cursor_position = input_buffer.chars().count();
+                    }
+                    KeyCode::Enter => {
+                        let query_trimmed = input_buffer.trim().to_string();
+                        if !query_trimmed.is_empty() {
+                            command_history.push(input_buffer.clone());
+                            history_index = None;
+                            input_buffer.clear();
+                            cursor_position = 0;
 
-                                let query_str = query_trimmed.clone();
-                                if query_str == "exit" || query_str == "quit" || query_str == "\\q"
-                                {
-                                    return Ok(());
+                            let query_str = query_trimmed.clone();
+                            if query_str == "exit" || query_str == "quit" || query_str == "\\q" {
+                                return Ok(());
+                            }
+
+                            let conn_clone = conn.clone();
+                            let tx = shell_tx.clone();
+
+                            // Spawn standard/tail operations non-blockingly
+                            tokio::spawn(async move {
+                                let query_trimmed = query_str.trim();
+                                if query_trimmed == "\\help" {
+                                    let mut help_lines = Vec::new();
+                                    help_lines.push("─────────────────────────────────────────────────────────────────────────────".to_string());
+                                    help_lines.push("                            LIVEN TUI QUICK HELP GUIDE                       ".to_string());
+                                    help_lines.push("─────────────────────────────────────────────────────────────────────────────".to_string());
+                                    help_lines.push(
+                                        "  \\d, \\dt          List all active streams (tables)"
+                                            .to_string(),
+                                    );
+                                    help_lines.push("  \\d <stream>      Describe schema/fields and record count for a stream".to_string());
+                                    help_lines.push(
+                                        "  \\help            Show this help guide".to_string(),
+                                    );
+                                    help_lines.push(
+                                        "  \\q, exit, quit  Exit the terminal shell".to_string(),
+                                    );
+                                    help_lines.push("".to_string());
+                                    help_lines.push("  Operational Query Examples:".to_string());
+                                    help_lines.push("    -- Ingest / Insert records".to_string());
+                                    help_lines.push("    from(\"users\").insert(\"user_100\", { \"name\": \"Alice\", \"role\": \"admin\" });".to_string());
+                                    help_lines.push("".to_string());
+                                    help_lines.push(
+                                        "    -- Query pipelines with forward pipe combinator"
+                                            .to_string(),
+                                    );
+                                    help_lines.push("    from(\"users\") | filter(role == \"admin\") | limit(5);".to_string());
+                                    help_lines.push("".to_string());
+                                    help_lines
+                                        .push("    -- Mutate / Update matched records".to_string());
+                                    help_lines.push("    from(\"users\") | filter(key == \"user_100\") .update({ \"status\": \"active\" });".to_string());
+                                    help_lines.push("".to_string());
+                                    help_lines.push("    -- Drop streams completely".to_string());
+                                    help_lines.push("    drop(\"users\");".to_string());
+                                    help_lines.push("─────────────────────────────────────────────────────────────────────────────".to_string());
+
+                                    let _ = tx.send(ShellEvent::QueryResult {
+                                        query: "\\help".to_string(),
+                                        duration: Duration::from_secs(0),
+                                        output: help_lines,
+                                    });
+                                    return;
                                 }
 
-                                let conn_clone = conn.clone();
-                                let tx = shell_tx.clone();
-
-                                // Spawn standard/tail operations non-blockingly
-                                tokio::spawn(async move {
-                                    let query_trimmed = query_str.trim();
-                                    if query_trimmed == "\\help" {
-                                        let mut help_lines = Vec::new();
-                                        help_lines.push("─────────────────────────────────────────────────────────────────────────────".to_string());
-                                        help_lines.push("                            LIVEN TUI QUICK HELP GUIDE                       ".to_string());
-                                        help_lines.push("─────────────────────────────────────────────────────────────────────────────".to_string());
-                                        help_lines.push(
-                                            "  \\d, \\dt          List all active streams (tables)"
-                                                .to_string(),
-                                        );
-                                        help_lines.push("  \\d <stream>      Describe schema/fields and record count for a stream".to_string());
-                                        help_lines.push(
-                                            "  \\help            Show this help guide".to_string(),
-                                        );
-                                        help_lines.push(
-                                            "  \\q, exit, quit  Exit the terminal shell"
-                                                .to_string(),
-                                        );
-                                        help_lines.push("".to_string());
-                                        help_lines
-                                            .push("  Operational Query Examples:".to_string());
-                                        help_lines
-                                            .push("    -- Ingest / Insert records".to_string());
-                                        help_lines.push("    from(\"users\").insert(\"user_100\", { \"name\": \"Alice\", \"role\": \"admin\" });".to_string());
-                                        help_lines.push("".to_string());
-                                        help_lines.push(
-                                            "    -- Query pipelines with forward pipe combinator"
-                                                .to_string(),
-                                        );
-                                        help_lines.push("    from(\"users\") | filter(role == \"admin\") | limit(5);".to_string());
-                                        help_lines.push("".to_string());
-                                        help_lines.push(
-                                            "    -- Mutate / Update matched records".to_string(),
-                                        );
-                                        help_lines.push("    from(\"users\") | filter(key == \"user_100\") .update({ \"status\": \"active\" });".to_string());
-                                        help_lines.push("".to_string());
-                                        help_lines
-                                            .push("    -- Drop streams completely".to_string());
-                                        help_lines.push("    drop(\"users\");".to_string());
-                                        help_lines.push("─────────────────────────────────────────────────────────────────────────────".to_string());
-
-                                        let _ = tx.send(ShellEvent::QueryResult {
-                                            query: "\\help".to_string(),
-                                            duration: Duration::from_secs(0),
-                                            output: help_lines,
-                                        });
-                                        return;
-                                    }
-
-                                    if query_trimmed == "\\d" || query_trimmed == "\\dt" {
-                                        match conn_clone.list_streams().await {
-                                            Ok(streams) => {
-                                                let mut output = Vec::new();
-                                                if streams.is_empty() {
-                                                    output.push(
-                                                        "No streams active in the database."
-                                                            .to_string(),
-                                                    );
-                                                } else {
-                                                    output.push("┌─────────────────────────────────────────┐".to_string());
-                                                    output.push("│                 STREAMS                 │".to_string());
-                                                    output.push("├─────────────────────────────────────────┤".to_string());
-                                                    for s in streams {
-                                                        output.push(format!("│  {: <39}│", s));
-                                                    }
-                                                    output.push("└─────────────────────────────────────────┘".to_string());
-                                                }
-                                                let _ = tx.send(ShellEvent::QueryResult {
-                                                    query: query_trimmed.to_string(),
-                                                    duration: Duration::from_secs(0),
-                                                    output,
-                                                });
-                                            }
-                                            Err(e) => {
-                                                let _ = tx.send(ShellEvent::QueryError {
-                                                    query: query_trimmed.to_string(),
-                                                    err: format!("Error listing streams: {}", e),
-                                                });
-                                            }
-                                        }
-                                        return;
-                                    }
-
-                                    if query_trimmed.starts_with("\\d ") {
-                                        let parts: Vec<&str> =
-                                            query_trimmed.split_whitespace().collect();
-                                        if parts.len() == 2 {
-                                            let stream_name = parts[1].to_string();
-                                            let conn_for_desc = conn_clone.clone();
-
-                                            let streams = match conn_for_desc.list_streams().await {
-                                                Ok(s) => s,
-                                                Err(e) => {
-                                                    let _ = tx.send(ShellEvent::QueryError {
-                                                        query: query_trimmed.to_string(),
-                                                        err: format!(
-                                                            "Error checking streams: {}",
-                                                            e
-                                                        ),
-                                                    });
-                                                    return;
-                                                }
-                                            };
-
-                                            if !streams.contains(&stream_name) {
-                                                let _ = tx.send(ShellEvent::QueryError {
-                                                    query: query_trimmed.to_string(),
-                                                    err: format!(
-                                                        "Error: Stream '{}' does not exist.",
-                                                        stream_name
-                                                    ),
-                                                });
-                                                return;
-                                            }
-
-                                            let count_query =
-                                                format!("from(\"{}\") | count();", stream_name);
-                                            let count =
-                                                match conn_for_desc.execute(&count_query).await {
-                                                    Ok(recs) => {
-                                                        if let Some(r) = recs.first() {
-                                                            match &r.value {
-                                                                DataValue::UInt(u) => *u,
-                                                                _ => 0,
-                                                            }
-                                                        } else {
-                                                            0
-                                                        }
-                                                    }
-                                                    Err(_) => 0,
-                                                };
-
-                                            let sample_query =
-                                                format!("from(\"{}\") | limit(1);", stream_name);
-                                            let sample_recs = conn_for_desc
-                                                .execute(&sample_query)
-                                                .await
-                                                .unwrap_or_default();
-
+                                if query_trimmed == "\\d" || query_trimmed == "\\dt" {
+                                    match conn_clone.list_streams().await {
+                                        Ok(streams) => {
                                             let mut output = Vec::new();
-                                            output.push(format!(
-                                                "Stream Information: {}",
-                                                stream_name
-                                            ));
-                                            output.push(
-                                                "───────────────────────────────────────────────"
-                                                    .to_string(),
-                                            );
-                                            output
-                                                .push(format!("  Approximate Records: {}", count));
-
-                                            if let Some(sample) = sample_recs.first() {
-                                                output.push("  System Fields:".to_string());
-                                                output.push("    - sequence_id: UInt".to_string());
-                                                output.push("    - timestamp: Int".to_string());
-                                                output.push(format!(
-                                                    "    - key: String (Value: \"{}\")",
-                                                    sample.key
-                                                ));
-
-                                                if let Some(map) = get_record_json_object(sample) {
-                                                    output.push(
-                                                        "  Document Payload Fields:".to_string(),
-                                                    );
-                                                    for (k, v) in map {
-                                                        let ty = match v {
-                                                            serde_json::Value::Null => "Null",
-                                                            serde_json::Value::Bool(_) => "Bool",
-                                                            serde_json::Value::Number(_) => {
-                                                                "Number"
-                                                            }
-                                                            serde_json::Value::String(_) => {
-                                                                "String"
-                                                            }
-                                                            serde_json::Value::Array(_) => "Array",
-                                                            serde_json::Value::Object(_) => {
-                                                                "Object"
-                                                            }
-                                                        };
-                                                        let mut sample_val = v.to_string();
-                                                        if sample_val.len() > 30 {
-                                                            sample_val =
-                                                                format!("{}...", &sample_val[..27]);
-                                                        }
-                                                        output.push(format!(
-                                                            "    - {: <14}: {} (Sample: {})",
-                                                            k, ty, sample_val
-                                                        ));
-                                                    }
-                                                } else {
-                                                    output.push("  Value Payload:".to_string());
-                                                    output.push(format!(
-                                                        "    - value: Primitive ({:?})",
-                                                        sample.value
-                                                    ));
-                                                }
+                                            if streams.is_empty() {
+                                                output.push(
+                                                    "No streams active in the database."
+                                                        .to_string(),
+                                                );
                                             } else {
-                                                output.push("  Status: Empty Stream (No sample payload available)".to_string());
+                                                output.push(
+                                                    "┌─────────────────────────────────────────┐"
+                                                        .to_string(),
+                                                );
+                                                output.push(
+                                                    "│                 STREAMS                 │"
+                                                        .to_string(),
+                                                );
+                                                output.push(
+                                                    "├─────────────────────────────────────────┤"
+                                                        .to_string(),
+                                                );
+                                                for s in streams {
+                                                    output.push(format!("│  {: <39}│", s));
+                                                }
+                                                output.push(
+                                                    "└─────────────────────────────────────────┘"
+                                                        .to_string(),
+                                                );
                                             }
-                                            output.push(
-                                                "───────────────────────────────────────────────"
-                                                    .to_string(),
-                                            );
-
                                             let _ = tx.send(ShellEvent::QueryResult {
                                                 query: query_trimmed.to_string(),
                                                 duration: Duration::from_secs(0),
                                                 output,
                                             });
-                                        } else {
+                                        }
+                                        Err(e) => {
                                             let _ = tx.send(ShellEvent::QueryError {
                                                 query: query_trimmed.to_string(),
-                                                err: "Usage: \\d <stream_name>".to_string(),
+                                                err: format!("Error listing streams: {}", e),
                                             });
                                         }
-                                        return;
                                     }
+                                    return;
+                                }
 
-                                    let is_tail = (query_trimmed.starts_with("tail(\"")
-                                        && query_trimmed.ends_with("\")"))
-                                        || (query_trimmed.starts_with("tail('")
-                                            && query_trimmed.ends_with("')"));
+                                if query_trimmed.starts_with("\\d ") {
+                                    let parts: Vec<&str> =
+                                        query_trimmed.split_whitespace().collect();
+                                    if parts.len() == 2 {
+                                        let stream_name = parts[1].to_string();
+                                        let conn_for_desc = conn_clone.clone();
 
-                                    if is_tail {
-                                        match &*conn_clone {
-                                            DbConnection::Online { auth_key, .. } => {
-                                                let stream_name =
-                                                    if query_trimmed.starts_with("tail(\"") {
-                                                        query_trimmed["tail(\"".len()
-                                                            ..query_trimmed.len() - "\")".len()]
-                                                            .to_string()
-                                                    } else {
-                                                        query_trimmed["tail('".len()
-                                                            ..query_trimmed.len() - "')".len()]
-                                                            .to_string()
-                                                    };
+                                        let streams = match conn_for_desc.list_streams().await {
+                                            Ok(s) => s,
+                                            Err(e) => {
+                                                let _ = tx.send(ShellEvent::QueryError {
+                                                    query: query_trimmed.to_string(),
+                                                    err: format!("Error checking streams: {}", e),
+                                                });
+                                                return;
+                                            }
+                                        };
 
-                                                let _ = tx.send(ShellEvent::TailStatus(format!(
-                                                    "⚡ Subscribing to live stream '{}'...",
+                                        if !streams.contains(&stream_name) {
+                                            let _ = tx.send(ShellEvent::QueryError {
+                                                query: query_trimmed.to_string(),
+                                                err: format!(
+                                                    "Error: Stream '{}' does not exist.",
                                                     stream_name
-                                                )));
+                                                ),
+                                            });
+                                            return;
+                                        }
 
-                                                let db_addr = if let Ok(cfg) =
-                                                    liven::config::AppConfig::load()
-                                                {
+                                        let count_query =
+                                            format!("from(\"{}\") | count();", stream_name);
+                                        let count = match conn_for_desc.execute(&count_query).await
+                                        {
+                                            Ok(recs) => {
+                                                if let Some(r) = recs.first() {
+                                                    match &r.value {
+                                                        DataValue::UInt(u) => *u,
+                                                        _ => 0,
+                                                    }
+                                                } else {
+                                                    0
+                                                }
+                                            }
+                                            Err(_) => 0,
+                                        };
+
+                                        let sample_query =
+                                            format!("from(\"{}\") | limit(1);", stream_name);
+                                        let sample_recs = conn_for_desc
+                                            .execute(&sample_query)
+                                            .await
+                                            .unwrap_or_default();
+
+                                        let mut output = Vec::new();
+                                        output.push(format!("Stream Information: {}", stream_name));
+                                        output.push(
+                                            "───────────────────────────────────────────────"
+                                                .to_string(),
+                                        );
+                                        output.push(format!("  Approximate Records: {}", count));
+
+                                        if let Some(sample) = sample_recs.first() {
+                                            output.push("  System Fields:".to_string());
+                                            output.push("    - sequence_id: UInt".to_string());
+                                            output.push("    - timestamp: Int".to_string());
+                                            output.push(format!(
+                                                "    - key: String (Value: \"{}\")",
+                                                sample.key
+                                            ));
+
+                                            if let Some(map) = get_record_json_object(sample) {
+                                                output
+                                                    .push("  Document Payload Fields:".to_string());
+                                                for (k, v) in map {
+                                                    let ty = match v {
+                                                        serde_json::Value::Null => "Null",
+                                                        serde_json::Value::Bool(_) => "Bool",
+                                                        serde_json::Value::Number(_) => "Number",
+                                                        serde_json::Value::String(_) => "String",
+                                                        serde_json::Value::Array(_) => "Array",
+                                                        serde_json::Value::Object(_) => "Object",
+                                                    };
+                                                    let mut sample_val = v.to_string();
+                                                    if sample_val.len() > 30 {
+                                                        sample_val =
+                                                            format!("{}...", &sample_val[..27]);
+                                                    }
+                                                    output.push(format!(
+                                                        "    - {: <14}: {} (Sample: {})",
+                                                        k, ty, sample_val
+                                                    ));
+                                                }
+                                            } else {
+                                                output.push("  Value Payload:".to_string());
+                                                output.push(format!(
+                                                    "    - value: Primitive ({:?})",
+                                                    sample.value
+                                                ));
+                                            }
+                                        } else {
+                                            output.push("  Status: Empty Stream (No sample payload available)".to_string());
+                                        }
+                                        output.push(
+                                            "───────────────────────────────────────────────"
+                                                .to_string(),
+                                        );
+
+                                        let _ = tx.send(ShellEvent::QueryResult {
+                                            query: query_trimmed.to_string(),
+                                            duration: Duration::from_secs(0),
+                                            output,
+                                        });
+                                    } else {
+                                        let _ = tx.send(ShellEvent::QueryError {
+                                            query: query_trimmed.to_string(),
+                                            err: "Usage: \\d <stream_name>".to_string(),
+                                        });
+                                    }
+                                    return;
+                                }
+
+                                let is_tail = (query_trimmed.starts_with("tail(\"")
+                                    && query_trimmed.ends_with("\")"))
+                                    || (query_trimmed.starts_with("tail('")
+                                        && query_trimmed.ends_with("')"));
+
+                                if is_tail {
+                                    match &*conn_clone {
+                                        DbConnection::Online { auth_key, .. } => {
+                                            let stream_name =
+                                                if query_trimmed.starts_with("tail(\"") {
+                                                    query_trimmed["tail(\"".len()
+                                                        ..query_trimmed.len() - "\")".len()]
+                                                        .to_string()
+                                                } else {
+                                                    query_trimmed["tail('".len()
+                                                        ..query_trimmed.len() - "')".len()]
+                                                        .to_string()
+                                                };
+
+                                            let _ = tx.send(ShellEvent::TailStatus(format!(
+                                                "⚡ Subscribing to live stream '{}'...",
+                                                stream_name
+                                            )));
+
+                                            let db_addr =
+                                                if let Ok(cfg) = liven::config::AppConfig::load() {
                                                     format!(
                                                         "{}:{}",
                                                         cfg.server.host, cfg.server.db_port
@@ -806,111 +797,107 @@ pub async fn run_shell(auth_key: Option<String>) -> Result<(), Box<dyn std::erro
                                                     "127.0.0.1:43121".to_string()
                                                 };
 
-                                                let client_res = if let Some(key) = auth_key {
-                                                    let full_addr =
-                                                        format!("{}?auth_key={}", db_addr, key);
-                                                    liven::client::LivenClient::connect_with_id(
-                                                        &full_addr,
-                                                        "default_client",
-                                                    )
-                                                    .await
-                                                } else {
-                                                    liven::client::LivenClient::connect(&db_addr)
-                                                        .await
-                                                };
+                                            let client_res = if let Some(key) = auth_key {
+                                                let full_addr =
+                                                    format!("{}?auth_key={}", db_addr, key);
+                                                liven::client::LivenClient::connect_with_id(
+                                                    &full_addr,
+                                                    "default_client",
+                                                )
+                                                .await
+                                            } else {
+                                                liven::client::LivenClient::connect(&db_addr).await
+                                            };
 
-                                                match client_res {
-                                                    Ok(client) => {
-                                                        let mut framed = client.into_inner();
-                                                        let tail_query =
-                                                            format!("tail(\"{}\")", stream_name);
-                                                        if let Err(e) =
-                                                            framed.send(tail_query).await
-                                                        {
-                                                            let _ = tx.send(ShellEvent::TailError(
-                                                                format!(
-                                                                    "Failed to start tail: {}",
-                                                                    e
-                                                                ),
-                                                            ));
-                                                            return;
-                                                        }
+                                            match client_res {
+                                                Ok(client) => {
+                                                    let mut framed = client.into_inner();
+                                                    let tail_query =
+                                                        format!("tail(\"{}\")", stream_name);
+                                                    if let Err(e) = framed.send(tail_query).await {
+                                                        let _ = tx.send(ShellEvent::TailError(
+                                                            format!("Failed to start tail: {}", e),
+                                                        ));
+                                                        return;
+                                                    }
 
-                                                        while let Some(res) = framed.next().await {
-                                                            match res {
-                                                                Ok(LivenFrame::Records(
-                                                                    records,
-                                                                )) => {
-                                                                    for r in records {
-                                                                        let _ = tx.send(
-                                                                            ShellEvent::TailRecord(
-                                                                                r,
-                                                                            ),
-                                                                        );
-                                                                    }
+                                                    while let Some(res) = framed.next().await {
+                                                        match res {
+                                                            Ok(LivenFrame::Records(records)) => {
+                                                                for r in records {
+                                                                    let _ = tx.send(
+                                                                        ShellEvent::TailRecord(r),
+                                                                    );
                                                                 }
-                                                                Ok(other) => {
-                                                                    let _ = tx.send(ShellEvent::TailError(format!("Unexpected frame: {:?}", other)));
-                                                                    break;
-                                                                }
-                                                                Err(e) => {
-                                                                    let _ = tx.send(ShellEvent::TailError(format!("Tail stream error: {}", e)));
-                                                                    break;
-                                                                }
+                                                            }
+                                                            Ok(other) => {
+                                                                let _ = tx.send(
+                                                                    ShellEvent::TailError(format!(
+                                                                        "Unexpected frame: {:?}",
+                                                                        other
+                                                                    )),
+                                                                );
+                                                                break;
+                                                            }
+                                                            Err(e) => {
+                                                                let _ = tx.send(
+                                                                    ShellEvent::TailError(format!(
+                                                                        "Tail stream error: {}",
+                                                                        e
+                                                                    )),
+                                                                );
+                                                                break;
                                                             }
                                                         }
                                                     }
-                                                    Err(e) => {
-                                                        let _ = tx.send(ShellEvent::TailError(
-                                                            format!(
-                                                                "Tail connection failed: {}",
-                                                                e
-                                                            ),
-                                                        ));
-                                                    }
+                                                }
+                                                Err(e) => {
+                                                    let _ = tx.send(ShellEvent::TailError(
+                                                        format!("Tail connection failed: {}", e),
+                                                    ));
                                                 }
                                             }
-                                            DbConnection::Offline { .. } => {
-                                                let _ = tx.send(ShellEvent::TailError("Tail subscriptions are only supported in Online mode.".to_string()));
-                                            }
                                         }
-                                        return;
-                                    }
-
-                                    let start_time = Instant::now();
-                                    match conn_clone.execute(&query_str).await {
-                                        Ok(records) => {
-                                            let duration = start_time.elapsed();
-                                            let is_mutation = query_str.contains(".insert")
-                                                || query_str.contains(".update")
-                                                || query_str.contains(".upsert")
-                                                || query_str.contains(".delete")
-                                                || query_str.contains(".empty")
-                                                || query_str.starts_with("drop");
-
-                                            let output = if is_mutation {
-                                                format_mutation_card(&records)
-                                            } else {
-                                                format_records_table(&records)
-                                            };
-                                            let _ = tx.send(ShellEvent::QueryResult {
-                                                query: query_str,
-                                                duration,
-                                                output,
-                                            });
-                                        }
-                                        Err(e) => {
-                                            let _ = tx.send(ShellEvent::QueryError {
-                                                query: query_str,
-                                                err: e,
-                                            });
+                                        DbConnection::Offline { .. } => {
+                                            let _ = tx.send(ShellEvent::TailError("Tail subscriptions are only supported in Online mode.".to_string()));
                                         }
                                     }
-                                });
-                            }
+                                    return;
+                                }
+
+                                let start_time = Instant::now();
+                                match conn_clone.execute(&query_str).await {
+                                    Ok(records) => {
+                                        let duration = start_time.elapsed();
+                                        let is_mutation = query_str.contains(".insert")
+                                            || query_str.contains(".update")
+                                            || query_str.contains(".upsert")
+                                            || query_str.contains(".delete")
+                                            || query_str.contains(".empty")
+                                            || query_str.starts_with("drop");
+
+                                        let output = if is_mutation {
+                                            format_mutation_card(&records)
+                                        } else {
+                                            format_records_table(&records)
+                                        };
+                                        let _ = tx.send(ShellEvent::QueryResult {
+                                            query: query_str,
+                                            duration,
+                                            output,
+                                        });
+                                    }
+                                    Err(e) => {
+                                        let _ = tx.send(ShellEvent::QueryError {
+                                            query: query_str,
+                                            err: e,
+                                        });
+                                    }
+                                }
+                            });
                         }
-                        _ => {}
                     }
+                    _ => {}
                 }
             }
         }
@@ -1042,7 +1029,7 @@ pub async fn run_shell(auth_key: Option<String>) -> Result<(), Box<dyn std::erro
                         .replace("\x1b[1;38;5;45m", "")
                         .replace("\x1b[0m", "");
 
-                    let styled_line = if line.contains("ERROR") || line.contains("[error]") {
+                    if line.contains("ERROR") || line.contains("[error]") {
                         ListItem::new(Line::from(vec![Span::styled(
                             clean,
                             Style::default().fg(Color::Red),
@@ -1067,8 +1054,7 @@ pub async fn run_shell(auth_key: Option<String>) -> Result<(), Box<dyn std::erro
                         )]))
                     } else {
                         ListItem::new(Line::from(vec![Span::raw(clean)]))
-                    };
-                    styled_line
+                    }
                 })
                 .collect();
 

@@ -16,6 +16,7 @@ pub enum LivenFrame {
     Vector(Vec<i8>),
 }
 
+#[derive(Default)]
 pub struct LivenCodec {
     pub is_client: bool,
 }
@@ -23,12 +24,6 @@ pub struct LivenCodec {
 impl LivenCodec {
     pub fn new(is_client: bool) -> Self {
         Self { is_client }
-    }
-}
-
-impl Default for LivenCodec {
-    fn default() -> Self {
-        Self { is_client: false }
     }
 }
 

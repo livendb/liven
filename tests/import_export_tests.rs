@@ -42,7 +42,7 @@ usr_2,Bob,25,false,\"{\"\"role\"\":\"\"user\"\"}\"
 
     // 2. Build the binary first to ensure cargo run doesn't print compilation output during test
     let build_status = Command::new("cargo")
-        .args(&["build", "--bin", "liven"])
+        .args(["build", "--bin", "liven"])
         .status()
         .expect("Failed to build liven binary");
     assert!(build_status.success());
@@ -58,7 +58,7 @@ usr_2,Bob,25,false,\"{\"\"role\"\":\"\"user\"\"}\"
         .env("LIVENDB__SECURITY__MODE", "none")
         .env("LIVENDB__SERVER__DB_PORT", test_port)
         .env("LIVENDB__SERVER__WEBUI_PORT", test_webui_port)
-        .args(&["run", "--bin", "liven", "--", "start", "--no-ui"])
+        .args(["run", "--bin", "liven", "--", "start", "--no-ui"])
         .spawn()
         .expect("Failed to start background LIVEN server");
 
@@ -75,7 +75,7 @@ usr_2,Bob,25,false,\"{\"\"role\"\":\"\"user\"\"}\"
         .env("LIVENDB__SECURITY__MODE", "none")
         .env("LIVENDB__SERVER__DB_PORT", test_port)
         .env("LIVENDB__SERVER__WEBUI_PORT", test_webui_port)
-        .args(&[
+        .args([
             "run",
             "--bin",
             "liven",
@@ -99,7 +99,7 @@ usr_2,Bob,25,false,\"{\"\"role\"\":\"\"user\"\"}\"
         .env("LIVENDB__SECURITY__MODE", "none")
         .env("LIVENDB__SERVER__DB_PORT", test_port)
         .env("LIVENDB__SERVER__WEBUI_PORT", test_webui_port)
-        .args(&[
+        .args([
             "run",
             "--bin",
             "liven",
@@ -194,7 +194,7 @@ usr_2,Bob,25,false,\"{\"\"role\"\":\"\"user\"\"}\"
         .env("LIVENDB__SECURITY__MODE", "none")
         .env("LIVENDB__SERVER__DB_PORT", test_port)
         .env("LIVENDB__SERVER__WEBUI_PORT", test_webui_port)
-        .args(&[
+        .args([
             "run",
             "--bin",
             "liven",
@@ -218,7 +218,7 @@ usr_2,Bob,25,false,\"{\"\"role\"\":\"\"user\"\"}\"
         .env("LIVENDB__SECURITY__MODE", "none")
         .env("LIVENDB__SERVER__DB_PORT", test_port)
         .env("LIVENDB__SERVER__WEBUI_PORT", test_webui_port)
-        .args(&[
+        .args([
             "run",
             "--bin",
             "liven",
@@ -257,7 +257,7 @@ usr_2,Bob,25,false,\"{\"\"role\"\":\"\"user\"\"}\"
         .env("LIVENDB__SERVER__DB_PORT", test_port)
         .env("LIVENDB__SERVER__WEBUI_PORT", test_webui_port)
         .env("HOME", test_dir) // Override HOME so it defaults to test_dir/Downloads
-        .args(&[
+        .args([
             "run",
             "--bin",
             "liven",
@@ -300,7 +300,7 @@ usr_2,Bob,25,false,\"{\"\"role\"\":\"\"user\"\"}\"
         .env("LIVENDB__SERVER__DB_PORT", test_port)
         .env("LIVENDB__SERVER__WEBUI_PORT", test_webui_port)
         .env("HOME", test_dir) // Override HOME so it defaults to test_dir/Downloads
-        .args(&["run", "--bin", "liven", "--", "export", "--format", "jsonl"])
+        .args(["run", "--bin", "liven", "--", "export", "--format", "jsonl"])
         .status()
         .expect("Failed to execute export all streams command");
     assert!(export_all_status.success());

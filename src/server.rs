@@ -123,14 +123,12 @@ pub struct ServerState {
 pub fn lookup_key_by_hash(engine: &StorageEngine, incoming_hash: &str) -> Option<AuthKeyRecord> {
     let keys = engine.list_keys("auth_keys");
     for k in keys {
-        if let Ok(Some(rec)) = engine.get("auth_keys", &k) {
-            if let DataValue::String(json_str) = rec.value {
-                if let Ok(auth_rec) = serde_json::from_str::<AuthKeyRecord>(&json_str) {
-                    if auth_rec.auth_key == incoming_hash {
-                        return Some(auth_rec);
-                    }
-                }
-            }
+        if let Ok(Some(rec)) = engine.get("auth_keys", &k)
+            && let DataValue::String(json_str) = rec.value
+            && let Ok(auth_rec) = serde_json::from_str::<AuthKeyRecord>(&json_str)
+            && auth_rec.auth_key == incoming_hash
+        {
+            return Some(auth_rec);
         }
     }
     None
@@ -167,15 +165,13 @@ pub fn bootstrap_auth_keys_table(
     let mut root_admin_exists = false;
 
     for key_name in &keys {
-        if let Ok(Some(record)) = engine.get("auth_keys", key_name) {
-            if let DataValue::String(json_str) = record.value {
-                if let Ok(auth_rec) = serde_json::from_str::<AuthKeyRecord>(&json_str) {
-                    if auth_rec.role == "admin" {
-                        root_admin_exists = true;
-                        break;
-                    }
-                }
-            }
+        if let Ok(Some(record)) = engine.get("auth_keys", key_name)
+            && let DataValue::String(json_str) = record.value
+            && let Ok(auth_rec) = serde_json::from_str::<AuthKeyRecord>(&json_str)
+            && auth_rec.role == "admin"
+        {
+            root_admin_exists = true;
+            break;
         }
     }
 
@@ -329,29 +325,27 @@ pub async fn run_server(
         let keys = engine.list_keys("auth_keys");
         let mut identity_cache = state.identity_cache.write().unwrap();
         for k in keys {
-            if let Ok(Some(rec)) = engine.get("auth_keys", &k) {
-                if let DataValue::String(json_str) = rec.value {
-                    if let Ok(auth_rec) = serde_json::from_str::<AuthKeyRecord>(&json_str) {
-                        if auth_rec.status == "active" {
-                            let capabilities = match auth_rec.role.as_str() {
-                                "admin" => crate::security::CAP_ROOT,
-                                "read-only" => crate::security::CAP_READ,
-                                "write-only" => crate::security::CAP_WRITE,
-                                _ => crate::security::CAP_NONE,
-                            };
-                            let client_cn = auth_rec.key_id.clone();
-                            identity_cache.insert(
-                                client_cn.clone(),
-                                ClientIdentity {
-                                    client_cn,
-                                    capabilities,
-                                    allowed_tags: auth_rec.allowed_tags.clone(),
-                                    auth_key_hash: auth_rec.auth_key.clone(),
-                                },
-                            );
-                        }
-                    }
-                }
+            if let Ok(Some(rec)) = engine.get("auth_keys", &k)
+                && let DataValue::String(json_str) = rec.value
+                && let Ok(auth_rec) = serde_json::from_str::<AuthKeyRecord>(&json_str)
+                && auth_rec.status == "active"
+            {
+                let capabilities = match auth_rec.role.as_str() {
+                    "admin" => crate::security::CAP_ROOT,
+                    "read-only" => crate::security::CAP_READ,
+                    "write-only" => crate::security::CAP_WRITE,
+                    _ => crate::security::CAP_NONE,
+                };
+                let client_cn = auth_rec.key_id.clone();
+                identity_cache.insert(
+                    client_cn.clone(),
+                    ClientIdentity {
+                        client_cn,
+                        capabilities,
+                        allowed_tags: auth_rec.allowed_tags.clone(),
+                        auth_key_hash: auth_rec.auth_key.clone(),
+                    },
+                );
             }
         }
     }
@@ -411,7 +405,7 @@ pub async fn run_server(
         .layer(CorsLayer::permissive());
 
     let env = config.server.environment.trim().to_lowercase();
-    let ztna_enabled = config.security.ztna.as_ref().map_or(false, |z| z.enabled);
+    let ztna_enabled = config.security.ztna.as_ref().is_some_and(|z| z.enabled);
     let is_dev = env == "development" || env == "test" || !ztna_enabled;
 
     let tls_acceptor = if !is_dev {
@@ -498,83 +492,79 @@ pub async fn run_server(
                                         permit,
                                     )
                                     .await;
-                                } else {
-                                    if let Some(acceptor) = acceptor_opt {
-                                        match acceptor.accept(stream).await {
-                                            Ok(tls_stream) => {
-                                                let cn_opt = {
-                                                    let (_, session) = tls_stream.get_ref();
-                                                    session
-                                                        .peer_certificates()
-                                                        .and_then(|certs| certs.first())
-                                                        .and_then(|cert| {
-                                                            extract_cn_from_der(cert.as_ref())
-                                                        })
+                                } else if let Some(acceptor) = acceptor_opt {
+                                    match acceptor.accept(stream).await {
+                                        Ok(tls_stream) => {
+                                            let cn_opt = {
+                                                let (_, session) = tls_stream.get_ref();
+                                                session
+                                                    .peer_certificates()
+                                                    .and_then(|certs| certs.first())
+                                                    .and_then(|cert| {
+                                                        extract_cn_from_der(cert.as_ref())
+                                                    })
+                                            };
+
+                                            if let Some(cn) = cn_opt {
+                                                let identity_opt = {
+                                                    let cache =
+                                                        state_clone.identity_cache.read().unwrap();
+                                                    cache.get(&cn).cloned()
                                                 };
 
-                                                if let Some(cn) = cn_opt {
-                                                    let identity_opt = {
-                                                        let cache = state_clone
-                                                            .identity_cache
-                                                            .read()
+                                                let liven_stream =
+                                                    LivenStream::Encrypted(tls_stream);
+                                                if let Some(identity) = identity_opt {
+                                                    let (close_tx, close_rx) =
+                                                        tokio::sync::oneshot::channel::<()>();
+                                                    {
+                                                        let mut conns = state_clone
+                                                            .active_connections
+                                                            .lock()
                                                             .unwrap();
-                                                        cache.get(&cn).cloned()
-                                                    };
-
-                                                    let liven_stream =
-                                                        LivenStream::Encrypted(tls_stream);
-                                                    if let Some(identity) = identity_opt {
-                                                        let (close_tx, close_rx) =
-                                                            tokio::sync::oneshot::channel::<()>();
-                                                        {
-                                                            let mut conns = state_clone
-                                                                .active_connections
-                                                                .lock()
-                                                                .unwrap();
-                                                            conns.push(ActiveNativeConnection {
-                                                                auth_key_hash: identity
-                                                                    .auth_key_hash
-                                                                    .clone(),
-                                                                close_tx: Some(close_tx),
-                                                            });
-                                                        }
-                                                        handle_connection(
-                                                            liven_stream,
-                                                            state_clone,
-                                                            identity.capabilities,
-                                                            identity.allowed_tags,
-                                                            Some(close_rx),
-                                                            false,
-                                                            permit,
-                                                        )
-                                                        .await;
-                                                    } else {
-                                                        handle_connection(
-                                                            liven_stream,
-                                                            state_clone,
-                                                            crate::security::CAP_NONE,
-                                                            Vec::new(),
-                                                            None,
-                                                            false,
-                                                            permit,
-                                                        )
-                                                        .await;
+                                                        conns.push(ActiveNativeConnection {
+                                                            auth_key_hash: identity
+                                                                .auth_key_hash
+                                                                .clone(),
+                                                            close_tx: Some(close_tx),
+                                                        });
                                                     }
+                                                    handle_connection(
+                                                        liven_stream,
+                                                        state_clone,
+                                                        identity.capabilities,
+                                                        identity.allowed_tags,
+                                                        Some(close_rx),
+                                                        false,
+                                                        permit,
+                                                    )
+                                                    .await;
                                                 } else {
-                                                    tracing::error!(
-                                                        "mTLS handshake succeeded but no client CN was extracted. Terminating stream."
-                                                    );
+                                                    handle_connection(
+                                                        liven_stream,
+                                                        state_clone,
+                                                        crate::security::CAP_NONE,
+                                                        Vec::new(),
+                                                        None,
+                                                        false,
+                                                        permit,
+                                                    )
+                                                    .await;
                                                 }
-                                            }
-                                            Err(e) => {
-                                                tracing::error!("mTLS handshake failed: {}", e);
+                                            } else {
+                                                tracing::error!(
+                                                    "mTLS handshake succeeded but no client CN was extracted. Terminating stream."
+                                                );
                                             }
                                         }
-                                    } else {
-                                        tracing::error!(
-                                            "Production mode but TLS acceptor is missing. Terminating stream."
-                                        );
+                                        Err(e) => {
+                                            tracing::error!("mTLS handshake failed: {}", e);
+                                        }
                                     }
+                                } else {
+                                    tracing::error!(
+                                        "Production mode but TLS acceptor is missing. Terminating stream."
+                                    );
                                 }
                             });
                         }
@@ -655,10 +645,8 @@ pub async fn run_server(
                                             let _ = writer.send(crate::codec::LivenFrame::Err("Authentication failed".to_string())).await;
                                             break;
                                         }
-                                    } else {
-                                        if writer.send(LivenFrame::Ok).await.is_err() {
-                                            break;
-                                        }
+                                    } else if writer.send(LivenFrame::Ok).await.is_err() {
+                                        break;
                                     }
                                 }
                                 crate::codec::LivenFrame::Query(query_str) => {
@@ -698,11 +686,10 @@ pub async fn run_server(
                                                         Ok(record) => {
                                                             if record.stream_name == stream_name || stream_name == "*" {
                                                                 let is_tag_allowed = allowed_tags.is_empty() || allowed_tags.contains(&(record.type_tag as u32));
-                                                                if is_tag_allowed {
-                                                                    if writer.send(crate::codec::LivenFrame::Records(vec![record])).await.is_err() {
+                                                                if is_tag_allowed
+                                                                    && writer.send(crate::codec::LivenFrame::Records(vec![record])).await.is_err() {
                                                                         break;
                                                                     }
-                                                                }
                                                             }
                                                         }
                                                         Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
@@ -880,12 +867,10 @@ async fn ws_handler(
             false
         };
 
-        if !authorized {
-            if let Some(cookie_val) = extract_session_cookie(&headers) {
-                let sessions = state.sessions.lock().unwrap();
-                if sessions.contains_key(&cookie_val) {
-                    authorized = true;
-                }
+        if !authorized && let Some(cookie_val) = extract_session_cookie(&headers) {
+            let sessions = state.sessions.lock().unwrap();
+            if sessions.contains_key(&cookie_val) {
+                authorized = true;
             }
         }
 
@@ -1030,19 +1015,19 @@ async fn handle_socket(socket: WebSocket, state: Arc<ServerState>) {
     });
 
     while let Some(Ok(msg)) = receiver.next().await {
-        if let Message::Text(txt) = msg {
-            if let Ok(req) = serde_json::from_str::<WsRequest>(&txt) {
-                match req {
-                    WsRequest::Query { query } => {
-                        let _ = query_tx.send(query).await;
-                    }
-                    WsRequest::Ping => {
-                        let resp = WsResponse::Pong;
-                        if let Ok(msg_str) = serde_json::to_string(&resp) {
-                            let mut sender_guard = sender.lock().await;
-                            if sender_guard.send(Message::Text(msg_str)).await.is_err() {
-                                break;
-                            }
+        if let Message::Text(txt) = msg
+            && let Ok(req) = serde_json::from_str::<WsRequest>(&txt)
+        {
+            match req {
+                WsRequest::Query { query } => {
+                    let _ = query_tx.send(query).await;
+                }
+                WsRequest::Ping => {
+                    let resp = WsResponse::Pong;
+                    if let Ok(msg_str) = serde_json::to_string(&resp) {
+                        let mut sender_guard = sender.lock().await;
+                        if sender_guard.send(Message::Text(msg_str)).await.is_err() {
+                            break;
                         }
                     }
                 }
@@ -1351,12 +1336,11 @@ async fn system_auth_list_keys_handler(
     let keys = state.engine.list_keys("auth_keys");
     let mut records = Vec::new();
     for k in keys {
-        if let Ok(Some(rec)) = state.engine.get("auth_keys", &k) {
-            if let DataValue::String(json_str) = rec.value {
-                if let Ok(auth_rec) = serde_json::from_str::<AuthKeyRecord>(&json_str) {
-                    records.push(auth_rec);
-                }
-            }
+        if let Ok(Some(rec)) = state.engine.get("auth_keys", &k)
+            && let DataValue::String(json_str) = rec.value
+            && let Ok(auth_rec) = serde_json::from_str::<AuthKeyRecord>(&json_str)
+        {
+            records.push(auth_rec);
         }
     }
 
