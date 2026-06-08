@@ -33,8 +33,9 @@ jobs:
 
       - name: Install UI dependencies & Build Frontend
         working-directory: ui
+        shell: bash
         run: |
-          npm ci
+          npm ci --legacy-peer-deps
           npm run build
 
       - name: Install Rust stable
