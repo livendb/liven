@@ -3,18 +3,18 @@
 
   <Product
     Id='*'
-    Name='KondaDB'
+    Name='LIVEN'
     UpgradeCode='DF8B5AEB-96E8-4EF5-86A8-71A37CD393A2'
-    Manufacturer='KondaDB Team'
+    Manufacturer='LIVEN Team'
     Language='1033'
     Codepage='1252'
     Version='$(var.Version)'>
 
     <Package Id='*'
       Keywords='Installer'
-      Description='KondaDB High-Performance Storage Engine'
-      Comments='KondaDB'
-      Manufacturer='KondaDB Team'
+      Description='LIVEN High-Performance Storage Engine'
+      Comments='LIVEN'
+      Manufacturer='LIVEN Team'
       InstallerVersion='450'
       Languages='1033'
       Compressed='yes'
@@ -25,46 +25,46 @@
       DowngradeErrorMessage='A newer version of [ProductName] is already installed. Setup will now exit.' />
 
     <Media Id='1' Cabinet='media1.cab' EmbedCab='yes' DiskPrompt='CD-ROM #1' />
-    <Property Id='DiskPrompt' Value='KondaDB Installation' />
+    <Property Id='DiskPrompt' Value='LIVEN Installation' />
 
     <Directory Id='TARGETDIR' Name='SourceDir'>
       <Directory Id='ProgramFilesFolder' Name='PFiles'>
-        <Directory Id='APPLICATIONFOLDER' Name='KondaDB'>
+        <Directory Id='APPLICATIONFOLDER' Name='LIVEN'>
           <Component Id='License' Guid='*'>
             <File Id='LicenseFile' Name='README.md' Source='README.md' KeyPath='yes'/>
           </Component>
           
           <Component Id='ConfigFile' Guid='3E112833-2895-4654-8B7C-D3F8CEFE4999'>
-            <File Id='KondaDBConfig' Name='kondadb.toml' Source='kondadb.toml' KeyPath='yes'/>
+            <File Id='LivenConfig' Name='liven.toml' Source='liven.toml' KeyPath='yes'/>
           </Component>
 
           <Component Id='Path' Guid='A657D982-EC33-4D93-9F9C-5D59A8331777' KeyPath='yes'>
             <Environment
-              Id='PATH'
-              Name='PATH'
-              Value='[APPLICATIONFOLDER]'
-              Action='set'
-              Part='last'
-              System='yes' />
+               Id='PATH'
+               Name='PATH'
+               Value='[APPLICATIONFOLDER]'
+               Action='set'
+               Part='last'
+               System='yes' />
           </Component>
 
-          <Component Id='KondaDBBinary' Guid='8C1FE3B8-F6E5-467D-89EA-6651E8408888'>
+          <Component Id='LivenBinary' Guid='8C1FE3B8-F6E5-467D-89EA-6651E8408888'>
             <File
-              Id='KondaDBEXE'
-              Name='kondadb.exe'
-              Source='$(var.CargoTargetBinDir)\kondadb.exe'
+              Id='LivenEXE'
+              Name='liven.exe'
+              Source='$(var.CargoTargetBinDir)\liven.exe'
               KeyPath='yes' />
             
-            <!-- Register KondaDB as a native Windows service -->
+            <!-- Register LIVEN as a native Windows service -->
             <ServiceInstall
               Id='ServiceInstall'
-              Name='KondaDB'
-              DisplayName='KondaDB Storage Engine'
+              Name='LIVEN'
+              DisplayName='LIVEN Storage Engine'
               Type='ownProcess'
               Start='auto'
               ErrorControl='normal'
-              Description='KondaDB High-Performance Storage Engine'
-              Arguments='start --config "[APPLICATIONFOLDER]kondadb.toml"'>
+              Description='LIVEN High-Performance Storage Engine'
+              Arguments='start --config "[APPLICATIONFOLDER]liven.toml"'>
               <ServiceConfig
                 OnInstall='yes'
                 OnReinstall='yes'
@@ -74,7 +74,7 @@
             
             <ServiceControl
               Id='ServiceControl'
-              Name='KondaDB'
+              Name='LIVEN'
               Start='install'
               Stop='both'
               Remove='uninstall'
@@ -84,10 +84,10 @@
       </Directory>
     </Directory>
 
-    <Feature Id='MainApplication' Title='KondaDB Application' Level='1'>
+    <Feature Id='MainApplication' Title='LIVEN Application' Level='1'>
       <ComponentRef Id='License' />
       <ComponentRef Id='ConfigFile' />
-      <ComponentRef Id='KondaDBBinary' />
+      <ComponentRef Id='LivenBinary' />
       <ComponentRef Id='Path' />
     </Feature>
 

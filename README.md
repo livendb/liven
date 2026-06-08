@@ -1,6 +1,6 @@
-# KondaDB ⚡
+# LIVEN ⚡
 
-KondaDB is a fast, lightweight database built to capture, store, and stream data in real time. It is designed to handle continuous streams of information—like AI tracking, live sports activities, financial market updates, or device logs—and make that data instantly searchable.
+LIVEN is a fast, lightweight database built to capture, store, and stream data in real time. It is designed to handle continuous streams of information—like AI tracking, live sports activities, financial market updates, or device logs—and make that data instantly searchable.
 
 ---
 
@@ -18,11 +18,11 @@ KondaDB is a fast, lightweight database built to capture, store, and stream data
 
 ## How It Works Under the Hood
 
-When data flows into KondaDB, it moves through a streamlined, highly secure pipeline:
+When data flows into LIVEN, it moves through a streamlined, highly secure pipeline:
 
 ```mermaid
 graph TD
-    Client[Your Application / Web UI] -- Real-time Streams --> Server[KondaDB Server]
+    Client[Your Application / Web UI] -- Real-time Streams --> Server[LIVEN Server]
     Server -- Immediate Queue --> Memory[Fast Safe Buffer]
     Memory -- Permanent Save --> Storage[Secure Disk Files]
     Memory -- Speed Index --> Map[Instant Search Map]
@@ -43,8 +43,8 @@ Make sure you have **Rust** (Rust 2024 edition) and **Node.js** installed on you
 # Build the database program
 cargo build --release
 
-# Start the KondaDB server
-cargo run --bin kondadb
+# Start the LIVEN server
+cargo run --bin liven
 ```
 
 ### 2. Launch the Web Dashboard
@@ -76,7 +76,7 @@ cargo bench
 
 ---
 
-## Simple Configuration (`kondadb.toml`)
+## Simple Configuration (`liven.toml`)
 
 You can easily manage your network ports, storage folders, and strict runtime limits from a single configuration file:
 
@@ -101,16 +101,16 @@ max_segment_size_mb = 16         # Active log-file size threshold before rolling
 
 ## Deterministic Resource Budgeting & Safety Limits
 
-KondaDB is engineered to run reliably under tight, predictable resource ceilings. Rather than letting resource consumption scale unchecked, the storage engine enforces strict bounds to prevent critical system failures:
+LIVEN is engineered to run reliably under tight, predictable resource ceilings. Rather than letting resource consumption scale unchecked, the storage engine enforces strict bounds to prevent critical system failures:
 
-*   **OOM Prevention (`max_index_ram_mb`):** KondaDB dynamically profiles in-memory index footprint by measuring pointer and structure overhead (`compound_key.len() + 64` bytes). Writes are pre-validated transactionally on the caller thread and rejected with `"Index RAM limit exceeded"` if they violate this budget. Delete/tombstone operations are always allowed, permitting immediate memory reclamation.
+*   **OOM Prevention (`max_index_ram_mb`):** LIVEN dynamically profiles in-memory index footprint by measuring pointer and structure overhead (`compound_key.len() + 64` bytes). Writes are pre-validated transactionally on the caller thread and rejected with `"Index RAM limit exceeded"` if they violate this budget. Delete/tombstone operations are always allowed, permitting immediate memory reclamation.
 *   **EMFILE (File Descriptor) Prevention (`max_open_file_descriptors`):** Dynamic LRU-style pruning of the file handle cache ensures the database never exceeds its file descriptor allocation limit. Inactive read-only segment file handles are evicted and automatically closed by the operating system once any active reader drops their reference, completely mitigating resource exhaustion.
 *   **Stream Ceilings (`max_concurrent_streams`):** Keeps stream ingestion bounded, preventing indexing and descriptor counts from scaling uncontrollably. Stream boundaries are checked sequentially on recovery (halting bad engines fast) and transactionally on write paths.
 *   **Segment Size Limits (`max_segment_size_mb`):** Sets a clear boundary on the active log-file size, ensuring rapid rolling, efficient compaction, and predictable chunking.
 
 ---
 
-## Current KondaDB Stats & Performance
+## Current LIVEN Stats & Performance
 
 Our automated micro-benchmarks demonstrate the exact performance profile of the storage engine under tight execution limits:
 
@@ -125,4 +125,4 @@ Our automated micro-benchmarks demonstrate the exact performance profile of the 
 ## Contributors
 
 *   **Olalekan** — Lead Developer & Architect
-*   **KondaDB Contributors** — Open-source community creators
+*   **LIVEN Contributors** — Open-source community creators

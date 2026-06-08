@@ -1,7 +1,7 @@
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
-use konda::parser::parse_pipeline;
-use konda::storage::StorageEngine;
-use konda::types::DataValue;
+use liven::parser::parse_pipeline;
+use liven::storage::StorageEngine;
+use liven::types::DataValue;
 
 fn bench_parser(c: &mut Criterion) {
     let query_str = "from(\"logs\") | filter(status == \"error\") | limit(10)";
@@ -27,7 +27,7 @@ fn bench_storage(c: &mut Criterion) {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let temp_dir = std::env::temp_dir().join(format!("kondadb_bench_{}", rand_id));
+    let temp_dir = std::env::temp_dir().join(format!("liven_bench_{}", rand_id));
     std::fs::create_dir_all(&temp_dir).unwrap();
 
     let engine = StorageEngine::new(&temp_dir, 50 * 1024 * 1024).unwrap(); // 50MB max segment size

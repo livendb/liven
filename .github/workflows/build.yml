@@ -1,4 +1,4 @@
-name: Build & Verify Konda
+name: Build & Verify Liven
 
 on:
   push:
@@ -57,7 +57,7 @@ jobs:
       - name: Build release binary
         run: cargo build --release
 
-      - name: Run KondaDB Installation Tests (Linux)
+      - name: Run LIVEN Installation Tests (Linux)
         if: matrix.os == 'ubuntu-latest'
         run: |
           echo "==== Linux Installation Tests ===="
@@ -68,18 +68,18 @@ jobs:
           sudo ./install.sh --env production
           
           # Assertions
-          grep -q 'environment = "production"' /etc/kondadb/kondadb.toml
-          test -f /etc/kondadb/certs/ca.crt
-          test -f /etc/kondadb/certs/ca.key
-          test -f /etc/kondadb/certs/server.crt
-          test -f /etc/kondadb/certs/server.key
+          grep -q 'environment = "production"' /etc/liven/liven.toml
+          test -f /etc/liven/certs/ca.crt
+          test -f /etc/liven/certs/ca.key
+          test -f /etc/liven/certs/server.crt
+          test -f /etc/liven/certs/server.key
           
           # Assert strict POSIX permissions (600) on keys
-          [ "$(stat -c '%a' /etc/kondadb/certs/server.key)" = "600" ]
-          [ "$(stat -c '%a' /etc/kondadb/certs/ca.key)" = "600" ]
+          [ "$(stat -c '%a' /etc/liven/certs/server.key)" = "600" ]
+          [ "$(stat -c '%a' /etc/liven/certs/ca.key)" = "600" ]
           
           # Assert systemd unit is injected
-          test -f /etc/systemd/system/kondadb.service
+          test -f /etc/systemd/system/liven.service
           
           # 2. Verify Non-Systemd / Container Fallback
           # Run inside isolated alpine container
@@ -87,15 +87,15 @@ jobs:
             cp /workspace/install.sh /install.sh &&
             chmod +x /install.sh &&
             ./install.sh --env development &&
-            test -f /usr/local/bin/kondadb &&
-            test -f /usr/local/bin/kondadb-entrypoint &&
-            ! test -f /etc/systemd/system/kondadb.service &&
-            grep -q 'environment = \"development\"' /etc/kondadb/kondadb.toml
+            test -f /usr/local/bin/liven &&
+            test -f /usr/local/bin/liven-entrypoint &&
+            ! test -f /etc/systemd/system/liven.service &&
+            grep -q 'environment = \"development\"' /etc/liven/liven.toml
           "
           
           # 3. Live-Process Boot & Security Verification (Linux Production)
-          echo "Booting mTLS protected production KondaDB in background..."
-          sudo /usr/local/bin/kondadb start --config /etc/kondadb/kondadb.toml &
+          echo "Booting mTLS protected production LIVEN in background..."
+          sudo /usr/local/bin/liven start --config /etc/liven/liven.toml &
           DB_PID=$!
           sleep 3
           
@@ -108,7 +108,7 @@ jobs:
           # Clean up background process
           sudo kill -15 $DB_PID || true
 
-      - name: Run KondaDB Installation Tests (macOS)
+      - name: Run LIVEN Installation Tests (macOS)
         if: matrix.os == 'macos-latest'
         run: |
           echo "==== macOS Installation Tests ===="
@@ -119,13 +119,13 @@ jobs:
           sudo ./install.sh --env development
           
           # Assertions
-          grep -q 'environment = "development"' /etc/kondadb/kondadb.toml
-          test -f /Library/LaunchDaemons/com.konda.kondadb.plist
-          test -f /usr/local/bin/kondadb
+          grep -q 'environment = "development"' /etc/liven/liven.toml
+          test -f /Library/LaunchDaemons/com.liven.liven.plist
+          test -f /usr/local/bin/liven
           
           # 2. Live-Process Boot & Verification (macOS Development)
-          echo "Booting cleartext development KondaDB in background..."
-          sudo /usr/local/bin/kondadb start --config /etc/kondadb/kondadb.toml &
+          echo "Booting cleartext development LIVEN in background..."
+          sudo /usr/local/bin/liven start --config /etc/liven/liven.toml &
           DB_PID=$!
           sleep 3
           
@@ -135,7 +135,7 @@ jobs:
           # Clean up background process
           sudo kill -15 $DB_PID || true
 
-      - name: Run KondaDB Installation Tests (Windows)
+      - name: Run LIVEN Installation Tests (Windows)
         if: matrix.os == 'windows-latest'
         shell: bash
         run: |
@@ -147,10 +147,10 @@ jobs:
       - name: Upload compiled executable
         uses: actions/upload-artifact@v4
         with:
-          name: kondadb-${{ matrix.os }}
+          name: liven-${{ matrix.os }}
           path: |
-            target/release/kondadb
-            target/release/kondadb.exe
+            target/release/liven
+            target/release/liven.exe
           if-no-files-found: error
 
   package-distribution:
@@ -180,14 +180,14 @@ jobs:
       - name: Download compiled executable
         uses: actions/download-artifact@v4
         with:
-          name: kondadb-${{ matrix.os }}
+          name: liven-${{ matrix.os }}
           path: target/release
 
       - name: Package Linux Distributions (.deb, .rpm, .tar.gz)
         if: matrix.os == 'ubuntu-latest'
         run: |
           echo "==== Packaging Linux Distribution Assets ===="
-          chmod +x target/release/kondadb
+          chmod +x target/release/liven
           
           # Install cargo-deb and cargo-generate-rpm
           cargo install cargo-deb --locked || true
@@ -200,13 +200,13 @@ jobs:
           cargo generate-rpm --no-build
           
           # 3. Build Tarball
-          tar -czvf kondadb-linux-amd64.tar.gz -C target/release kondadb kondadb.toml
+          tar -czvf liven-linux-amd64.tar.gz -C target/release liven liven.toml
           
           # Ensure directories exist and move packages
           mkdir -p dist
           mv target/debian/*.deb dist/ || true
           mv target/generate-rpm/*.rpm dist/ || true
-          mv kondadb-linux-amd64.tar.gz dist/
+          mv liven-linux-amd64.tar.gz dist/
 
       - name: Package Windows MSI (.msi, .zip)
         if: matrix.os == 'windows-latest'
@@ -220,39 +220,39 @@ jobs:
           cargo wix --no-build
           
           # 2. Build Zip Archive
-          powershell -Command "Compress-Archive -Path target/release/kondadb.exe, kondadb.toml -DestinationPath kondadb-windows-amd64.zip"
+          powershell -Command "Compress-Archive -Path target/release/liven.exe, liven.toml -DestinationPath liven-windows-amd64.zip"
           
           mkdir -p dist
           mv target/wix/*.msi dist/ || true
-          mv kondadb-windows-amd64.zip dist/
+          mv liven-windows-amd64.zip dist/
 
       - name: Package macOS DMG (.dmg, .tar.gz)
         if: matrix.os == 'macos-latest'
         run: |
           echo "==== Packaging macOS Distribution Assets ===="
-          chmod +x target/release/kondadb
+          chmod +x target/release/liven
           
           # Create DMG assets placeholders so appdmg doesn't fail
           mkdir -p assets
-          touch assets/kondadb.icns
+          touch assets/liven.icns
           touch assets/dmg_background.png
           
           # Install appdmg
           npm install -g appdmg || true
           
           # 1. Build DMG Package
-          appdmg appdmg.json dist/kondadb-macos.dmg || echo "Warning: appdmg failed, skipping .dmg asset"
+          appdmg appdmg.json dist/liven-macos.dmg || echo "Warning: appdmg failed, skipping .dmg asset"
           
           # 2. Build Tarball
-          tar -czvf kondadb-macos-x64.tar.gz -C target/release kondadb kondadb.toml
+          tar -czvf liven-macos-x64.tar.gz -C target/release liven liven.toml
           
           mkdir -p dist
-          mv kondadb-macos-x64.tar.gz dist/
+          mv liven-macos-x64.tar.gz dist/
 
       - name: Upload Packaged Installers
         uses: actions/upload-artifact@v4
         with:
-          name: kondadb-installers-${{ matrix.os }}
+          name: liven-installers-${{ matrix.os }}
           path: dist/*
           if-no-files-found: ignore
 

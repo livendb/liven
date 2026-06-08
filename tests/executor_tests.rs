@@ -1,8 +1,8 @@
-use konda::executor::{
+use liven::executor::{
     apply_pipeline_stages_to_vec, compare_values, execute_query, extract_field, project_record,
 };
-use konda::storage::StorageEngine;
-use konda::types::{DataValue, FilterExpr, Op, PipelineStage, Query, Record};
+use liven::storage::StorageEngine;
+use liven::types::{DataValue, FilterExpr, Op, PipelineStage, Query, Record};
 
 #[test]
 fn test_extract_field() {
@@ -41,7 +41,7 @@ fn test_project_record() {
         type_tag: 5,
         flags: 1,
         stream_name: "logs".to_string(),
-        key: konda::storage::key::StreamKey::from_str_truncated("key1"),
+        key: liven::storage::key::StreamKey::from_str_truncated("key1"),
         value: DataValue::String(
             r#"{"user": "alice", "role": "admin", "ip": "1.1.1.1"}"#.to_string(),
         ),
@@ -73,7 +73,7 @@ fn test_delete_trash_execution() {
             type_tag: 1,
             flags: 0x01, // Active key
             stream_name: "logs".to_string(),
-            key: konda::storage::key::StreamKey::from_str_truncated("k1"),
+            key: liven::storage::key::StreamKey::from_str_truncated("k1"),
             value: DataValue::Int(10),
         },
         Record {
@@ -82,7 +82,7 @@ fn test_delete_trash_execution() {
             type_tag: 0,
             flags: 0x02, // Deleted value (key tombstone)
             stream_name: "logs".to_string(),
-            key: konda::storage::key::StreamKey::from_str_truncated("k2"),
+            key: liven::storage::key::StreamKey::from_str_truncated("k2"),
             value: DataValue::Null,
         },
         Record {
@@ -91,7 +91,7 @@ fn test_delete_trash_execution() {
             type_tag: 0,
             flags: 0x04, // Trashed stream & values
             stream_name: "logs".to_string(),
-            key: konda::storage::key::StreamKey::from_str_truncated("*"),
+            key: liven::storage::key::StreamKey::from_str_truncated("*"),
             value: DataValue::Null,
         },
     ];

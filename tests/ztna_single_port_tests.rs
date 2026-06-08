@@ -1,9 +1,9 @@
-use konda::client::KondaClient;
-use konda::config::{
+use liven::client::LivenClient;
+use liven::config::{
     AppConfig, LimitsConfig, SecurityConfig, ServerConfig, StorageConfig, ZtnaConfig,
 };
-use konda::server::run_server;
-use konda::storage::StorageEngine;
+use liven::server::run_server;
+use liven::storage::StorageEngine;
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
@@ -176,7 +176,7 @@ extendedKeyUsage = clientAuth
 #[tokio::test]
 async fn test_ztna_development_mode() {
     let test_dir = std::env::temp_dir().join(format!(
-        "konda_ztna_dev_{}",
+        "liven_ztna_dev_{}",
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -227,7 +227,7 @@ async fn test_ztna_development_mode() {
 
     // Connect with a native client (cleartext raw connection succeeds)
     let client_res =
-        KondaClient::connect_with_auth_mode(&format!("127.0.0.1:{}", port), "test_client", "none")
+        LivenClient::connect_with_auth_mode(&format!("127.0.0.1:{}", port), "test_client", "none")
             .await;
     assert!(
         client_res.is_ok(),
@@ -245,7 +245,7 @@ async fn test_ztna_development_mode() {
 #[tokio::test]
 async fn test_ztna_production_mode_cleartext_rejected() {
     let test_dir = std::env::temp_dir().join(format!(
-        "konda_ztna_prod_{}",
+        "liven_ztna_prod_{}",
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -304,7 +304,7 @@ async fn test_ztna_production_mode_cleartext_rejected() {
 
     // Verify raw TCP connection attempts without TLS are dropped/terminated
     let client_res =
-        KondaClient::connect_with_auth_mode(&format!("127.0.0.1:{}", port), "test_client", "none")
+        LivenClient::connect_with_auth_mode(&format!("127.0.0.1:{}", port), "test_client", "none")
             .await;
 
     if let Ok(mut client) = client_res {
@@ -321,14 +321,14 @@ async fn test_ztna_production_mode_cleartext_rejected() {
 #[tokio::test]
 async fn test_ztna_production_mode_mtls_success_with_filtering() {
     use futures_util::{SinkExt, StreamExt};
-    use konda::codec::{KondaCodec, KondaFrame};
-    use konda::server::AuthKeyRecord;
-    use konda::types::DataValue;
+    use liven::codec::{LivenCodec, LivenFrame};
+    use liven::server::AuthKeyRecord;
+    use liven::types::DataValue;
     use tokio::net::TcpStream;
     use tokio_util::codec::Framed;
 
     let test_dir = std::env::temp_dir().join(format!(
-        "konda_ztna_mtls_{}",
+        "liven_ztna_mtls_{}",
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -454,17 +454,17 @@ async fn test_ztna_production_mode_mtls_success_with_filtering() {
         .to_owned();
     let tls_stream = connector.connect(server_name, tcp_stream).await.unwrap();
 
-    let mut framed = Framed::new(tls_stream, KondaCodec::new(true));
+    let mut framed = Framed::new(tls_stream, LivenCodec::new(true));
 
     // Send query to fetch sensor data
     framed
-        .send(KondaFrame::Query("from(\"sensor_stream\")".to_string()))
+        .send(LivenFrame::Query("from(\"sensor_stream\")".to_string()))
         .await
         .unwrap();
 
     // Expect Records frame
     match framed.next().await {
-        Some(Ok(KondaFrame::Records(records))) => {
+        Some(Ok(LivenFrame::Records(records))) => {
             // Check that only sensor_1 (String) is returned, and sensor_2 (Int) is filtered out
             assert_eq!(
                 records.len(),

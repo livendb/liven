@@ -18,15 +18,15 @@ use std::io;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use konda::codec::KondaFrame;
-use konda::executor::execute_query;
-use konda::parser::parse_query;
-use konda::storage::StorageEngine;
-use konda::types::{DataValue, Record};
+use liven::codec::LivenFrame;
+use liven::executor::execute_query;
+use liven::parser::parse_query;
+use liven::storage::StorageEngine;
+use liven::types::{DataValue, Record};
 
 enum DbConnection {
     Online {
-        client: tokio::sync::Mutex<konda::client::KondaClient>,
+        client: tokio::sync::Mutex<liven::client::LivenClient>,
         auth_key: Option<String>,
     },
     Offline {
@@ -344,13 +344,13 @@ enum ShellEvent {
 }
 
 pub async fn run_shell(auth_key: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
-    let app_config = konda::config::AppConfig::load()?;
+    let app_config = liven::config::AppConfig::load()?;
     let db_addr = format!("{}:{}", app_config.server.host, app_config.server.db_port);
     let client_res = if let Some(ref key) = auth_key {
         let full_addr = format!("{}?auth_key={}", db_addr, key);
-        konda::client::KondaClient::connect_with_id(&full_addr, "default_client").await
+        liven::client::LivenClient::connect_with_id(&full_addr, "default_client").await
     } else {
-        konda::client::KondaClient::connect(&db_addr).await
+        liven::client::LivenClient::connect(&db_addr).await
     };
     let conn = match client_res {
         Ok(client) => DbConnection::Online {
@@ -360,7 +360,7 @@ pub async fn run_shell(auth_key: Option<String>) -> Result<(), Box<dyn std::erro
         Err(e) => {
             if auth_key.is_some() || crate::cli::is_server_running() {
                 return Err(format!(
-                    "Connection/Authentication failed for KondaDB server at {}: {}",
+                    "Connection/Authentication failed for LIVEN server at {}: {}",
                     db_addr, e
                 )
                 .into());
@@ -414,7 +414,7 @@ pub async fn run_shell(auth_key: Option<String>) -> Result<(), Box<dyn std::erro
         "┌───────────────────────────────────────────────────────────────────────────┐".to_string(),
     );
     logs.push(
-        "│                    KONDA INTERACTIVE QUERY CONSOLE                        │".to_string(),
+        "│                    LIVEN INTERACTIVE QUERY CONSOLE                        │".to_string(),
     );
     logs.push(
         "├───────────────────────────────────────────────────────────────────────────┤".to_string(),
@@ -556,7 +556,7 @@ pub async fn run_shell(auth_key: Option<String>) -> Result<(), Box<dyn std::erro
                                     if query_trimmed == "\\help" {
                                         let mut help_lines = Vec::new();
                                         help_lines.push("─────────────────────────────────────────────────────────────────────────────".to_string());
-                                        help_lines.push("                            KONDA TUI QUICK HELP GUIDE                       ".to_string());
+                                        help_lines.push("                            LIVEN TUI QUICK HELP GUIDE                       ".to_string());
                                         help_lines.push("─────────────────────────────────────────────────────────────────────────────".to_string());
                                         help_lines.push(
                                             "  \\d, \\dt          List all active streams (tables)"
@@ -795,7 +795,7 @@ pub async fn run_shell(auth_key: Option<String>) -> Result<(), Box<dyn std::erro
                                                 )));
 
                                                 let db_addr = if let Ok(cfg) =
-                                                    konda::config::AppConfig::load()
+                                                    liven::config::AppConfig::load()
                                                 {
                                                     format!(
                                                         "{}:{}",
@@ -808,13 +808,13 @@ pub async fn run_shell(auth_key: Option<String>) -> Result<(), Box<dyn std::erro
                                                 let client_res = if let Some(key) = auth_key {
                                                     let full_addr =
                                                         format!("{}?auth_key={}", db_addr, key);
-                                                    konda::client::KondaClient::connect_with_id(
+                                                    liven::client::LivenClient::connect_with_id(
                                                         &full_addr,
                                                         "default_client",
                                                     )
                                                     .await
                                                 } else {
-                                                    konda::client::KondaClient::connect(&db_addr)
+                                                    liven::client::LivenClient::connect(&db_addr)
                                                         .await
                                                 };
 
@@ -837,7 +837,7 @@ pub async fn run_shell(auth_key: Option<String>) -> Result<(), Box<dyn std::erro
 
                                                         while let Some(res) = framed.next().await {
                                                             match res {
-                                                                Ok(KondaFrame::Records(
+                                                                Ok(LivenFrame::Records(
                                                                     records,
                                                                 )) => {
                                                                     for r in records {
@@ -922,7 +922,7 @@ pub async fn run_shell(auth_key: Option<String>) -> Result<(), Box<dyn std::erro
                     duration,
                     output,
                 } => {
-                    logs.push(format!("konda=> {};", query));
+                    logs.push(format!("liven=> {};", query));
                     for line in output {
                         logs.push(line);
                     }
@@ -930,7 +930,7 @@ pub async fn run_shell(auth_key: Option<String>) -> Result<(), Box<dyn std::erro
                     logs.push(String::new());
                 }
                 ShellEvent::QueryError { query, err } => {
-                    logs.push(format!("konda=> {};", query));
+                    logs.push(format!("liven=> {};", query));
                     for line in format_error_card(&err) {
                         logs.push(line);
                     }
@@ -997,7 +997,7 @@ pub async fn run_shell(auth_key: Option<String>) -> Result<(), Box<dyn std::erro
                         .add_modifier(Modifier::BOLD),
                 )
                 .border_style(Style::default().fg(Color::DarkGray));
-            let (host, port) = if let Ok(cfg) = konda::config::AppConfig::load() {
+            let (host, port) = if let Ok(cfg) = liven::config::AppConfig::load() {
                 (cfg.server.host, cfg.server.db_port)
             } else {
                 ("127.0.0.1".to_string(), 43121)
@@ -1058,7 +1058,7 @@ pub async fn run_shell(auth_key: Option<String>) -> Result<(), Box<dyn std::erro
                             clean,
                             Style::default().fg(Color::Cyan),
                         )]))
-                    } else if line.contains("konda=>") {
+                    } else if line.contains("liven=>") {
                         ListItem::new(Line::from(vec![Span::styled(
                             clean,
                             Style::default().fg(Color::Magenta),
@@ -1074,7 +1074,7 @@ pub async fn run_shell(auth_key: Option<String>) -> Result<(), Box<dyn std::erro
             f.render_widget(list_widget, log_area);
 
             let input_area = chunks[2];
-            let max_input_width = (input_area.width as usize).saturating_sub(17); // " konda=> " is 11 chars + borders
+            let max_input_width = (input_area.width as usize).saturating_sub(17); // " liven=> " is 11 chars + borders
             let display_str: String = if input_buffer.chars().count() > max_input_width {
                 let start_idx = input_buffer.chars().count().saturating_sub(max_input_width);
                 input_buffer.chars().skip(start_idx).collect()
@@ -1094,7 +1094,7 @@ pub async fn run_shell(auth_key: Option<String>) -> Result<(), Box<dyn std::erro
 
             let input_paragraph = Paragraph::new(Line::from(vec![
                 Span::styled(
-                    " konda=> ",
+                    " liven=> ",
                     Style::default()
                         .fg(Color::Green)
                         .add_modifier(Modifier::BOLD),

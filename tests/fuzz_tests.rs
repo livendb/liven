@@ -1,6 +1,6 @@
-use konda::parser::parse_pipeline;
-use konda::storage::deserialize_payload_fuzz;
-use konda::storage::key::StreamKey;
+use liven::parser::parse_pipeline;
+use liven::storage::deserialize_payload_fuzz;
+use liven::storage::key::StreamKey;
 use proptest::prelude::*;
 
 proptest! {

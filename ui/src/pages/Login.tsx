@@ -15,7 +15,7 @@ export default function Login({ onLoginSuccess }: LoginProps) {
 
   // Initialize theme from localStorage or system class list
   const [theme, setTheme] = useState<"light" | "dark" | "system">(() => {
-    const saved = localStorage.getItem("konda-theme") as
+    const saved = localStorage.getItem("liven-theme") as
       | "light"
       | "dark"
       | "system"
@@ -26,7 +26,7 @@ export default function Login({ onLoginSuccess }: LoginProps) {
   const [resolvedTheme, setResolvedTheme] = useState<"light" | "dark">("dark");
 
   useEffect(() => {
-    localStorage.setItem("konda-theme", theme);
+    localStorage.setItem("liven-theme", theme);
     const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
 
     const updateTheme = () => {
@@ -153,7 +153,7 @@ export default function Login({ onLoginSuccess }: LoginProps) {
                 : "from-emerald-600 via-teal-600 to-blue-500"
             }`}
           >
-            KondaDB
+            LIVEN
           </h1>
           <p
             className={`text-xs font-bold tracking-widest mt-1.5 uppercase ${

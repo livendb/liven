@@ -55,7 +55,7 @@ export default function Dashboard({
           </div>
           <div>
             <h4 className="font-semibold text-zinc-900 dark:text-zinc-100 text-sm tracking-wide">
-              KondaDB Active Instance
+              LIVEN Active Instance
             </h4>
           </div>
         </div>

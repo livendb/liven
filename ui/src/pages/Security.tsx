@@ -217,7 +217,7 @@ export default function Security({
               Authentication Bypass Active
             </h4>
             <p className="text-xs leading-relaxed opacity-90">
-              The KondaDB server is currently configured with{" "}
+              The LIVEN server is currently configured with{" "}
               <strong>mode = &quot;none&quot;</strong>. Authentication is
               completely disabled across both the Web UI and native wire
               protocol boundaries. This configuration is highly insecure and

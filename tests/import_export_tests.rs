@@ -1,5 +1,5 @@
-use konda::client::KondaClient;
-use konda::types::DataValue;
+use liven::client::LivenClient;
+use liven::types::DataValue;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -42,25 +42,25 @@ usr_2,Bob,25,false,\"{\"\"role\"\":\"\"user\"\"}\"
 
     // 2. Build the binary first to ensure cargo run doesn't print compilation output during test
     let build_status = Command::new("cargo")
-        .args(&["build", "--bin", "kondadb"])
+        .args(&["build", "--bin", "liven"])
         .status()
-        .expect("Failed to build kondadb binary");
+        .expect("Failed to build liven binary");
     assert!(build_status.success());
 
     // Define a custom port and webui port to prevent collisions during tests
     let test_port = "45165";
     let test_webui_port = "45164";
 
-    // Spawn background KondaDB server process
+    // Spawn background LIVEN server process
     let server_child = Command::new("cargo")
-        .env("KONDA_DATA_DIR", test_dir)
-        .env("KONDADB__STORAGE__DATA_DIRECTORY", test_dir)
-        .env("KONDADB__SECURITY__MODE", "none")
-        .env("KONDADB__SERVER__DB_PORT", test_port)
-        .env("KONDADB__SERVER__WEBUI_PORT", test_webui_port)
-        .args(&["run", "--bin", "kondadb", "--", "start", "--no-ui"])
+        .env("LIVEN_DATA_DIR", test_dir)
+        .env("LIVENDB__STORAGE__DATA_DIRECTORY", test_dir)
+        .env("LIVENDB__SECURITY__MODE", "none")
+        .env("LIVENDB__SERVER__DB_PORT", test_port)
+        .env("LIVENDB__SERVER__WEBUI_PORT", test_webui_port)
+        .args(&["run", "--bin", "liven", "--", "start", "--no-ui"])
         .spawn()
-        .expect("Failed to start background KondaDB server");
+        .expect("Failed to start background LIVEN server");
 
     // Use the RAII ServerGuard to ensure cleanup even if the test panics
     let _server_guard = ServerGuard(server_child);
@@ -68,17 +68,17 @@ usr_2,Bob,25,false,\"{\"\"role\"\":\"\"user\"\"}\"
     // Wait a brief moment for the server to spin up and bind to the port
     std::thread::sleep(std::time::Duration::from_millis(3000));
 
-    // 3. Run CSV import command sandboxed using KONDA_DATA_DIR
+    // 3. Run CSV import command sandboxed using LIVEN_DATA_DIR
     let import_csv_status = Command::new("cargo")
-        .env("KONDA_DATA_DIR", test_dir)
-        .env("KONDADB__STORAGE__DATA_DIRECTORY", test_dir)
-        .env("KONDADB__SECURITY__MODE", "none")
-        .env("KONDADB__SERVER__DB_PORT", test_port)
-        .env("KONDADB__SERVER__WEBUI_PORT", test_webui_port)
+        .env("LIVEN_DATA_DIR", test_dir)
+        .env("LIVENDB__STORAGE__DATA_DIRECTORY", test_dir)
+        .env("LIVENDB__SECURITY__MODE", "none")
+        .env("LIVENDB__SERVER__DB_PORT", test_port)
+        .env("LIVENDB__SERVER__WEBUI_PORT", test_webui_port)
         .args(&[
             "run",
             "--bin",
-            "kondadb",
+            "liven",
             "--",
             "import",
             "--stream",
@@ -92,17 +92,17 @@ usr_2,Bob,25,false,\"{\"\"role\"\":\"\"user\"\"}\"
         .expect("Failed to execute CSV import command");
     assert!(import_csv_status.success());
 
-    // 4. Run JSONL import command sandboxed using KONDA_DATA_DIR
+    // 4. Run JSONL import command sandboxed using LIVEN_DATA_DIR
     let import_jsonl_status = Command::new("cargo")
-        .env("KONDA_DATA_DIR", test_dir)
-        .env("KONDADB__STORAGE__DATA_DIRECTORY", test_dir)
-        .env("KONDADB__SECURITY__MODE", "none")
-        .env("KONDADB__SERVER__DB_PORT", test_port)
-        .env("KONDADB__SERVER__WEBUI_PORT", test_webui_port)
+        .env("LIVEN_DATA_DIR", test_dir)
+        .env("LIVENDB__STORAGE__DATA_DIRECTORY", test_dir)
+        .env("LIVENDB__SECURITY__MODE", "none")
+        .env("LIVENDB__SERVER__DB_PORT", test_port)
+        .env("LIVENDB__SERVER__WEBUI_PORT", test_webui_port)
         .args(&[
             "run",
             "--bin",
-            "kondadb",
+            "liven",
             "--",
             "import",
             "--stream",
@@ -116,17 +116,17 @@ usr_2,Bob,25,false,\"{\"\"role\"\":\"\"user\"\"}\"
         .expect("Failed to execute JSONL import command");
     assert!(import_jsonl_status.success());
 
-    // 5. Verify the server contains the imported data using KondaClient
+    // 5. Verify the server contains the imported data using LivenClient
     {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
-            let mut client = KondaClient::connect_with_auth_mode(
+            let mut client = LivenClient::connect_with_auth_mode(
                 &format!("127.0.0.1:{}", test_port),
                 "test_client",
                 "none",
             )
             .await
-            .expect("Failed to connect to KondaDB server");
+            .expect("Failed to connect to LIVEN server");
 
             let streams_records = client.query("streams()").await.unwrap();
             let streams: Vec<String> = streams_records
@@ -187,17 +187,17 @@ usr_2,Bob,25,false,\"{\"\"role\"\":\"\"user\"\"}\"
         });
     }
 
-    // 6. Run CSV export command sandboxed using KONDA_DATA_DIR
+    // 6. Run CSV export command sandboxed using LIVEN_DATA_DIR
     let export_csv_status = Command::new("cargo")
-        .env("KONDA_DATA_DIR", test_dir)
-        .env("KONDADB__STORAGE__DATA_DIRECTORY", test_dir)
-        .env("KONDADB__SECURITY__MODE", "none")
-        .env("KONDADB__SERVER__DB_PORT", test_port)
-        .env("KONDADB__SERVER__WEBUI_PORT", test_webui_port)
+        .env("LIVEN_DATA_DIR", test_dir)
+        .env("LIVENDB__STORAGE__DATA_DIRECTORY", test_dir)
+        .env("LIVENDB__SECURITY__MODE", "none")
+        .env("LIVENDB__SERVER__DB_PORT", test_port)
+        .env("LIVENDB__SERVER__WEBUI_PORT", test_webui_port)
         .args(&[
             "run",
             "--bin",
-            "kondadb",
+            "liven",
             "--",
             "export",
             "--stream",
@@ -211,17 +211,17 @@ usr_2,Bob,25,false,\"{\"\"role\"\":\"\"user\"\"}\"
         .expect("Failed to execute CSV export command");
     assert!(export_csv_status.success());
 
-    // 7. Run JSONL export command sandboxed using KONDA_DATA_DIR
+    // 7. Run JSONL export command sandboxed using LIVEN_DATA_DIR
     let export_jsonl_status = Command::new("cargo")
-        .env("KONDA_DATA_DIR", test_dir)
-        .env("KONDADB__STORAGE__DATA_DIRECTORY", test_dir)
-        .env("KONDADB__SECURITY__MODE", "none")
-        .env("KONDADB__SERVER__DB_PORT", test_port)
-        .env("KONDADB__SERVER__WEBUI_PORT", test_webui_port)
+        .env("LIVEN_DATA_DIR", test_dir)
+        .env("LIVENDB__STORAGE__DATA_DIRECTORY", test_dir)
+        .env("LIVENDB__SECURITY__MODE", "none")
+        .env("LIVENDB__SERVER__DB_PORT", test_port)
+        .env("LIVENDB__SERVER__WEBUI_PORT", test_webui_port)
         .args(&[
             "run",
             "--bin",
-            "kondadb",
+            "liven",
             "--",
             "export",
             "--stream",
@@ -251,16 +251,16 @@ usr_2,Bob,25,false,\"{\"\"role\"\":\"\"user\"\"}\"
 
     // 8b. Run CSV export without --path and check for HOME/Downloads fallback
     let export_no_path_status = Command::new("cargo")
-        .env("KONDA_DATA_DIR", test_dir)
-        .env("KONDADB__STORAGE__DATA_DIRECTORY", test_dir)
-        .env("KONDADB__SECURITY__MODE", "none")
-        .env("KONDADB__SERVER__DB_PORT", test_port)
-        .env("KONDADB__SERVER__WEBUI_PORT", test_webui_port)
+        .env("LIVEN_DATA_DIR", test_dir)
+        .env("LIVENDB__STORAGE__DATA_DIRECTORY", test_dir)
+        .env("LIVENDB__SECURITY__MODE", "none")
+        .env("LIVENDB__SERVER__DB_PORT", test_port)
+        .env("LIVENDB__SERVER__WEBUI_PORT", test_webui_port)
         .env("HOME", test_dir) // Override HOME so it defaults to test_dir/Downloads
         .args(&[
             "run",
             "--bin",
-            "kondadb",
+            "liven",
             "--",
             "export",
             "--stream",
@@ -294,14 +294,14 @@ usr_2,Bob,25,false,\"{\"\"role\"\":\"\"user\"\"}\"
 
     // 8c. Run export without --stream (all streams) and check for HOME/Downloads fallback
     let export_all_status = Command::new("cargo")
-        .env("KONDA_DATA_DIR", test_dir)
-        .env("KONDADB__STORAGE__DATA_DIRECTORY", test_dir)
-        .env("KONDADB__SECURITY__MODE", "none")
-        .env("KONDADB__SERVER__DB_PORT", test_port)
-        .env("KONDADB__SERVER__WEBUI_PORT", test_webui_port)
+        .env("LIVEN_DATA_DIR", test_dir)
+        .env("LIVENDB__STORAGE__DATA_DIRECTORY", test_dir)
+        .env("LIVENDB__SECURITY__MODE", "none")
+        .env("LIVENDB__SERVER__DB_PORT", test_port)
+        .env("LIVENDB__SERVER__WEBUI_PORT", test_webui_port)
         .env("HOME", test_dir) // Override HOME so it defaults to test_dir/Downloads
         .args(&[
-            "run", "--bin", "kondadb", "--", "export", "--format", "jsonl",
+            "run", "--bin", "liven", "--", "export", "--format", "jsonl",
         ])
         .status()
         .expect("Failed to execute export all streams command");

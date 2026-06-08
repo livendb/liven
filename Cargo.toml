@@ -1,14 +1,14 @@
 [package]
-name = "konda"
+name = "liven"
 version = "0.0.1"
 edition = "2024"
 
 [lib]
-name = "konda"
+name = "liven"
 path = "src/lib.rs"
 
 [[bin]]
-name = "kondadb"
+name = "liven"
 path = "src/main.rs"
 
 
@@ -62,54 +62,54 @@ name = "engine_bench"
 harness = false
 
 [package.metadata.deb]
-maintainer = "KondaDB Maintainers <team@kondadb.io>"
-copyright = "2026, KondaDB Maintainers <team@kondadb.io>"
+maintainer = "LIVEN Maintainers <team@liven.io>"
+copyright = "2026, LIVEN Maintainers <team@liven.io>"
 license = "MIT"
 section = "database"
 priority = "optional"
 assets = [
-    ["target/release/kondadb", "usr/local/bin/kondadb", "755"],
-    ["kondadb.toml", "etc/kondadb/kondadb.toml", "644"],
-    ["kondadb.service", "lib/systemd/system/kondadb.service", "644"]
+    ["target/release/liven", "usr/local/bin/liven", "755"],
+    ["liven.toml", "etc/liven/liven.toml", "644"],
+    ["liven.service", "lib/systemd/system/liven.service", "644"]
 ]
-conf-files = ["/etc/kondadb/kondadb.toml"]
+conf-files = ["/etc/liven/liven.toml"]
 maintainer-scripts = "debian"
 
 [package.metadata.generate-rpm]
-summary = "KondaDB High-Performance Storage Engine"
+summary = "LIVEN High-Performance Storage Engine"
 description = "High-performance storage engine with ZTNA and mTLS support"
 license = "MIT"
 release = "1"
-packager = "KondaDB Maintainers <team@kondadb.io>"
+packager = "LIVEN Maintainers <team@liven.io>"
 doc-files = ["README.md"]
 assets = [
-    { source = "target/release/kondadb", dest = "/usr/local/bin/kondadb", mode = "755" },
-    { source = "kondadb.toml", dest = "/etc/kondadb/kondadb.toml", mode = "644", config = true },
-    { source = "kondadb.service", dest = "/usr/lib/systemd/system/kondadb.service", mode = "644" }
+    { source = "target/release/liven", dest = "/usr/local/bin/liven", mode = "755" },
+    { source = "liven.toml", dest = "/etc/liven/liven.toml", mode = "644", config = true },
+    { source = "liven.service", dest = "/usr/lib/systemd/system/liven.service", mode = "644" }
 ]
 post_install = """
 # RPM %post installation script
-if [ ! -d /var/lib/kondadb ]; then
-    echo "Creating KondaDB data directory with secure permissions (700)..."
-    mkdir -p /var/lib/kondadb
-    chmod 700 /var/lib/kondadb
+if [ ! -d /var/lib/liven ]; then
+    echo "Creating LIVEN data directory with secure permissions (700)..."
+    mkdir -p /var/lib/liven
+    chmod 700 /var/lib/liven
 else
-    echo "KondaDB data directory already exists. Preserving existing .konda data blocks."
+    echo "LIVEN data directory already exists. Preserving existing .liven data blocks."
 fi
-if [ ! -d /var/log/kondadb ]; then
-    echo "Creating KondaDB log directory with secure permissions (700)..."
-    mkdir -p /var/log/kondadb
-    chmod 700 /var/log/kondadb
+if [ ! -d /var/log/liven ]; then
+    echo "Creating LIVEN log directory with secure permissions (700)..."
+    mkdir -p /var/log/liven
+    chmod 700 /var/log/liven
 fi
 systemctl daemon-reload || true
-systemctl enable kondadb || true
+systemctl enable liven || true
 """
 pre_uninstall = """
 # RPM %preun uninstallation script
 if [ "$1" -eq 0 ]; then
     # Complete uninstall (not an upgrade)
-    systemctl stop kondadb || true
-    systemctl disable kondadb || true
+    systemctl stop liven || true
+    systemctl disable liven || true
 fi
 """
 post_uninstall = """

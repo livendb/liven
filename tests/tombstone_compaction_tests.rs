@@ -1,5 +1,5 @@
-use konda::storage::StorageEngine;
-use konda::types::{DataValue, Record};
+use liven::storage::StorageEngine;
+use liven::types::{DataValue, Record};
 use std::fs;
 
 #[test]
@@ -7,7 +7,7 @@ fn test_tombstone_compaction_lifecycle() {
     // 1. Generate guaranteed isolated directory path using time + thread ID to prevent CI collision
     let thread_id = std::thread::current().id();
     let path = std::env::temp_dir().join(format!(
-        "konda_test_tombstone_compaction_lifecycle_{:?}_{}",
+        "liven_test_tombstone_compaction_lifecycle_{:?}_{}",
         thread_id,
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

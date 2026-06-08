@@ -1,13 +1,13 @@
 #!/bin/sh
-# debian/prerm - KondaDB pre-removal script
+# debian/prerm - LIVEN pre-removal script
 set -e
 
 case "$1" in
     remove)
         if [ -d /run/systemd/system ] || [ -d /lib/systemd/system ]; then
-            echo "Stopping and disabling KondaDB background service..."
-            systemctl stop kondadb || true
-            systemctl disable kondadb || true
+            echo "Stopping and disabling LIVEN background service..."
+            systemctl stop liven || true
+            systemctl disable liven || true
         fi
         ;;
     upgrade|failed-upgrade|deconfigure)

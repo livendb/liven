@@ -1,7 +1,7 @@
 #[allow(unused_imports)]
 use fs2::FileExt;
-use konda::storage::StorageEngine;
-use konda::types::DataValue;
+use liven::storage::StorageEngine;
+use liven::types::DataValue;
 use std::fs;
 
 fn post_http_json(addr: &str, path: &str, json_payload: &str) -> Result<(), String> {
@@ -108,10 +108,10 @@ impl AppendTarget {
 
 #[test]
 fn test_generate_sample_data() {
-    let target_dir = std::env::var("KONDA_DATA_DIR").unwrap_or_else(|_| {
+    let target_dir = std::env::var("LIVEN_DATA_DIR").unwrap_or_else(|_| {
         std::env::temp_dir()
             .join(format!(
-                "konda_sample_data_{}",
+                "liven_sample_data_{}",
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap()
@@ -121,12 +121,12 @@ fn test_generate_sample_data() {
             .to_string()
     });
 
-    // Detect if the directory is locked by trying to obtain try_lock_shared on any existing .konda segments
+    // Detect if the directory is locked by trying to obtain try_lock_shared on any existing .liven segments
     let is_locked = if let Ok(entries) = fs::read_dir(&target_dir) {
         let mut locked = false;
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("konda") {
+            if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("liven") {
                 if let Ok(file) = fs::File::open(&path) {
                     if file.try_lock_shared().is_err() {
                         locked = true;
@@ -141,7 +141,7 @@ fn test_generate_sample_data() {
     };
 
     // Clean any prior residues if any and if the directory is not locked
-    let is_env_set = std::env::var("KONDA_DATA_DIR").is_ok();
+    let is_env_set = std::env::var("LIVEN_DATA_DIR").is_ok();
     if !is_locked && !is_env_set {
         let _ = fs::remove_dir_all(&target_dir);
     }
@@ -364,8 +364,8 @@ fn test_generate_sample_data() {
         target_dir
     );
 
-    // If KONDA_DATA_DIR/CONDUIT_DATA_DIR was not explicitly set, and directory is not locked, clean up the temporary folder after successful test
-    let is_env_set = std::env::var("KONDA_DATA_DIR").is_ok();
+    // If LIVEN_DATA_DIR/CONDUIT_DATA_DIR was not explicitly set, and directory is not locked, clean up the temporary folder after successful test
+    let is_env_set = std::env::var("LIVEN_DATA_DIR").is_ok();
     if !is_locked && !is_env_set {
         println!(
             "Cleaning up temporary sample data directory: {}",

@@ -116,7 +116,7 @@ export const fetchSamples = [
     title: "Discover Active Streams",
     badge: "STREAMS",
     code: 'streams()',
-    desc: "Retrieve the complete list of active stream partitions currently managed by KondaDB.",
+    desc: "Retrieve the complete list of active stream partitions currently managed by LIVEN.",
     hint: "Useful for discovering stream schemas and allocation details.",
   },
 ];

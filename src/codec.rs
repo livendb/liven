@@ -5,7 +5,7 @@ use std::io;
 use tokio_util::codec::{Decoder, Encoder};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum KondaFrame {
+pub enum LivenFrame {
     Query(String),
     Records(Vec<Record>),
     Connect { client_id: String },
@@ -15,24 +15,24 @@ pub enum KondaFrame {
     Err(String),
 }
 
-pub struct KondaCodec {
+pub struct LivenCodec {
     pub is_client: bool,
 }
 
-impl KondaCodec {
+impl LivenCodec {
     pub fn new(is_client: bool) -> Self {
         Self { is_client }
     }
 }
 
-impl Default for KondaCodec {
+impl Default for LivenCodec {
     fn default() -> Self {
         Self { is_client: false }
     }
 }
 
-impl Decoder for KondaCodec {
-    type Item = KondaFrame;
+impl Decoder for LivenCodec {
+    type Item = LivenFrame;
     type Error = io::Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
@@ -51,16 +51,16 @@ impl Decoder for KondaCodec {
         src.advance(4);
         let data = src.split_to(len);
 
-        let frame: KondaFrame = rmp_serde::from_slice(&data)
+        let frame: LivenFrame = rmp_serde::from_slice(&data)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
         Ok(Some(frame))
     }
 }
 
-impl Encoder<KondaFrame> for KondaCodec {
+impl Encoder<LivenFrame> for LivenCodec {
     type Error = io::Error;
 
-    fn encode(&mut self, item: KondaFrame, dst: &mut BytesMut) -> Result<(), Self::Error> {
+    fn encode(&mut self, item: LivenFrame, dst: &mut BytesMut) -> Result<(), Self::Error> {
         let serialized =
             rmp_serde::to_vec(&item).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
         let payload_len = serialized.len();
@@ -73,26 +73,26 @@ impl Encoder<KondaFrame> for KondaCodec {
     }
 }
 
-impl Encoder<Vec<Record>> for KondaCodec {
+impl Encoder<Vec<Record>> for LivenCodec {
     type Error = io::Error;
 
     fn encode(&mut self, item: Vec<Record>, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        self.encode(KondaFrame::Records(item), dst)
+        self.encode(LivenFrame::Records(item), dst)
     }
 }
 
-impl Encoder<String> for KondaCodec {
+impl Encoder<String> for LivenCodec {
     type Error = io::Error;
 
     fn encode(&mut self, item: String, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        self.encode(KondaFrame::Query(item), dst)
+        self.encode(LivenFrame::Query(item), dst)
     }
 }
 
-impl Encoder<&str> for KondaCodec {
+impl Encoder<&str> for LivenCodec {
     type Error = io::Error;
 
     fn encode(&mut self, item: &str, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        self.encode(KondaFrame::Query(item.to_string()), dst)
+        self.encode(LivenFrame::Query(item.to_string()), dst)
     }
 }

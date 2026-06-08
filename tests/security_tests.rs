@@ -1,10 +1,10 @@
-use konda::client::KondaClient;
-use konda::config::{
+use liven::client::LivenClient;
+use liven::config::{
     AppConfig, AuthKeyConfig, LimitsConfig, SecurityConfig, ServerConfig, StorageConfig,
 };
-use konda::server::{AuthKeyRecord, run_server};
-use konda::storage::StorageEngine;
-use konda::types::DataValue;
+use liven::server::{AuthKeyRecord, run_server};
+use liven::storage::StorageEngine;
+use liven::types::DataValue;
 use std::fs;
 use std::sync::Arc;
 use std::time::Duration;
@@ -70,7 +70,7 @@ async fn send_http_request(
 #[tokio::test]
 async fn test_auth_key_handshake_lifecycle() {
     let test_dir = std::env::temp_dir().join(format!(
-        "konda_security_test_{}",
+        "liven_security_test_{}",
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -119,7 +119,7 @@ async fn test_auth_key_handshake_lifecycle() {
     // Pre-populate a known administrative root auth key
     let raw_key = "a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3e4f51234";
     let hash = blake3::hash(raw_key.as_bytes());
-    let hash_hex = konda::security::hex_encode(hash.as_bytes());
+    let hash_hex = liven::security::hex_encode(hash.as_bytes());
 
     let auth_rec = AuthKeyRecord {
         key_id: "Default Root Admin".to_string(),
@@ -149,7 +149,7 @@ async fn test_auth_key_handshake_lifecycle() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     // Connect with a native client using the pre-populated key
-    let client_res = KondaClient::connect_with_auth_mode(
+    let client_res = LivenClient::connect_with_auth_mode(
         &format!("127.0.0.1:{}?auth_key={}", port, raw_key),
         "default_client",
         "auth_key",
@@ -168,7 +168,7 @@ async fn test_auth_key_handshake_lifecycle() {
     assert!(query_res.is_ok());
 
     // Attempt to connect with an invalid key and ensure it gets rejected
-    let invalid_client_res = KondaClient::connect_with_auth_mode(
+    let invalid_client_res = LivenClient::connect_with_auth_mode(
         &format!("127.0.0.1:{}?auth_key=invalidkey12345", port),
         "default_client",
         "auth_key",
@@ -186,7 +186,7 @@ async fn test_auth_key_handshake_lifecycle() {
 #[tokio::test]
 async fn test_rest_auth_key_challenge_login_lifecycle() {
     let test_dir = std::env::temp_dir().join(format!(
-        "konda_rest_security_test_{}",
+        "liven_rest_security_test_{}",
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -236,7 +236,7 @@ async fn test_rest_auth_key_challenge_login_lifecycle() {
     // Pre-populate a known administrative root auth key
     let raw_key = "test_rest_root_key_67890_test_rest_root_key_67890_test_rest_key_6";
     let hash = blake3::hash(raw_key.as_bytes());
-    let hash_hex = konda::security::hex_encode(hash.as_bytes());
+    let hash_hex = liven::security::hex_encode(hash.as_bytes());
 
     let auth_rec = AuthKeyRecord {
         key_id: "Default Root Admin".to_string(),
@@ -291,12 +291,12 @@ async fn test_rest_auth_key_challenge_login_lifecycle() {
         "Default Root Admin"
     );
 
-    // Extract konda_session cookie
+    // Extract liven_session cookie
     let mut session_id = String::new();
     for (k, v) in &headers {
-        if k == "set-cookie" && v.starts_with("konda_session=") {
+        if k == "set-cookie" && v.starts_with("liven_session=") {
             let end_idx = v.find(';').unwrap_or(v.len());
-            session_id = v["konda_session=".len()..end_idx].to_string();
+            session_id = v["liven_session=".len()..end_idx].to_string();
         }
     }
     assert!(
@@ -311,7 +311,7 @@ async fn test_rest_auth_key_challenge_login_lifecycle() {
         "/api/system/auth/status",
         vec![(
             "cookie".to_string(),
-            format!("konda_session={}", session_id),
+            format!("liven_session={}", session_id),
         )],
         None,
     )
@@ -338,7 +338,7 @@ async fn test_rest_auth_key_challenge_login_lifecycle() {
         vec![
             (
                 "cookie".to_string(),
-                format!("konda_session={}", session_id),
+                format!("liven_session={}", session_id),
             ),
             ("content-type".to_string(), "application/json".to_string()),
         ],
@@ -360,7 +360,7 @@ async fn test_rest_auth_key_challenge_login_lifecycle() {
         "/api/system/auth/keys",
         vec![(
             "cookie".to_string(),
-            format!("konda_session={}", session_id),
+            format!("liven_session={}", session_id),
         )],
         None,
     )
@@ -387,7 +387,7 @@ async fn test_rest_auth_key_challenge_login_lifecycle() {
         vec![
             (
                 "cookie".to_string(),
-                format!("konda_session={}", session_id),
+                format!("liven_session={}", session_id),
             ),
             ("content-type".to_string(), "application/json".to_string()),
         ],
@@ -405,7 +405,7 @@ async fn test_rest_auth_key_challenge_login_lifecycle() {
         "/api/system/auth/keys",
         vec![(
             "cookie".to_string(),
-            format!("konda_session={}", session_id),
+            format!("liven_session={}", session_id),
         )],
         None,
     )
@@ -429,7 +429,7 @@ async fn test_rest_auth_key_challenge_login_lifecycle() {
         "/api/system/auth/logout",
         vec![(
             "cookie".to_string(),
-            format!("konda_session={}", session_id),
+            format!("liven_session={}", session_id),
         )],
         None,
     )
@@ -441,7 +441,7 @@ async fn test_rest_auth_key_challenge_login_lifecycle() {
     // Verify Set-Cookie header with Max-Age=0 or clearing is returned
     let mut cleared_cookie = false;
     for (k, v) in &headers {
-        if k == "set-cookie" && v.contains("konda_session=") && v.contains("Max-Age=0") {
+        if k == "set-cookie" && v.contains("liven_session=") && v.contains("Max-Age=0") {
             cleared_cookie = true;
         }
     }
@@ -454,7 +454,7 @@ async fn test_rest_auth_key_challenge_login_lifecycle() {
         "/api/system/auth/status",
         vec![(
             "cookie".to_string(),
-            format!("konda_session={}", session_id),
+            format!("liven_session={}", session_id),
         )],
         None,
     )
@@ -469,8 +469,8 @@ async fn test_rest_auth_key_challenge_login_lifecycle() {
 
 #[test]
 fn test_continuous_edge_check_query_capabilities() {
-    use konda::security::{CAP_ADMIN, CAP_NONE, CAP_READ, CAP_ROOT, CAP_WRITE};
-    use konda::server::check_query_capabilities;
+    use liven::security::{CAP_ADMIN, CAP_NONE, CAP_READ, CAP_ROOT, CAP_WRITE};
+    use liven::server::check_query_capabilities;
 
     // CAP_ROOT can do everything
     assert!(check_query_capabilities("from(\"stream\")", CAP_ROOT));

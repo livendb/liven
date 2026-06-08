@@ -1,5 +1,5 @@
 // Rebuild trigger for embedded static UI assets
-use crate::codec::{KondaCodec, KondaFrame};
+use crate::codec::{LivenCodec, LivenFrame};
 use crate::executor::{execute_query, execute_query_stream};
 use crate::parser::{parse_pipeline, parse_query};
 use crate::storage::StorageEngine;
@@ -54,47 +54,47 @@ use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::TcpStream;
 use tokio_rustls::server::TlsStream;
 
-pub enum KondaStream {
+pub enum LivenStream {
     Cleartext(TcpStream),
     Encrypted(TlsStream<TcpStream>),
 }
 
-impl AsyncRead for KondaStream {
+impl AsyncRead for LivenStream {
     fn poll_read(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
     ) -> Poll<std::io::Result<()>> {
         match self.get_mut() {
-            KondaStream::Cleartext(s) => Pin::new(s).poll_read(cx, buf),
-            KondaStream::Encrypted(s) => Pin::new(s).poll_read(cx, buf),
+            LivenStream::Cleartext(s) => Pin::new(s).poll_read(cx, buf),
+            LivenStream::Encrypted(s) => Pin::new(s).poll_read(cx, buf),
         }
     }
 }
 
-impl AsyncWrite for KondaStream {
+impl AsyncWrite for LivenStream {
     fn poll_write(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<std::io::Result<usize>> {
         match self.get_mut() {
-            KondaStream::Cleartext(s) => Pin::new(s).poll_write(cx, buf),
-            KondaStream::Encrypted(s) => Pin::new(s).poll_write(cx, buf),
+            LivenStream::Cleartext(s) => Pin::new(s).poll_write(cx, buf),
+            LivenStream::Encrypted(s) => Pin::new(s).poll_write(cx, buf),
         }
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
         match self.get_mut() {
-            KondaStream::Cleartext(s) => Pin::new(s).poll_flush(cx),
-            KondaStream::Encrypted(s) => Pin::new(s).poll_flush(cx),
+            LivenStream::Cleartext(s) => Pin::new(s).poll_flush(cx),
+            LivenStream::Encrypted(s) => Pin::new(s).poll_flush(cx),
         }
     }
 
     fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
         match self.get_mut() {
-            KondaStream::Cleartext(s) => Pin::new(s).poll_shutdown(cx),
-            KondaStream::Encrypted(s) => Pin::new(s).poll_shutdown(cx),
+            LivenStream::Cleartext(s) => Pin::new(s).poll_shutdown(cx),
+            LivenStream::Encrypted(s) => Pin::new(s).poll_shutdown(cx),
         }
     }
 }
@@ -214,7 +214,7 @@ pub fn bootstrap_auth_keys_table(
 
     println!("\x1b[1;31m");
     println!("########################################################################");
-    println!("#                      KONDADB INITIALIZATION WARNING                  #");
+    println!("#                      LIVENDB INITIALIZATION WARNING                  #");
     println!("########################################################################");
     println!("\x1b[0m");
     println!("  A DEFAULT ROOT ADMINISTRATIVE AUTH KEY HAS BEEN GENERATED:");
@@ -316,7 +316,7 @@ pub async fn run_server(
         println!("\x1b[1;31m");
         println!("########################################################################");
         println!("# WARNING: SECURITY IS EXPLICITLY DISABLED.                            #");
-        println!("# KONDADB IS OPEN TO UNAUTHENTICATED TRAFFIC.                          #");
+        println!("# LIVENDB IS OPEN TO UNAUTHENTICATED TRAFFIC.                          #");
         println!("########################################################################");
         println!("\x1b[0m");
     } else {
@@ -459,7 +459,7 @@ pub async fn run_server(
     };
 
     info!(
-        "KondaDB listening on native wire scheme konda://{}",
+        "LIVEN listening on native wire scheme liven://{}",
         db_addr
     );
 
@@ -475,7 +475,7 @@ pub async fn run_server(
                         let _ = stream.set_nodelay(true);
 
                         if is_dev {
-                            let konda_stream = KondaStream::Cleartext(stream);
+                            let liven_stream = LivenStream::Cleartext(stream);
                             let is_auth_key = state_clone.config.security.mode == "auth_key";
                             let caps = if is_auth_key {
                                 crate::security::CAP_NONE
@@ -483,7 +483,7 @@ pub async fn run_server(
                                 crate::security::CAP_ROOT
                             };
                             handle_connection(
-                                konda_stream,
+                                liven_stream,
                                 state_clone,
                                 caps,
                                 Vec::new(),
@@ -510,7 +510,7 @@ pub async fn run_server(
                                                 cache.get(&cn).cloned()
                                             };
 
-                                            let konda_stream = KondaStream::Encrypted(tls_stream);
+                                            let liven_stream = LivenStream::Encrypted(tls_stream);
                                             if let Some(identity) = identity_opt {
                                                 let (close_tx, close_rx) =
                                                     tokio::sync::oneshot::channel::<()>();
@@ -527,7 +527,7 @@ pub async fn run_server(
                                                     });
                                                 }
                                                 handle_connection(
-                                                    konda_stream,
+                                                    liven_stream,
                                                     state_clone,
                                                     identity.capabilities,
                                                     identity.allowed_tags,
@@ -537,7 +537,7 @@ pub async fn run_server(
                                                 .await;
                                             } else {
                                                 handle_connection(
-                                                    konda_stream,
+                                                    liven_stream,
                                                     state_clone,
                                                     crate::security::CAP_NONE,
                                                     Vec::new(),
@@ -592,7 +592,7 @@ pub async fn run_server(
             }
         };
 
-        let framed = tokio_util::codec::Framed::new(stream, KondaCodec::default());
+        let framed = tokio_util::codec::Framed::new(stream, LivenCodec::default());
         let (mut writer, mut reader) = framed.split();
 
         loop {
@@ -601,7 +601,7 @@ pub async fn run_server(
                     match frame_res {
                         Some(Ok(frame)) => {
                             match frame {
-                                crate::codec::KondaFrame::Connect { client_id } => {
+                                crate::codec::LivenFrame::Connect { client_id } => {
                                     if is_auth_key_mode {
                                         let hash = blake3::hash(client_id.as_bytes());
                                         let hash_hex = crate::security::hex_encode(hash.as_bytes());
@@ -624,24 +624,24 @@ pub async fn run_server(
                                                 close_rx_fused = new_close_rx;
                                                 _keep_alive_tx = None;
 
-                                                if writer.send(crate::codec::KondaFrame::Ok).await.is_err() {
+                                                if writer.send(crate::codec::LivenFrame::Ok).await.is_err() {
                                                     break;
                                                 }
                                             } else {
-                                                let _ = writer.send(crate::codec::KondaFrame::Err("Authentication failed: Key has been revoked".to_string())).await;
+                                                let _ = writer.send(crate::codec::LivenFrame::Err("Authentication failed: Key has been revoked".to_string())).await;
                                                 break;
                                             }
                                         } else {
-                                            let _ = writer.send(crate::codec::KondaFrame::Err("Authentication failed".to_string())).await;
+                                            let _ = writer.send(crate::codec::LivenFrame::Err("Authentication failed".to_string())).await;
                                             break;
                                         }
                                     } else {
-                                        if writer.send(KondaFrame::Ok).await.is_err() {
+                                        if writer.send(LivenFrame::Ok).await.is_err() {
                                             break;
                                         }
                                     }
                                 }
-                                crate::codec::KondaFrame::Query(query_str) => {
+                                crate::codec::LivenFrame::Query(query_str) => {
                                     if !check_query_capabilities(&query_str, capabilities) {
                                         let error_record = Record {
                                             sequence_id: 0,
@@ -654,7 +654,7 @@ pub async fn run_server(
                                                 "SECURITY ERROR: Insufficient capabilities for this operation".to_string(),
                                             ),
                                         };
-                                        let _ = writer.send(crate::codec::KondaFrame::Records(vec![error_record])).await;
+                                        let _ = writer.send(crate::codec::LivenFrame::Records(vec![error_record])).await;
                                         continue;
                                     }
 
@@ -679,7 +679,7 @@ pub async fn run_server(
                                                             if record.stream_name == stream_name || stream_name == "*" {
                                                                 let is_tag_allowed = allowed_tags.is_empty() || allowed_tags.contains(&(record.type_tag as u32));
                                                                 if is_tag_allowed {
-                                                                    if writer.send(crate::codec::KondaFrame::Records(vec![record])).await.is_err() {
+                                                                    if writer.send(crate::codec::LivenFrame::Records(vec![record])).await.is_err() {
                                                                         break;
                                                                     }
                                                                 }
@@ -730,7 +730,7 @@ pub async fn run_server(
                                                 }]
                                             }
                                         };
-                                        if writer.send(crate::codec::KondaFrame::Records(result)).await.is_err() {
+                                        if writer.send(crate::codec::LivenFrame::Records(result)).await.is_err() {
                                             break;
                                         }
                                     }
@@ -766,7 +766,7 @@ pub async fn run_server(
             }
         };
 
-        info!("Konda Web UI listening on http://{}", ui_addr);
+        info!("Liven Web UI listening on http://{}", ui_addr);
         let ui_server = axum::serve(ui_listener, ui_app);
 
         tokio::select! {
@@ -1038,7 +1038,7 @@ fn extract_session_cookie(headers: &HeaderMap) -> Option<String> {
     let cookie_header = headers.get(header::COOKIE)?.to_str().ok()?;
     for cookie in cookie_header.split(';') {
         let parts: Vec<&str> = cookie.split('=').collect();
-        if parts.len() == 2 && parts[0].trim() == "konda_session" {
+        if parts.len() == 2 && parts[0].trim() == "liven_session" {
             return Some(parts[1].trim().to_string());
         }
     }
@@ -1081,7 +1081,7 @@ pub fn validate_session_and_slide(
 
         let mut response_headers = HeaderMap::new();
         let cookie = format!(
-            "konda_session={}; HttpOnly; SameSite=Lax; Max-Age=300; Path=/",
+            "liven_session={}; HttpOnly; SameSite=Lax; Max-Age=300; Path=/",
             session_id
         );
         if let Ok(val) = header::HeaderValue::from_str(&cookie) {
@@ -1161,7 +1161,7 @@ async fn system_auth_login_handler(
             }
 
             let cookie = format!(
-                "konda_session={}; HttpOnly; SameSite=Lax; Max-Age=300; Path=/",
+                "liven_session={}; HttpOnly; SameSite=Lax; Max-Age=300; Path=/",
                 session_id
             );
 
@@ -1206,7 +1206,7 @@ async fn system_auth_status_handler(
                 session.last_seen = std::time::Instant::now();
                 let user_id = session.user_id.clone();
                 let cookie = format!(
-                    "konda_session={}; HttpOnly; SameSite=Lax; Max-Age=300; Path=/",
+                    "liven_session={}; HttpOnly; SameSite=Lax; Max-Age=300; Path=/",
                     cookie_val
                 );
                 return Response::builder()
@@ -1247,7 +1247,7 @@ async fn system_auth_logout_handler(
         sessions.remove(&cookie_val);
     }
 
-    let cookie = "konda_session=; HttpOnly; SameSite=Lax; Max-Age=0; Path=/";
+    let cookie = "liven_session=; HttpOnly; SameSite=Lax; Max-Age=0; Path=/";
 
     Response::builder()
         .status(StatusCode::OK)

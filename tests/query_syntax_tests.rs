@@ -1,7 +1,7 @@
-use konda::executor::execute_query;
-use konda::parser::parse_query;
-use konda::storage::StorageEngine;
-use konda::types::DataValue;
+use liven::executor::execute_query;
+use liven::parser::parse_query;
+use liven::storage::StorageEngine;
+use liven::types::DataValue;
 
 #[test]
 fn test_execute_all_query_syntaxes() {

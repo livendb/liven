@@ -1,5 +1,5 @@
-use konda::parser::{parse_pipeline, parse_query};
-use konda::types::{DataValue, FilterExpr, Op, PipelineStage, Query};
+use liven::parser::{parse_pipeline, parse_query};
+use liven::types::{DataValue, FilterExpr, Op, PipelineStage, Query};
 
 #[test]
 fn test_pipeline_parsing() {

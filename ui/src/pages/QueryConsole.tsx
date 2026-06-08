@@ -103,7 +103,7 @@ const getPageNumbers = (currentPage: number, totalPages: number) => {
   return range;
 };
 
-const kondaLanguage = StreamLanguage.define({
+const livenLanguage = StreamLanguage.define({
   token(stream) {
     if (stream.eatSpace()) return null;
 
@@ -583,7 +583,7 @@ export default function QueryConsole({
               highlightActiveLine: false,
               highlightActiveLineGutter: false,
             }}
-            extensions={[kondaLanguage, autocompleteExtension]}
+            extensions={[livenLanguage, autocompleteExtension]}
             className="font-mono text-sm"
           />
         </div>

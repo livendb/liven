@@ -1,23 +1,23 @@
 #!/bin/sh
-# debian/postinst - KondaDB post-installation script
+# debian/postinst - LIVEN post-installation script
 set -e
 
 case "$1" in
     configure)
         # 1. Secure and preserve data directory
-        if [ -d /var/lib/kondadb ]; then
-            echo "KondaDB data directory '/var/lib/kondadb' already exists. Preserving existing .konda data blocks."
+        if [ -d /var/lib/liven ]; then
+            echo "LIVEN data directory '/var/lib/liven' already exists. Preserving existing .liven data blocks."
         else
-            echo "Creating KondaDB data directory with secure permissions (700)..."
-            mkdir -p /var/lib/kondadb
-            chmod 700 /var/lib/kondadb
+            echo "Creating LIVEN data directory with secure permissions (700)..."
+            mkdir -p /var/lib/liven
+            chmod 700 /var/lib/liven
         fi
 
         # Create log directory with secure permissions (700)
-        if [ ! -d /var/log/kondadb ]; then
-            echo "Creating KondaDB log directory with secure permissions (700)..."
-            mkdir -p /var/log/kondadb
-            chmod 700 /var/log/kondadb
+        if [ ! -d /var/log/liven ]; then
+            echo "Creating LIVEN log directory with secure permissions (700)..."
+            mkdir -p /var/log/liven
+            chmod 700 /var/log/liven
         fi
 
         # 2. Configure systemd integration
@@ -25,9 +25,9 @@ case "$1" in
             echo "Reloading systemd daemon..."
             systemctl daemon-reload || true
             
-            echo "Enabling and starting KondaDB background service..."
-            systemctl enable kondadb || true
-            systemctl restart kondadb || true
+            echo "Enabling and starting LIVEN background service..."
+            systemctl enable liven || true
+            systemctl restart liven || true
         fi
         ;;
     abort-upgrade|abort-remove|abort-deconfigure)

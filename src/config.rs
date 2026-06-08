@@ -113,18 +113,18 @@ impl AppConfig {
             .set_default("security.ztna.client_ca_path", "./certs/ca.crt")?
             // Layer 2: Read and parse local configurations
             .add_source(
-                File::from(std::path::Path::new("kondadb.toml"))
+                File::from(std::path::Path::new("liven.toml"))
                     .required(false)
                     .format(config::FileFormat::Toml),
             )
             .add_source(
-                File::from(std::path::Path::new("kondadb.conf"))
+                File::from(std::path::Path::new("liven.conf"))
                     .required(false)
                     .format(config::FileFormat::Toml),
             )
             // Layer 3: Environment variable overrides
-            .add_source(Environment::with_prefix("KONDA").separator("__"))
-            .add_source(Environment::with_prefix("KONDADB").separator("__"));
+            .add_source(Environment::with_prefix("LIVEN").separator("__"))
+            .add_source(Environment::with_prefix("LIVENDB").separator("__"));
 
         let mut config: Self = builder.build()?.try_deserialize()?;
 
@@ -143,7 +143,7 @@ impl AppConfig {
                 .collect::<String>();
 
             let _ =
-                update_master_key_in_toml(std::path::Path::new("kondadb.toml"), &generated_mkey);
+                update_master_key_in_toml(std::path::Path::new("liven.toml"), &generated_mkey);
             config.security.master_key = Some(generated_mkey);
         }
 

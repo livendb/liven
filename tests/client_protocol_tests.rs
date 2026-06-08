@@ -1,7 +1,7 @@
-use konda::client::KondaClient;
-use konda::config::{AppConfig, LimitsConfig, SecurityConfig, ServerConfig, StorageConfig};
-use konda::server::run_server;
-use konda::storage::StorageEngine;
+use liven::client::LivenClient;
+use liven::config::{AppConfig, LimitsConfig, SecurityConfig, ServerConfig, StorageConfig};
+use liven::server::run_server;
+use liven::storage::StorageEngine;
 use std::fs;
 use std::sync::Arc;
 use std::time::Duration;
@@ -9,7 +9,7 @@ use std::time::Duration;
 #[tokio::test]
 async fn test_client_protocol_prefixes() {
     let test_dir = format!(
-        "./data_konda_prefix_test_{}",
+        "./data_liven_prefix_test_{}",
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -61,15 +61,15 @@ async fn test_client_protocol_prefixes() {
     // Wait a brief moment for the server to start listening
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    // Test connecting with raw and konda:// prefixes
+    // Test connecting with raw and liven:// prefixes
     let addresses = vec![
         format!("127.0.0.1:{}", port),
-        format!("konda://127.0.0.1:{}", port),
+        format!("liven://127.0.0.1:{}", port),
     ];
 
     for addr in addresses {
-        // Connect explicitly with "none" mode to align with the server's mode and avoid loading kondadb.toml's auth_key mode
-        let client_res = KondaClient::connect_with_auth_mode(&addr, "default_client", "none").await;
+        // Connect explicitly with "none" mode to align with the server's mode and avoid loading liven.toml's auth_key mode
+        let client_res = LivenClient::connect_with_auth_mode(&addr, "default_client", "none").await;
         assert!(
             client_res.is_ok(),
             "Failed to connect to the instance using: {} (Error: {:?})",

@@ -216,7 +216,7 @@ impl StorageEngine {
 
     /// Helper to get a segment path from its ID
     fn segment_path(&self, segment_id: u64) -> PathBuf {
-        self.data_dir.join(format!("{:020}.konda", segment_id))
+        self.data_dir.join(format!("{:020}.liven", segment_id))
     }
 
     fn get_or_load_file_handle(&self, segment_id: u64) -> Result<Arc<File>, String> {
@@ -249,7 +249,7 @@ impl StorageEngine {
         for entry in fs::read_dir(&self.data_dir).map_err(|e| e.to_string())? {
             let entry = entry.map_err(|e| e.to_string())?;
             let path = entry.path();
-            if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("konda") {
+            if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("liven") {
                 if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
                     if let Ok(segment_id) = stem.parse::<u64>() {
                         segments.push((segment_id, path));
@@ -433,7 +433,7 @@ impl StorageEngine {
         *active_size_guard = active_len;
 
         info!(
-            "KondaDB Engine started. Active Segment ID: {}, Next Sequence ID: {}, Index Entries: {}",
+            "LIVEN Engine started. Active Segment ID: {}, Next Sequence ID: {}, Index Entries: {}",
             active_id,
             highest_seq + 1,
             self.skipmap.len()
@@ -713,7 +713,7 @@ impl StorageEngine {
         for entry in fs::read_dir(&self.data_dir).map_err(|e| e.to_string())? {
             let entry = entry.map_err(|e| e.to_string())?;
             let path = entry.path();
-            if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("konda") {
+            if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("liven") {
                 if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
                     if let Ok(segment_id) = stem.parse::<u64>() {
                         segments.push((segment_id, path));
@@ -835,7 +835,7 @@ impl StorageEngine {
         for entry in fs::read_dir(&self.data_dir).map_err(|e| e.to_string())? {
             let entry = entry.map_err(|e| e.to_string())?;
             let path = entry.path();
-            if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("konda") {
+            if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("liven") {
                 if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
                     if let Ok(segment_id) = stem.parse::<u64>() {
                         if segment_id < active_id {
@@ -1011,7 +1011,7 @@ impl StorageEngine {
         for entry in fs::read_dir(&self.data_dir).map_err(|e| e.to_string())? {
             let entry = entry.map_err(|e| e.to_string())?;
             let path = entry.path();
-            if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("konda") {
+            if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("liven") {
                 total_size += path.metadata().map_err(|e| e.to_string())?.len();
                 segment_count += 1;
             }
@@ -1257,7 +1257,7 @@ fn execute_batch_append(
         let new_active_id = current_sequence_id.load(Ordering::SeqCst);
         active_segment_id.store(new_active_id, Ordering::SeqCst);
 
-        let new_path = data_dir.join(format!("{:020}.konda", new_active_id));
+        let new_path = data_dir.join(format!("{:020}.liven", new_active_id));
         let file = OpenOptions::new()
             .create(true)
             .read(true)

@@ -1,22 +1,22 @@
-use crate::codec::{KondaCodec, KondaFrame};
+use crate::codec::{LivenCodec, LivenFrame};
 use crate::types::Record;
 use futures_util::{SinkExt, StreamExt};
 use std::io;
 use tokio::net::TcpStream;
 use tokio_util::codec::Framed;
 
-pub struct KondaClient {
-    framed: Framed<TcpStream, KondaCodec>,
+pub struct LivenClient {
+    framed: Framed<TcpStream, LivenCodec>,
 }
 
-impl KondaClient {
-    /// Connects to a Konda server instance over the native wire protocol.
+impl LivenClient {
+    /// Connects to a LIVEN server instance over the native wire protocol.
     pub async fn connect(addr: &str) -> io::Result<Self> {
         let client_id = "default_client".to_string();
         Self::connect_with_id(addr, &client_id).await
     }
 
-    /// Connects to a Konda server instance with a specific client ID for auth.
+    /// Connects to a LIVEN server instance with a specific client ID for auth.
     pub async fn connect_with_id(addr: &str, client_id: &str) -> io::Result<Self> {
         let mode = if let Ok(config) = crate::config::AppConfig::load() {
             config.security.mode.clone()
@@ -26,14 +26,14 @@ impl KondaClient {
         Self::connect_with_auth_mode(addr, client_id, &mode).await
     }
 
-    /// Connects to a Konda server instance with an explicit client ID and security mode.
+    /// Connects to a LIVEN server instance with an explicit client ID and security mode.
     pub async fn connect_with_auth_mode(
         addr: &str,
         client_id: &str,
         mode: &str,
     ) -> io::Result<Self> {
-        let stripped_scheme = if addr.starts_with("konda://") {
-            &addr["konda://".len()..]
+        let stripped_scheme = if addr.starts_with("liven://") {
+            &addr["liven://".len()..]
         } else {
             addr
         };
@@ -55,8 +55,8 @@ impl KondaClient {
         let tcp_stream = TcpStream::connect(clean_addr).await?;
         tcp_stream.set_nodelay(true)?;
 
-        // Wrap with our client-configured KondaCodec (is_client: true)
-        let mut framed = Framed::new(tcp_stream, KondaCodec::new(true));
+        // Wrap with our client-configured LivenCodec (is_client: true)
+        let mut framed = Framed::new(tcp_stream, LivenCodec::new(true));
 
         let do_auth = mode == "auth_key" || parsed_auth_key.is_some();
 
@@ -69,15 +69,15 @@ impl KondaClient {
 
             // 1. Send Connect frame containing the symmetric token
             framed
-                .send(KondaFrame::Connect {
+                .send(LivenFrame::Connect {
                     client_id: token_to_send,
                 })
                 .await?;
 
             // 2. Expect Ok or Err frame
             match framed.next().await {
-                Some(Ok(KondaFrame::Ok)) => {}
-                Some(Ok(KondaFrame::Err(e))) => {
+                Some(Ok(LivenFrame::Ok)) => {}
+                Some(Ok(LivenFrame::Err(e))) => {
                     return Err(io::Error::new(
                         io::ErrorKind::PermissionDenied,
                         format!("Authentication failed: {}", e),
@@ -102,18 +102,18 @@ impl KondaClient {
         Ok(Self { framed })
     }
 
-    pub fn into_inner(self) -> Framed<TcpStream, KondaCodec> {
+    pub fn into_inner(self) -> Framed<TcpStream, LivenCodec> {
         self.framed
     }
 
     /// Submits a query expression over the wire and awaits deserialized Records response.
     pub async fn query(&mut self, query_str: &str) -> io::Result<Vec<Record>> {
         self.framed
-            .send(KondaFrame::Query(query_str.to_string()))
+            .send(LivenFrame::Query(query_str.to_string()))
             .await?;
 
         match self.framed.next().await {
-            Some(Ok(KondaFrame::Records(records))) => Ok(records),
+            Some(Ok(LivenFrame::Records(records))) => Ok(records),
             Some(Ok(other)) => Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!("Unexpected response frame from server: {:?}", other),
@@ -129,11 +129,11 @@ impl KondaClient {
     /// Initiates a real-time tail subscription query on a specific stream.
     pub async fn tail_stream(mut self, stream_name: &str, format: &str) -> io::Result<()> {
         let query_str = format!("tail(\"{}\")", stream_name);
-        self.framed.send(KondaFrame::Query(query_str)).await?;
+        self.framed.send(LivenFrame::Query(query_str)).await?;
 
         while let Some(res) = self.framed.next().await {
             match res? {
-                KondaFrame::Records(records) => {
+                LivenFrame::Records(records) => {
                     for record in records {
                         if format == "json" {
                             match serde_json::to_string(&record) {
@@ -152,7 +152,7 @@ impl KondaClient {
                                     format!("<Binary: {} bytes>", b.len())
                                 }
                                 crate::types::DataValue::Array(arr) => format!("{:?}", arr),
-                            };
+                             };
                             println!(
                                 "\x1b[32m[tail]\x1b[0m \x1b[1mSeq:\x1b[0m #{} | \x1b[1mKey:\x1b[0m {} | \x1b[1mValue:\x1b[0m {}",
                                 record.sequence_id, record.key, val_str

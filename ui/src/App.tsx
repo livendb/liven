@@ -95,13 +95,13 @@ export default function App() {
   // Theme support (system, light, dark)
   const [theme, setTheme] = useState<"system" | "light" | "dark">(
     () =>
-      (localStorage.getItem("konda-theme") as "system" | "light" | "dark") ||
+      (localStorage.getItem("liven-theme") as "system" | "light" | "dark") ||
       "system",
   );
   const [resolvedTheme, setResolvedTheme] = useState<"light" | "dark">("light");
 
   useEffect(() => {
-    localStorage.setItem("konda-theme", theme);
+    localStorage.setItem("liven-theme", theme);
     const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
 
     const updateTheme = () => {
@@ -554,7 +554,7 @@ export default function App() {
 
               <div className="space-y-1">
                 <h3 className="text-xs font-bold text-zinc-900 dark:text-zinc-100 tracking-wider uppercase">
-                  KondaDB Offline
+                  LIVEN Offline
                 </h3>
                 <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
                   Real-time database socket lost
@@ -562,7 +562,7 @@ export default function App() {
               </div>
 
               <code className="block w-full bg-zinc-50 dark:bg-zinc-950/40 p-2 rounded text-zinc-600 dark:text-zinc-300 font-mono text-[11px] border border-zinc-200/60 dark:border-zinc-800/40">
-                kondadb start
+                liven start
               </code>
 
               <button

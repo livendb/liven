@@ -1,5 +1,5 @@
-use konda::storage::{StorageEngine, deserialize_payload, serialize_payload_into};
-use konda::types::DataValue;
+use liven::storage::{StorageEngine, deserialize_payload, serialize_payload_into};
+use liven::types::DataValue;
 use std::fs;
 
 #[test]
@@ -20,7 +20,7 @@ fn test_payload_serialization() {
 #[test]
 fn test_storage_engine_lifecycle() {
     let path = format!(
-        "./data_konda_test_{}",
+        "./data_liven_test_{}",
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -107,7 +107,7 @@ fn test_storage_engine_lifecycle() {
 #[test]
 fn test_compaction() {
     let path = format!(
-        "./data_konda_test_compaction_{}",
+        "./data_liven_test_compaction_{}",
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -175,7 +175,7 @@ fn test_compaction() {
 #[test]
 fn test_stream_limits() {
     let path = std::env::temp_dir().join(format!(
-        "konda_test_streams_{}",
+        "liven_test_streams_{}",
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -206,7 +206,7 @@ fn test_stream_limits() {
 #[test]
 fn test_index_ram_limits() {
     let path = std::env::temp_dir().join(format!(
-        "konda_test_ram_{}",
+        "liven_test_ram_{}",
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -242,7 +242,7 @@ fn test_index_ram_limits() {
 #[test]
 fn test_file_descriptor_limits() {
     let path = std::env::temp_dir().join(format!(
-        "konda_test_fds_{}",
+        "liven_test_fds_{}",
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()

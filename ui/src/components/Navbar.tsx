@@ -141,7 +141,7 @@ export default function Navbar({
           <div className="px-6 flex flex-row gap-1.5">
             <img src={"logo.png"} className="h-7" />
             <h1 className="font-semibold text-lg leading-none mt-2 tracking-wider text-emerald-500  select-none">
-              Konda
+              Liven
               <span className="text-emerald-500">DB</span>
             </h1>
           </div>
@@ -170,7 +170,7 @@ export default function Navbar({
             <Menu className="w-5 h-5 text-zinc-900 dark:text-zinc-100" />
           </button>
           <h1 className="font-semibold text-sm leading-none tracking-wider text-emerald-500 select-none">
-            Konda
+            Liven
             <span className="text-emerald-500">DB</span>
           </h1>
         </div>
@@ -193,7 +193,7 @@ export default function Navbar({
               <div className="px-5 flex items-center justify-between">
                 <div className="flex flex-col gap-1">
                   <h1 className="font-semibold text-base leading-none tracking-wider text-emerald-500  select-none">
-                    Konda
+                    Liven
                     <span className="text-emerald-500">DB</span>
                   </h1>
                 </div>

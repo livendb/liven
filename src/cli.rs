@@ -1,4 +1,4 @@
-use konda::{server, storage, types::DataValue};
+use liven::{server, storage, types::DataValue};
 use std::io::Write;
 use std::path::Path;
 use std::process::{Command, exit};
@@ -8,7 +8,7 @@ use tracing::info;
 use tracing_subscriber::EnvFilter;
 
 fn get_data_dir() -> String {
-    if let Ok(config) = konda::config::AppConfig::load() {
+    if let Ok(config) = liven::config::AppConfig::load() {
         config.storage.data_directory
     } else {
         "./data".to_string()
@@ -16,40 +16,40 @@ fn get_data_dir() -> String {
 }
 
 fn get_pid_file() -> String {
-    format!("{}/kondadb.pid", get_data_dir())
+    format!("{}/liven.pid", get_data_dir())
 }
 
 fn print_usage() {
     print!("\x1b[36m");
     println!(
         r#"
-        _  __               _       ____  ____
-       | |/ /___  _ __   __| | __ _|  _ \| __ )
-       | ' // _ \| '_ \ / _` |/ _` | | | |  _ \
-       | . \ (_) | | | | (_| | (_| | |_| | |_) |
-       |_|\_\___/|_| |_|\__,_|\__,_|____/|____/
+  _      _____     _______ _   _ 
+ | |    |_ _\ \   / / ____| \ | |
+ | |     | | \ \ / /|  _| |  \| |
+ | |___  | |  \ V / | |___| |\  |
+ |_____|___|  \_/  |_____|_| \_|
         "#
     );
     println!("\x1b[0m");
-    println!("\x1b[36m KondaDB CLI\x1b[0m");
+    println!("\x1b[36m LIVEN CLI\x1b[0m");
     println!("Usage:");
-    println!("  kondadb start [--no-ui]   Start the database server");
-    println!("  kondadb stop              Stop the running database server");
-    println!("  kondadb status            Check the status of the database server");
-    println!("  kondadb list [--auth-key <value>] List all available database streams");
-    println!("  kondadb vibe [--auth-key <value>] Start interactive TUI query shell");
-    println!("  kondadb tail <stream>     Tail real-time records from a stream");
+    println!("  liven start [--no-ui]   Start the database server");
+    println!("  liven stop              Stop the running database server");
+    println!("  liven status            Check the status of the database server");
+    println!("  liven list [--auth-key <value>] List all available database streams");
+    println!("  liven vibe [--auth-key <value>] Start interactive TUI query shell");
+    println!("  liven tail <stream>     Tail real-time records from a stream");
     println!("                         Options: [--format <text|json>] [--auth-key <value>]");
-    println!("  kondadb import            Import CSV or JSONL records into a stream");
+    println!("  liven import            Import CSV or JSONL records into a stream");
     println!(
         "                         Options: --stream <name> --format <csv|jsonl> --path <path> [--auth-key <value>]"
     );
-    println!("  kondadb export            Export stream records as CSV or JSONL");
+    println!("  liven export            Export stream records as CSV or JSONL");
     println!(
         "                         Options: [--stream <name>] --format <csv|jsonl> [--path <path>] [--auth-key <value>]"
     );
     println!(
-        "  kondadb reset-key         Reset and remove all administrative credentials, generating a new root key"
+        "  liven reset-key         Reset and remove all administrative credentials, generating a new root key"
     );
     println!();
     println!("Options:");
@@ -100,7 +100,7 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
 
             if let Some(pid) = running_pid {
                 println!(
-                    "KondaDB is currently running (PID {}). Stopping it first...",
+                    "LIVEN is currently running (PID {}). Stopping it first...",
                     pid
                 );
 
@@ -119,7 +119,7 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
 
                 // If still running, force-terminate (SIGKILL)
                 if is_server_running() {
-                    println!("KondaDB did not stop gracefully. Attempting force-kill (kill -9)...");
+                    println!("LIVEN did not stop gracefully. Attempting force-kill (kill -9)...");
                     let _ = Command::new("kill").arg("-9").arg(pid.to_string()).output();
 
                     let mut force_attempts = 0;
@@ -131,10 +131,10 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
 
                 // Clean up pid file
                 let _ = fs::remove_file(get_pid_file());
-                println!("\x1b[32m✔ KondaDB stopped.\x1b[0m");
+                println!("\x1b[32m✔ LIVEN stopped.\x1b[0m");
             }
 
-            let max_segment_size = match konda::config::AppConfig::load() {
+            let max_segment_size = match liven::config::AppConfig::load() {
                 Ok(cfg) => cfg.storage.max_segment_size_mb * 1024 * 1024,
                 Err(_) => 10 * 1024 * 1024,
             };
@@ -152,10 +152,10 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                 // 2. Generate a fresh default root administrative key
                 let mut raw_key_bytes = [0u8; 32];
                 rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut raw_key_bytes);
-                let generated_key = konda::security::hex_encode(&raw_key_bytes);
+                let generated_key = liven::security::hex_encode(&raw_key_bytes);
 
                 let hash = blake3::hash(generated_key.as_bytes());
-                let hash_hex = konda::security::hex_encode(hash.as_bytes());
+                let hash_hex = liven::security::hex_encode(hash.as_bytes());
 
                 let auth_rec = server::AuthKeyRecord {
                     key_id: "Default Root Admin".to_string(),
@@ -177,7 +177,7 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
 
             println!("\x1b[1;31m");
             println!("########################################################################");
-            println!("#                      KONDADB ROOT KEY RESET SUCCESS                  #");
+            println!("#                      LIVENDB ROOT KEY RESET SUCCESS                  #");
             println!("########################################################################");
             println!("\x1b[0m");
             println!("  A FRESH DEFAULT ROOT ADMINISTRATIVE AUTH KEY HAS BEEN GENERATED:");
@@ -190,7 +190,7 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
             println!("\x1b[0m");
 
             if running_pid.is_some() {
-                println!("Restarting KondaDB server in background...");
+                println!("Restarting LIVEN server in background...");
                 let current_exe = env::current_exe()?;
                 let mut cmd = Command::new(current_exe);
                 cmd.arg("start");
@@ -203,17 +203,17 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                 if is_server_running() {
                     if let Ok(new_pid) = read_pid() {
                         println!(
-                            "\x1b[32m✔ KondaDB has been restarted successfully in the background (PID {}).\x1b[0m",
+                            "\x1b[32m✔ LIVEN has been restarted successfully in the background (PID {}).\x1b[0m",
                             new_pid
                         );
                     } else {
                         println!(
-                            "\x1b[32m✔ KondaDB has been restarted successfully in the background.\x1b[0m"
+                            "\x1b[32m✔ LIVEN has been restarted successfully in the background.\x1b[0m"
                         );
                     }
                 } else {
                     println!(
-                        "\x1b[33m⚠ KondaDB was spawned but hasn't started yet. Please run `kondadb start` manually if it failed.\x1b[0m"
+                        "\x1b[33m⚠ LIVEN was spawned but hasn't started yet. Please run `liven start` manually if it failed.\x1b[0m"
                     );
                 }
             }
@@ -223,7 +223,7 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
             if is_server_running() {
                 if let Ok(pid) = read_pid() {
                     println!(
-                        "\x1b[31mError: KondaDB is already running with PID {}\x1b[0m",
+                        "\x1b[31mError: LIVEN is already running with PID {}\x1b[0m",
                         pid
                     );
                     exit(1);
@@ -239,9 +239,9 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                 )
                 .init();
 
-            info!("⚡ Starting KondaDB Server...");
+            info!("⚡ Starting LIVEN Server...");
 
-            let config = konda::config::AppConfig::load()
+            let config = liven::config::AppConfig::load()
                 .map_err(|e| format!("Failed to load config: {}", e))?;
 
             // Create data directory if it doesn't exist
@@ -273,7 +273,7 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
         "stop" => {
             if !Path::new(&get_pid_file()).exists() {
                 println!(
-                    "\x1b[33mKondaDB is not running (no PID file found at {}).\x1b[0m",
+                    "\x1b[33mLIVEN is not running (no PID file found at {}).\x1b[0m",
                     get_pid_file()
                 );
                 exit(0);
@@ -285,7 +285,7 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                 .parse::<u32>()
                 .map_err(|e| format!("Invalid PID file: {}", e))?;
 
-            println!("Sending termination signal to KondaDB (PID {})...", pid);
+            println!("Sending termination signal to LIVEN (PID {})...", pid);
 
             // Use 'kill' command to terminate the process
             let output = Command::new("kill")
@@ -296,7 +296,7 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
             match output {
                 Ok(out) if out.status.success() => {
                     println!(
-                        "\x1b[32m✔ KondaDB (PID {}) has been successfully terminated.\x1b[0m",
+                        "\x1b[32m✔ LIVEN (PID {}) has been successfully terminated.\x1b[0m",
                         pid
                     );
                     let _ = fs::remove_file(get_pid_file());
@@ -311,7 +311,7 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
 
                     if force_output.is_ok() && force_output.unwrap().status.success() {
                         println!(
-                            "\x1b[32m✔ KondaDB (PID {}) has been force-terminated.\x1b[0m",
+                            "\x1b[32m✔ LIVEN (PID {}) has been force-terminated.\x1b[0m",
                             pid
                         );
                     } else {
@@ -338,8 +338,8 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
 "#
                     );
                     println!("\x1b[0m");
-                    println!("\x1b[32m● KondaDB is running (PID: {})\x1b[0m", pid);
-                    let (host, db_p, web_p) = match konda::config::AppConfig::load() {
+                    println!("\x1b[32m● LIVEN is running (PID: {})\x1b[0m", pid);
+                    let (host, db_p, web_p) = match liven::config::AppConfig::load() {
                         Ok(cfg) => (cfg.server.host, cfg.server.db_port, cfg.server.webui_port),
                         Err(_) => ("127.0.0.1".to_string(), 43121, 43120),
                     };
@@ -357,11 +357,11 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
             } else {
                 if Path::new(&get_pid_file()).exists() {
                     println!(
-                        "\x1b[33m● KondaDB status: Stale PID file found (process is not active).\x1b[0m"
+                        "\x1b[33m● LIVEN status: Stale PID file found (process is not active).\x1b[0m"
                     );
                     let _ = fs::remove_file(get_pid_file());
                 } else {
-                    println!("\x1b[37m● KondaDB is stopped.\x1b[0m");
+                    println!("\x1b[37m● LIVEN is stopped.\x1b[0m");
                 }
             }
         }
@@ -385,7 +385,7 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
 
-            let config = match konda::config::AppConfig::load() {
+            let config = match liven::config::AppConfig::load() {
                 Ok(c) => c,
                 Err(e) => {
                     println!("\x1b[31m❌ Failed to load configuration: {}\x1b[0m", e);
@@ -397,7 +397,7 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
             let streams = if is_server_running() {
                 let mut client = if let Some(ref key) = auth_key {
                     let full_addr = format!("{}?auth_key={}", db_addr, key);
-                    match konda::client::KondaClient::connect_with_id(&full_addr, "default_client")
+                    match liven::client::LivenClient::connect_with_id(&full_addr, "default_client")
                         .await
                     {
                         Ok(c) => c,
@@ -407,7 +407,7 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                 } else {
-                    match konda::client::KondaClient::connect(&db_addr).await {
+                    match liven::client::LivenClient::connect(&db_addr).await {
                         Ok(c) => c,
                         Err(e) => {
                             println!("\x1b[31m❌ Connection failed: {}\x1b[0m", e);
@@ -486,7 +486,7 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                 Some(name) => name,
                 None => {
                     println!(
-                        "\x1b[31m❌ Error: Missing stream name. Usage: kondadb tail <stream_name> [--format <text|json>] [--auth-key <value>]\x1b[0m"
+                        "\x1b[31m❌ Error: Missing stream name. Usage: liven tail <stream_name> [--format <text|json>] [--auth-key <value>]\x1b[0m"
                     );
                     exit(1);
                 }
@@ -500,7 +500,7 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                 exit(1);
             }
 
-            let config = match konda::config::AppConfig::load() {
+            let config = match liven::config::AppConfig::load() {
                 Ok(c) => c,
                 Err(e) => {
                     println!("\x1b[31m❌ Failed to load configuration: {}\x1b[0m", e);
@@ -509,12 +509,12 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
             };
             let db_addr = format!("{}:{}", config.server.host, config.server.db_port);
             println!(
-                "⚡ Connecting to konda://{} and tailing stream '{}' in {} format...",
+                "⚡ Connecting to liven://{} and tailing stream '{}' in {} format...",
                 db_addr, stream_name, format
             );
             let client = if let Some(ref key) = auth_key {
                 let full_addr = format!("{}?auth_key={}", db_addr, key);
-                match konda::client::KondaClient::connect_with_id(&full_addr, "default_client")
+                match liven::client::LivenClient::connect_with_id(&full_addr, "default_client")
                     .await
                 {
                     Ok(c) => c,
@@ -524,7 +524,7 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
             } else {
-                match konda::client::KondaClient::connect(&db_addr).await {
+                match liven::client::LivenClient::connect(&db_addr).await {
                     Ok(c) => c,
                     Err(e) => {
                         println!("\x1b[31m❌ Connection failed: {}\x1b[0m", e);
@@ -646,7 +646,7 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                 file_path, stream_name, format
             );
 
-            let config = match konda::config::AppConfig::load() {
+            let config = match liven::config::AppConfig::load() {
                 Ok(c) => c,
                 Err(e) => {
                     println!("\x1b[31m❌ Failed to load configuration: {}\x1b[0m", e);
@@ -656,7 +656,7 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
             let db_addr = format!("{}:{}", config.server.host, config.server.db_port);
             let mut client = if let Some(key) = auth_key {
                 let full_addr = format!("{}?auth_key={}", db_addr, key);
-                match konda::client::KondaClient::connect_with_id(&full_addr, "default_client")
+                match liven::client::LivenClient::connect_with_id(&full_addr, "default_client")
                     .await
                 {
                     Ok(c) => c,
@@ -666,7 +666,7 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
             } else {
-                match konda::client::KondaClient::connect(&db_addr).await {
+                match liven::client::LivenClient::connect(&db_addr).await {
                     Ok(c) => c,
                     Err(e) => {
                         println!("\x1b[31m❌ Connection failed: {}\x1b[0m", e);
@@ -862,7 +862,7 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                 exit(1);
             }
 
-            let config = match konda::config::AppConfig::load() {
+            let config = match liven::config::AppConfig::load() {
                 Ok(c) => c,
                 Err(e) => {
                     println!("\x1b[31m❌ Failed to load configuration: {}\x1b[0m", e);
@@ -872,7 +872,7 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
             let db_addr = format!("{}:{}", config.server.host, config.server.db_port);
             let mut client = if let Some(ref key) = auth_key {
                 let full_addr = format!("{}?auth_key={}", db_addr, key);
-                match konda::client::KondaClient::connect_with_id(&full_addr, "default_client")
+                match liven::client::LivenClient::connect_with_id(&full_addr, "default_client")
                     .await
                 {
                     Ok(c) => c,
@@ -882,7 +882,7 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
             } else {
-                match konda::client::KondaClient::connect(&db_addr).await {
+                match liven::client::LivenClient::connect(&db_addr).await {
                     Ok(c) => c,
                     Err(e) => {
                         println!("\x1b[31m❌ Connection failed: {}\x1b[0m", e);
