@@ -89,6 +89,8 @@ async fn test_auth_key_handshake_lifecycle() {
             host: "127.0.0.1".to_string(),
             db_port: port,
             webui_port: port - 1,
+            max_connections: 10000,
+            broadcast_capacity: 4096,
         },
         storage: StorageConfig {
             data_directory: test_dir.to_string_lossy().to_string(),
@@ -122,7 +124,7 @@ async fn test_auth_key_handshake_lifecycle() {
     let hash_hex = liven::security::hex_encode(hash.as_bytes());
 
     let auth_rec = AuthKeyRecord {
-        key_id: "Default Root Admin".to_string(),
+        key_id: "default-admin".to_string(),
         role: "admin".to_string(),
         auth_key: hash_hex,
         status: "active".to_string(),
@@ -132,7 +134,7 @@ async fn test_auth_key_handshake_lifecycle() {
     engine
         .append(
             "auth_keys",
-            "Default Root Admin",
+            "default-admin",
             DataValue::String(json_val),
             false,
         )
@@ -206,6 +208,8 @@ async fn test_rest_auth_key_challenge_login_lifecycle() {
             host: "127.0.0.1".to_string(),
             db_port: port,
             webui_port,
+            max_connections: 10000,
+            broadcast_capacity: 4096,
         },
         storage: StorageConfig {
             data_directory: test_dir.to_string_lossy().to_string(),
@@ -239,7 +243,7 @@ async fn test_rest_auth_key_challenge_login_lifecycle() {
     let hash_hex = liven::security::hex_encode(hash.as_bytes());
 
     let auth_rec = AuthKeyRecord {
-        key_id: "Default Root Admin".to_string(),
+        key_id: "default-admin".to_string(),
         role: "admin".to_string(),
         auth_key: hash_hex,
         status: "active".to_string(),
@@ -249,7 +253,7 @@ async fn test_rest_auth_key_challenge_login_lifecycle() {
     engine
         .append(
             "auth_keys",
-            "Default Root Admin",
+            "default-admin",
             DataValue::String(json_val),
             false,
         )
@@ -286,10 +290,7 @@ async fn test_rest_auth_key_challenge_login_lifecycle() {
 
     let login_json: serde_json::Value = serde_json::from_str(&body).unwrap();
     assert_eq!(login_json["status"].as_str().unwrap(), "success");
-    assert_eq!(
-        login_json["user_id"].as_str().unwrap(),
-        "Default Root Admin"
-    );
+    assert_eq!(login_json["user_id"].as_str().unwrap(), "default-admin");
 
     // Extract liven_session cookie
     let mut session_id = String::new();
@@ -319,10 +320,7 @@ async fn test_rest_auth_key_challenge_login_lifecycle() {
     assert_eq!(code, 200);
     let status_json: serde_json::Value = serde_json::from_str(&body).unwrap();
     assert_eq!(status_json["authenticated"].as_bool().unwrap(), true);
-    assert_eq!(
-        status_json["user_id"].as_str().unwrap(),
-        "Default Root Admin"
-    );
+    assert_eq!(status_json["user_id"].as_str().unwrap(), "default-admin");
 
     // 4. Generate a new key identity using the authenticated session
     let gen_payload = serde_json::json!({

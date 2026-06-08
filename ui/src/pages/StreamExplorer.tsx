@@ -465,7 +465,7 @@ export default function StreamExplorer({
                 setImportError("");
                 setIsImportingOpen(true);
               }}
-              className="p-1.5 rounded bg-primary/10 hover:bg-primary/20 text-emerald-500 transition-colors"
+              className="p-1.5 rounded bg-primary/10 hover:bg-primary/20 text-accent transition-colors"
               title="Import Stream Data"
             >
               <Plus className="w-4 h-4" />
@@ -484,7 +484,7 @@ export default function StreamExplorer({
                   onClick={() => setSelectedStream(stream)}
                   className={`w-full text-left px-3 py-2 rounded text-sm font-bold transition-all flex items-center justify-between ${
                     selectedStream === stream
-                      ? "bg-emerald-50 dark:bg-zinc-800 text-emerald-500"
+                      ? "bg-primary/10 text-primary"
                       : "text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-700 hover:text-zinc-850 dark:hover:text-zinc-200"
                   }`}
                 >
@@ -565,7 +565,7 @@ export default function StreamExplorer({
                       onClick={() => handleStreamExport("jsonl")}
                       className="w-full text-left px-3 py-2 rounded text-xs font-bold text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-900 hover:text-zinc-900 dark:hover:text-white transition-all flex items-center gap-2"
                     >
-                      <FileText className="w-4 h-4 text-emerald-500" />
+                      <FileText className="w-4 h-4 text-accent" />
                       <span>JSON Lines (.jsonl)</span>
                     </button>
                     <button
@@ -754,7 +754,7 @@ export default function StreamExplorer({
 
       {/* IMPORT STREAM DATA MODAL DIALOG */}
       {isImportingOpen && (
-        <div className="fixed inset-0 bg-gradient-to-br from-body-bg/96 to-body-bg/96 dark:from-body-bg/96 dark:to-body-bg/96 backdrop-blur-xl flex items-center justify-center z-50 p-4 animate-fade-in ">
+        <div className="fixed inset-0 bg-body-bg/95 backdrop-blur-xl flex items-center justify-center z-50 p-4 animate-fade-in">
           <div className="bg-white dark:bg-zinc-900 max-w-2xl w-full rounded-md p-6 space-y-6 relative overflow-hidden shadow-2xl bg-panel-bg">
             <div className="flex items-start justify-between">
               <div>
@@ -882,7 +882,7 @@ export default function StreamExplorer({
                 )}
 
                 {importSuccess && (
-                  <div className="p-3 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs flex items-center gap-2 animate-fade-in">
+                  <div className="p-3 rounded bg-accent/10 border border-accent/20 text-accent text-xs flex items-center gap-2 animate-fade-in">
                     <CheckCircle2 className="w-4 h-4 shrink-0" />
                     <span className="font-semibold text-[11px] leading-normal">
                       {importSuccess}
@@ -926,7 +926,7 @@ export default function StreamExplorer({
 
       {/* DELETE STREAM WARNING/CONFIRMATION MODAL */}
       {isDeleteModalOpen && (
-        <div className="fixed inset-0 bg-gradient-to-br from-body-bg/96 to-body-bg/96 dark:from-body-bg/96 dark:to-body-bg/96 backdrop-blur-xl flex items-center justify-center z-50 p-4 animate-fade-in ">
+        <div className="fixed inset-0 bg-body-bg/95 backdrop-blur-xl flex items-center justify-center z-50 p-4 animate-fade-in">
           <div className="bg-white dark:bg-zinc-900 max-w-md w-full rounded-md p-6 space-y-6 relative overflow-hidden shadow-2xl bg-panel-bg">
             <div className="flex items-start gap-4">
               <div className="p-3 rounded bg-rose-500/10 text-rose-500 shrink-0">

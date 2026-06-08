@@ -34,8 +34,8 @@ export interface QueryConsoleProps {
   setIsQueryRunning: (running: boolean) => void;
   queryStats: { count: number; timeMs: number };
   setQueryStats: (stats: { count: number; timeMs: number }) => void;
-  continuousStream: boolean;
-  setContinuousStream: (continuous: boolean) => void;
+  activeStreamQuery: string | null;
+  setActiveStreamQuery: (q: string | null) => void;
   queryCurrentPage: number;
   setQueryCurrentPage: (page: number) => void;
   queryPageSize: number;
@@ -367,8 +367,8 @@ export default function QueryConsole({
   setIsQueryRunning,
   queryStats,
   setQueryStats,
-  continuousStream,
-  setContinuousStream,
+  activeStreamQuery,
+  setActiveStreamQuery,
   queryCurrentPage,
   setQueryCurrentPage,
   queryPageSize,
@@ -415,17 +415,29 @@ export default function QueryConsole({
       "info",
     );
 
-    if (continuousStream && wsRef.current && wsConnected) {
-      // Stream over Websocket
-      wsRef.current.send(JSON.stringify({ type: "query", query }));
+    const queryTrimmed = query.trim();
+    const isListenQuery = queryTrimmed.includes(".listen()") || queryTrimmed.startsWith("tail(");
+
+    if (isListenQuery && wsRef.current && wsConnected) {
+      // Translate from("stream").listen() to tail("stream") before sending to websocket
+      let wsQuery = queryTrimmed;
+      if (wsQuery.includes(".listen()")) {
+        const match = wsQuery.match(/from\s*\(\s*(["'])([^"'\\]+)\1\s*\)\s*\.\s*listen\s*\(\s*\)/);
+        if (match) {
+          wsQuery = `tail("${match[2]}")`;
+        }
+      }
+      wsRef.current.send(JSON.stringify({ type: "query", query: wsQuery }));
       setIsQueryRunning(false); // Keeps socket listening, UI handles streaming
       setHasExecuted(true);
+      setActiveStreamQuery(queryTrimmed);
       addActivity(
-        `Subscribed to real-time stream subscription for query: "${query}"`,
+        `Subscribed to real-time stream subscription for query: "${wsQuery}"`,
         "query",
         "info",
       );
     } else {
+      setActiveStreamQuery(null);
       // Query REST Endpoint (Historical Snapshot)
       try {
         const res = await fetch(getDbApiUrl("/api/query"), {
@@ -589,22 +601,33 @@ export default function QueryConsole({
         </div>
 
         <div className="flex items-center justify-between pt-1">
-          <div className="text-xs text-zinc-550 dark:text-zinc-400 flex items-center gap-2"></div>
-          <div className="flex items-center gap-6">
-            <label className="flex items-center gap-2 text-xs font-bold text-zinc-500 dark:text-zinc-400 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={continuousStream}
-                onChange={(e) => setContinuousStream(e.target.checked)}
-                className="w-4 h-4 rounded border-zinc-250 dark:border-zinc-800 bg-panel-bg checked:bg-primary focus:ring-0 cursor-pointer accent-primary"
-              />
-              Continuous Live Stream
-            </label>
+          <div className="text-xs text-zinc-550 dark:text-zinc-400 flex items-center gap-2">
+            {activeStreamQuery && (
+              <span className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/25 text-emerald-600 dark:text-emerald-400 text-xs font-bold animate-pulse">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]" />
+                Streaming Live: {activeStreamQuery.length > 30 ? `${activeStreamQuery.substring(0, 27)}...` : activeStreamQuery}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-4">
+            {activeStreamQuery && (
+              <button
+                onClick={() => {
+                  setActiveStreamQuery(null);
+                  setQueryResults([]);
+                  setQueryStats({ count: 0, timeMs: 0 });
+                  addActivity("Stopped real-time stream subscription", "query", "warn");
+                }}
+                className="py-2 px-4 rounded border border-rose-200 dark:border-rose-800/60 hover:bg-rose-50 dark:hover:bg-rose-950/20 text-rose-500 text-xs font-bold transition-all active:scale-[0.98] cursor-pointer"
+              >
+                Stop Streaming
+              </button>
+            )}
 
             <button
               onClick={runQuery}
               disabled={isQueryRunning}
-              className="py-2 px-5 rounded bg-primary hover:bg-primary-hover text-white text-sm font-bold active:scale-[0.98] transition-all flex items-center gap-2"
+              className="py-2 px-5 rounded bg-primary hover:bg-primary-hover text-white text-sm font-bold active:scale-[0.98] transition-all flex items-center gap-2 cursor-pointer"
             >
               <Play className="w-4 h-4" />
               {isQueryRunning ? "Running..." : "Run"}
@@ -625,7 +648,13 @@ export default function QueryConsole({
         <div className="px-6 py-4 border-b border-zinc-100 dark:border-zinc-800 bg-body-bg/50 dark:bg-panel-bg/30 flex items-center justify-between">
           <h4 className="font-semibold text-zinc-900 dark:text-white text-sm flex items-center gap-2">
             <Terminal className="w-4 h-4  text-zinc-600 dark:text-zinc-400" />
-            Query Output
+            <span>Query Output</span>
+            {activeStreamQuery && (
+              <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-[10px] tracking-wide font-extrabold animate-pulse">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                TAILING LIVE STREAM
+              </span>
+            )}
           </h4>
           {queryStats.count > 0 && (
             <div className="text-xs font-bold text-zinc-500 dark:text-zinc-400 flex items-center gap-4">
@@ -642,7 +671,7 @@ export default function QueryConsole({
                 ) : operationType === "insert" || operationType === "upsert" ? (
                   <>
                     Records Written:{" "}
-                    <strong className="text-emerald-400">
+                    <strong className="text-accent">
                       {queryStats.count}
                     </strong>
                   </>
@@ -679,9 +708,9 @@ export default function QueryConsole({
           </div>
         ) : isMutationStatus ? (
           <div className="p-8 max-w-xl mx-auto my-6">
-            <div className="relative bg-white dark:bg-zinc-900 rounded-md p-6 border-b-2 border-r-2 border-secondary/25 dark:border-secondary/15 bg-gradient-to-br from-panel-bg/80 to-body-bg/50 dark:from-panel-bg/90 dark:to-body-bg/80 /5 overflow-hidden animate-fade-in">
+            <div className="relative bg-panel-bg rounded-md p-6 border border-border-subtle overflow-hidden animate-fade-in shadow-sm">
               {/* Neon top highlight glow */}
-              <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-secondary via-primary to-secondary" />
+              <div className="absolute top-0 left-0 right-0 h-[2px] bg-primary" />
 
               <div className="flex items-start gap-4">
                 <div className="p-3 rounded bg-secondary/10 border border-secondary/20 text-secondary shadow-sm">
@@ -696,7 +725,7 @@ export default function QueryConsole({
 
                 <div className="flex-1 space-y-1">
                   <div className="flex items-center justify-between">
-                    <span className="text-[10px]  tracking-wider font-extrabold px-2.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center gap-1 -green/5">
+                    <span className="text-[10px]  tracking-wider font-extrabold px-2.5 py-0.5 rounded bg-accent/10 border border-accent/20 text-accent flex items-center gap-1">
                       <CheckCircle2 className="w-3.5 h-3.5" />
                       Transaction Committed
                     </span>

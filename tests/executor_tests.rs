@@ -254,3 +254,40 @@ fn test_pipeline_delete_optimizations() {
 
     let _ = std::fs::remove_dir_all(&temp_dir);
 }
+
+#[test]
+fn test_status_query() {
+    let temp_dir = format!("./data_test_status_{}", std::process::id());
+    let engine = StorageEngine::new(&temp_dir, 1024 * 1024)
+        .unwrap()
+        .with_max_connections(500)
+        .with_broadcast_capacity(100);
+
+    let res = execute_query(&engine, &Query::Status).unwrap();
+    assert_eq!(res.len(), 1);
+    assert_eq!(res[0].stream_name, "status");
+
+    let val_str = match &res[0].value {
+        DataValue::String(s) => s,
+        _ => panic!("Expected DataValue::String"),
+    };
+
+    let metrics: serde_json::Value = serde_json::from_str(val_str).unwrap();
+    assert_eq!(metrics["max_connections"], 500);
+    assert_eq!(metrics["broadcast_capacity"], 100);
+    assert_eq!(metrics["active_connections"], 0);
+
+    // If we acquire a permit, active_connections increases
+    let permit = engine.conn_semaphore.clone().try_acquire_owned().unwrap();
+    let res_with_permit = execute_query(&engine, &Query::Status).unwrap();
+    let val_str_2 = match &res_with_permit[0].value {
+        DataValue::String(s) => s,
+        _ => panic!("Expected DataValue::String"),
+    };
+    let metrics_2: serde_json::Value = serde_json::from_str(val_str_2).unwrap();
+    assert_eq!(metrics_2["active_connections"], 1);
+
+    drop(permit);
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}

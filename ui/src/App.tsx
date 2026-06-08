@@ -171,7 +171,12 @@ export default function App() {
   const [queryResults, setQueryResults] = useState<Record[]>([]);
   const [isQueryRunning, setIsQueryRunning] = useState(false);
   const [queryStats, setQueryStats] = useState({ count: 0, timeMs: 0 });
-  const [continuousStream, setContinuousStream] = useState(false);
+  const [activeStreamQuery, setActiveStreamQuery] = useState<string | null>(null);
+  const activeStreamQueryRef = useRef<string | null>(null);
+  useEffect(() => {
+    activeStreamQueryRef.current = activeStreamQuery;
+  }, [activeStreamQuery]);
+
   const [queryCurrentPage, setQueryCurrentPage] = useState<number>(1);
   const [queryPageSize, setQueryPageSize] = useState<number>(50);
   const [queryError, setQueryError] = useState("");
@@ -381,21 +386,23 @@ export default function App() {
           }
           prevMetricsRef.current = msg;
         } else if (msg.type === "query_result") {
-          setQueryResults((prev) => {
-            // If continuous, append and limit to last 200 items to avoid lagging
-            const updated = [msg.data, ...prev];
-            return updated.slice(0, 200);
-          });
-          setQueryStats((prev) => ({
-            count: prev.count + 1,
-            timeMs: prev.timeMs,
-          }));
-          queriesThisSecondRef.current++;
-          addActivity(
-            `Streaming query match on [${msg.data.stream_name}] key "${msg.data.key}"`,
-            "query",
-            "info",
-          );
+          if (activeStreamQueryRef.current) {
+            setQueryResults((prev) => {
+              // If continuous, append and limit to last 200 items to avoid lagging
+              const updated = [msg.data, ...prev];
+              return updated.slice(0, 200);
+            });
+            setQueryStats((prev) => ({
+              count: prev.count + 1,
+              timeMs: prev.timeMs,
+            }));
+            queriesThisSecondRef.current++;
+            addActivity(
+              `Streaming query match on [${msg.data.stream_name}] key "${msg.data.key}"`,
+              "query",
+              "info",
+            );
+          }
         }
       } catch (e) {
         console.error("WS parse error:", e);
@@ -520,8 +527,8 @@ export default function App() {
     return (
       <div className="flex items-center justify-center min-h-screen bg-zinc-950">
         <div className="flex flex-col items-center gap-4">
-          <div className="animate-spin w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full" />
-          <p className="text-xs font-semibold tracking-widest text-emerald-500 uppercase animate-pulse">
+          <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full" />
+          <p className="text-xs font-semibold tracking-widest text-primary uppercase animate-pulse">
             Initializing Gateway...
           </p>
         </div>
@@ -542,7 +549,7 @@ export default function App() {
 
   return (
     <>
-      <div className="flex flex-col min-h-screen  bg-gray-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 transition-colors duration-300">
+      <div className="flex flex-col min-h-screen bg-body-bg text-text-main transition-colors duration-300">
         <style>{resolvedTheme === "dark" ? darkTheme : lightTheme}</style>
 
         {hasAttemptedConnect && !wsConnected && (
@@ -666,8 +673,8 @@ export default function App() {
                     setIsQueryRunning={setIsQueryRunning}
                     queryStats={queryStats}
                     setQueryStats={setQueryStats}
-                    continuousStream={continuousStream}
-                    setContinuousStream={setContinuousStream}
+                    activeStreamQuery={activeStreamQuery}
+                    setActiveStreamQuery={setActiveStreamQuery}
                     queryCurrentPage={queryCurrentPage}
                     setQueryCurrentPage={setQueryCurrentPage}
                     queryPageSize={queryPageSize}

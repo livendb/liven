@@ -171,4 +171,48 @@ impl LivenClient {
         }
         Ok(())
     }
+
+    /// Initiates a real-time query subscription on a specific stream using the tail method,
+    /// returning an asynchronous Stream of Record items.
+    pub async fn listen(
+        mut self,
+        stream_name: &str,
+    ) -> io::Result<std::pin::Pin<Box<dyn futures_util::Stream<Item = io::Result<Record>> + Send + 'static>>> {
+        let query_str = format!("tail(\"{}\")", stream_name);
+        self.framed.send(LivenFrame::Query(query_str)).await?;
+
+        let state = (self.framed, Vec::<Record>::new());
+        let stream = futures_util::stream::unfold(state, |(mut framed, mut buffer)| async move {
+            loop {
+                if !buffer.is_empty() {
+                    let rec = buffer.remove(0);
+                    return Some((Ok(rec), (framed, buffer)));
+                }
+
+                match framed.next().await {
+                    Some(Ok(LivenFrame::Records(mut records))) => {
+                        if !records.is_empty() {
+                            let rec = records.remove(0);
+                            return Some((Ok(rec), (framed, records)));
+                        }
+                    }
+                    Some(Ok(other)) => {
+                        return Some((
+                            Err(io::Error::new(
+                                io::ErrorKind::InvalidData,
+                                format!("Unexpected frame during listen: {:?}", other),
+                            )),
+                            (framed, Vec::new()),
+                        ));
+                    }
+                    Some(Err(e)) => {
+                        return Some((Err(e), (framed, Vec::new())));
+                    }
+                    None => return None,
+                }
+            }
+        });
+
+        Ok(Box::pin(stream))
+    }
 }

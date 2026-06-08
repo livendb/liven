@@ -23,7 +23,7 @@ fn print_usage() {
     print!("\x1b[36m");
     println!(
         r#"
-  _      _____     _______ _   _ 
+  _      _____     _______ _   _
  | |    |_ _\ \   / / ____| \ | |
  | |     | | \ \ / /|  _| |  \| |
  | |___  | |  \ V / | |___| |\  |
@@ -158,7 +158,7 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                 let hash_hex = liven::security::hex_encode(hash.as_bytes());
 
                 let auth_rec = server::AuthKeyRecord {
-                    key_id: "Default Root Admin".to_string(),
+                    key_id: "default-admin".to_string(),
                     role: "admin".to_string(),
                     auth_key: hash_hex,
                     status: "active".to_string(),
@@ -168,7 +168,7 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                 let json_val = serde_json::to_string(&auth_rec)?;
                 engine.append(
                     "auth_keys",
-                    "Default Root Admin",
+                    "default-admin",
                     DataValue::String(json_val),
                     false,
                 )?;

@@ -7,7 +7,20 @@ pub struct ServerConfig {
     pub host: String,
     pub db_port: u16,
     pub webui_port: u16,
+    #[serde(default = "default_max_connections")]
+    pub max_connections: usize,
+    #[serde(default = "default_broadcast_capacity")]
+    pub broadcast_capacity: usize,
 }
+
+fn default_max_connections() -> usize {
+    10000
+}
+
+fn default_broadcast_capacity() -> usize {
+    4096
+}
+
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct StorageConfig {
@@ -98,6 +111,8 @@ impl AppConfig {
             .set_default("server.host", "127.0.0.1")?
             .set_default("server.db_port", 43121)?
             .set_default("server.webui_port", 43120)?
+            .set_default("server.max_connections", 10000)?
+            .set_default("server.broadcast_capacity", 4096)?
             .set_default("storage.data_directory", "./data")?
             .set_default("storage.max_segment_size_mb", 10)?
             .set_default("storage.sync_mode", "always")?

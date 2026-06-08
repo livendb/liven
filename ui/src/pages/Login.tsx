@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Key, Eye, EyeOff, Cpu, Sun, Moon } from "lucide-react";
+import { Key, Eye, EyeOff, Sun, Moon } from "lucide-react";
 import { submitSystemLogin } from "../utils/requests";
 
 interface LoginProps {
@@ -84,18 +84,16 @@ export default function Login({ onLoginSuccess }: LoginProps) {
   };
 
   return (
-    <div
-      className={`relative min-h-screen flex items-center justify-center overflow-hidden font-sans transition-all duration-500 ${resolvedTheme === "dark" ? "bg-[#090d16] text-zinc-100" : "bg-zinc-50 text-zinc-900"}`}
-    >
+    <div className="relative min-h-screen flex items-center justify-center overflow-hidden font-sans transition-all duration-500 bg-body-bg text-text-main">
       {/* Premium background gradient spheres and glows */}
       {resolvedTheme === "dark" ? (
         <>
-          <div className="absolute top-1/4 left-1/4 w-[500px] h-[500px] bg-emerald-950/20 rounded-full blur-[130px] pointer-events-none" />
+          <div className="absolute top-1/4 left-1/4 w-[500px] h-[500px] bg-primary/20 rounded-full blur-[130px] pointer-events-none" />
           <div className="absolute bottom-1/4 right-1/4 w-[450px] h-[450px] bg-blue-950/20 rounded-full blur-[110px] pointer-events-none" />
         </>
       ) : (
         <>
-          <div className="absolute top-1/4 left-1/4 w-[500px] h-[500px] bg-emerald-100/40 rounded-full blur-[130px] pointer-events-none" />
+          <div className="absolute top-1/4 left-1/4 w-[500px] h-[500px] bg-accent/20 rounded-full blur-[130px] pointer-events-none" />
           <div className="absolute bottom-1/4 right-1/4 w-[450px] h-[450px] bg-teal-50/50 rounded-full blur-[110px] pointer-events-none" />
         </>
       )}
@@ -112,8 +110,8 @@ export default function Login({ onLoginSuccess }: LoginProps) {
           onClick={toggleTheme}
           className={`p-3 rounded-2xl border transition-all duration-300 shadow-md ${
             resolvedTheme === "dark"
-              ? "bg-zinc-950/60 border-emerald-950/80 text-emerald-400 hover:bg-zinc-900 hover:border-emerald-500/40"
-              : "bg-white/80 border-zinc-200/60 text-emerald-600 hover:bg-zinc-50 hover:border-emerald-300"
+              ? "bg-zinc-950/60 border-zinc-800 text-primary hover:bg-zinc-900 hover:border-primary/60"
+              : "bg-white/80 border-zinc-200/60 text-primary hover:bg-zinc-50 hover:border-primary-hover"
           }`}
           title={`Switch to ${resolvedTheme === "dark" ? "Light" : "Dark"} Mode`}
         >
@@ -129,39 +127,16 @@ export default function Login({ onLoginSuccess }: LoginProps) {
       <div
         className={`relative w-full max-w-md mx-4 p-8 rounded-3xl border backdrop-blur-2xl shadow-2xl transition-all  ${
           resolvedTheme === "dark"
-            ? "border-emerald-500/10 bg-zinc-950/70 shadow-emerald-950/30"
-            : "border-emerald-200/50 bg-white/90 shadow-emerald-500/5"
+            ? "border-zinc-800 bg-zinc-900 shadow-primary/30"
+            : "border-primary/20 bg-white/90 shadow-primary/5"
         }`}
       >
         {/* Header/Logo */}
         <div className="text-center mb-8">
-          <div
-            className={`inline-flex items-center justify-center p-4 rounded-2xl border shadow-lg mb-4 ${
-              resolvedTheme === "dark"
-                ? "bg-emerald-500/5 border-emerald-500/20 shadow-emerald-950/30"
-                : "bg-emerald-50 border-emerald-100 shadow-emerald-500/5"
-            }`}
-          >
-            <Cpu
-              className={`w-8 h-8 ${resolvedTheme === "dark" ? "text-emerald-400" : "text-emerald-600"}`}
-            />
-          </div>
-          <h1
-            className={`text-4xl font-extrabold tracking-tight bg-clip-text text-transparent bg-gradient-to-r ${
-              resolvedTheme === "dark"
-                ? "from-emerald-400 via-teal-300 to-blue-400"
-                : "from-emerald-600 via-teal-600 to-blue-500"
-            }`}
-          >
+          <h1 className="text-4xl font-extrabold tracking-tight text-primary">
             LIVEN
           </h1>
-          <p
-            className={`text-xs font-bold tracking-widest mt-1.5 uppercase ${
-              resolvedTheme === "dark"
-                ? "text-emerald-400/80"
-                : "text-emerald-600"
-            }`}
-          >
+          <p className="text-xs font-bold tracking-widest mt-1.5 uppercase text-accent">
             Admin Login
           </p>
         </div>
@@ -183,8 +158,8 @@ export default function Login({ onLoginSuccess }: LoginProps) {
           <div
             className={`flex items-start gap-3 p-4 border rounded-2xl text-xs mb-6 animate-pulse ${
               resolvedTheme === "dark"
-                ? "bg-emerald-950/30 border-emerald-500/20 text-emerald-200"
-                : "bg-emerald-50 border-emerald-200 text-emerald-800"
+                ? "bg-accent/10 border-accent/20 text-accent"
+                : "bg-accent/5 border-accent/25 text-accent"
             }`}
           >
             <span>Key Authenticated! Securing admin session...</span>
@@ -205,7 +180,7 @@ export default function Login({ onLoginSuccess }: LoginProps) {
                 type={showPassword ? "text" : "password"}
                 value={authKey}
                 onChange={(e) => setAuthKey(e.target.value)}
-                className={`w-full pl-4 pr-11 py-3.5 font-mono text-xs rounded-2xl border focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition-all duration-300 ${
+                className={`w-full pl-4 pr-11 py-3.5 font-mono text-xs rounded-2xl border focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all duration-300 ${
                   resolvedTheme === "dark"
                     ? "bg-zinc-950/50 border-zinc-800 text-zinc-100 placeholder-zinc-700"
                     : "bg-zinc-50 border-zinc-200 text-zinc-900 placeholder-zinc-400"
@@ -233,7 +208,7 @@ export default function Login({ onLoginSuccess }: LoginProps) {
           <button
             type="submit"
             disabled={loading || success}
-            className="w-full flex items-center justify-center gap-2 py-4 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-zinc-50 font-bold text-xs uppercase tracking-wider rounded-2xl shadow-lg hover:shadow-emerald-500/10 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-300 active:scale-[0.98]"
+            className="w-full flex items-center justify-center gap-2 py-4 bg-primary hover:bg-primary-hover text-zinc-50 font-bold text-xs uppercase tracking-wider rounded-2xl shadow-lg hover:shadow-primary/10 focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-300 active:scale-[0.98]"
           >
             {loading ? (
               <span className="flex items-center gap-2">

@@ -1144,8 +1144,6 @@ dependencies = [
  "rustls-pemfile",
  "serde",
  "serde_json",
- "subtle",
- "thiserror",
  "tokio",
  "tokio-rustls",
  "tokio-util",

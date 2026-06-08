@@ -88,3 +88,97 @@ fn test_vector_storage_serialization_and_framereader() {
     let unpacked_slice = slice.unwrap();
     assert_eq!(unpacked_slice, &vec_data[..]);
 }
+
+#[test]
+fn test_vector_similarity_computation() {
+    use liven::executor::cosine_similarity;
+
+    // Identical vectors: similarity should be 1.0
+    let a = vec![1, 2, 3];
+    let b = vec![1, 2, 3];
+    let sim1 = cosine_similarity(&a, &b).unwrap();
+    assert!((sim1 - 1.0).abs() < 1e-6);
+
+    // Orthogonal vectors: similarity should be 0.0
+    let c = vec![1, 0];
+    let d = vec![0, 1];
+    let sim2 = cosine_similarity(&c, &d).unwrap();
+    assert!((sim2 - 0.0).abs() < 1e-6);
+
+    // Opposite vectors: similarity should be -1.0
+    let e = vec![1, -1];
+    let f = vec![-1, 1];
+    let sim3 = cosine_similarity(&e, &f).unwrap();
+    assert!((sim3 - (-1.0)).abs() < 1e-6);
+}
+
+#[test]
+fn test_vector_filter_parsing() {
+    use liven::parser::parse_pipeline;
+    use liven::types::PipelineStage;
+
+    let query_str = "from(\"vectors\") | vector_filter(value, [10, -20, 30], 0.85)";
+    let stages = parse_pipeline(query_str).unwrap();
+
+    assert_eq!(stages.len(), 2);
+    if let PipelineStage::VectorFilter { field, query_vector, threshold } = &stages[1] {
+        assert_eq!(field, "value");
+        assert_eq!(query_vector, &vec![10, -20, 30]);
+        assert!((threshold.into_inner() - 0.85).abs() < 1e-6);
+    } else {
+        panic!("Parsed stage is not PipelineStage::VectorFilter");
+    }
+}
+
+#[test]
+fn test_vector_filter_execution() {
+    use liven::types::{Record, PipelineStage};
+    use liven::executor::apply_pipeline_stages_to_vec;
+    use liven::storage::StorageEngine;
+    use liven::storage::key::StreamKey;
+    use ordered_float::OrderedFloat;
+
+    // Create a pool of records
+    let mut records = vec![
+        Record {
+            sequence_id: 1,
+            timestamp: 1000,
+            type_tag: 8, // Vector
+            flags: 0x01,
+            stream_name: "vectors".to_string(),
+            key: StreamKey::from_str_truncated("rec1"),
+            value: DataValue::Vector(vec![1, 2, 3]), // exact match with query vector
+        },
+        Record {
+            sequence_id: 2,
+            timestamp: 1001,
+            type_tag: 8,
+            flags: 0x01,
+            stream_name: "vectors".to_string(),
+            key: StreamKey::from_str_truncated("rec2"),
+            value: DataValue::Vector(vec![-1, -2, -3]), // opposite vector
+        },
+    ];
+
+    // Pipeline Stage
+    let stage = PipelineStage::VectorFilter {
+        field: "value".to_string(),
+        query_vector: vec![1, 2, 3],
+        threshold: OrderedFloat(0.8),
+    };
+
+    let temp_dir = std::env::temp_dir().join(format!(
+        "test_vec_exec_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let engine = StorageEngine::new(&temp_dir, 1024 * 1024).unwrap();
+
+    apply_pipeline_stages_to_vec(&mut records, &engine, &[stage]);
+
+    // Should retain only rec1
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].key.as_str(), "rec1");
+}

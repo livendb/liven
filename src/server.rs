@@ -197,7 +197,7 @@ pub fn bootstrap_auth_keys_table(
     let hash_hex = crate::security::hex_encode(hash.as_bytes());
 
     let auth_rec = AuthKeyRecord {
-        key_id: "Default Root Admin".to_string(),
+        key_id: "default-admin".to_string(),
         role: "admin".to_string(),
         auth_key: hash_hex,
         status: "active".to_string(),
@@ -207,7 +207,7 @@ pub fn bootstrap_auth_keys_table(
     let json_val = serde_json::to_string(&auth_rec).map_err(|e| e.to_string())?;
     engine.append(
         "auth_keys",
-        "Default Root Admin",
+        "default-admin",
         DataValue::String(json_val),
         false,
     )?;
@@ -320,7 +320,7 @@ pub async fn run_server(
         println!("########################################################################");
         println!("\x1b[0m");
     } else {
-        // Bootstrap Default Root Admin key if necessary
+        // Bootstrap default-admin key if necessary
         bootstrap_auth_keys_table(&engine, config.security.master_key.as_deref())?;
     }
 
@@ -458,10 +458,7 @@ pub async fn run_server(
         }
     };
 
-    info!(
-        "LIVEN listening on native wire scheme liven://{}",
-        db_addr
-    );
+    info!("LIVEN listening on native wire scheme liven://{}", db_addr);
 
     let state_for_tcp = state.clone();
     let tcp_handle = tokio::spawn(async move {
@@ -471,98 +468,108 @@ pub async fn run_server(
                     let state_clone = state_for_tcp.clone();
                     let acceptor_opt = tls_acceptor.clone();
 
-                    tokio::spawn(async move {
-                        let _ = stream.set_nodelay(true);
+                    match state_clone.engine.conn_semaphore.clone().acquire_owned().await {
+                        Ok(permit) => {
+                            tokio::spawn(async move {
+                                let _ = stream.set_nodelay(true);
 
-                        if is_dev {
-                            let liven_stream = LivenStream::Cleartext(stream);
-                            let is_auth_key = state_clone.config.security.mode == "auth_key";
-                            let caps = if is_auth_key {
-                                crate::security::CAP_NONE
-                            } else {
-                                crate::security::CAP_ROOT
-                            };
-                            handle_connection(
-                                liven_stream,
-                                state_clone,
-                                caps,
-                                Vec::new(),
-                                None,
-                                is_auth_key,
-                            )
-                            .await;
-                        } else {
-                            if let Some(acceptor) = acceptor_opt {
-                                match acceptor.accept(stream).await {
-                                    Ok(tls_stream) => {
-                                        let cn_opt = {
-                                            let (_, session) = tls_stream.get_ref();
-                                            session
-                                                .peer_certificates()
-                                                .and_then(|certs| certs.first())
-                                                .and_then(|cert| extract_cn_from_der(cert.as_ref()))
-                                        };
+                                if is_dev {
+                                    let liven_stream = LivenStream::Cleartext(stream);
+                                    let is_auth_key = state_clone.config.security.mode == "auth_key";
+                                    let caps = if is_auth_key {
+                                        crate::security::CAP_NONE
+                                    } else {
+                                        crate::security::CAP_ROOT
+                                    };
+                                    handle_connection(
+                                        liven_stream,
+                                        state_clone,
+                                        caps,
+                                        Vec::new(),
+                                        None,
+                                        is_auth_key,
+                                        permit,
+                                    )
+                                    .await;
+                                } else {
+                                    if let Some(acceptor) = acceptor_opt {
+                                        match acceptor.accept(stream).await {
+                                            Ok(tls_stream) => {
+                                                let cn_opt = {
+                                                    let (_, session) = tls_stream.get_ref();
+                                                    session
+                                                        .peer_certificates()
+                                                        .and_then(|certs| certs.first())
+                                                        .and_then(|cert| extract_cn_from_der(cert.as_ref()))
+                                                };
 
-                                        if let Some(cn) = cn_opt {
-                                            let identity_opt = {
-                                                let cache =
-                                                    state_clone.identity_cache.read().unwrap();
-                                                cache.get(&cn).cloned()
-                                            };
+                                                if let Some(cn) = cn_opt {
+                                                    let identity_opt = {
+                                                        let cache =
+                                                            state_clone.identity_cache.read().unwrap();
+                                                        cache.get(&cn).cloned()
+                                                    };
 
-                                            let liven_stream = LivenStream::Encrypted(tls_stream);
-                                            if let Some(identity) = identity_opt {
-                                                let (close_tx, close_rx) =
-                                                    tokio::sync::oneshot::channel::<()>();
-                                                {
-                                                    let mut conns = state_clone
-                                                        .active_connections
-                                                        .lock()
-                                                        .unwrap();
-                                                    conns.push(ActiveNativeConnection {
-                                                        auth_key_hash: identity
-                                                            .auth_key_hash
-                                                            .clone(),
-                                                        close_tx: Some(close_tx),
-                                                    });
+                                                    let liven_stream = LivenStream::Encrypted(tls_stream);
+                                                    if let Some(identity) = identity_opt {
+                                                        let (close_tx, close_rx) =
+                                                            tokio::sync::oneshot::channel::<()>();
+                                                        {
+                                                            let mut conns = state_clone
+                                                                .active_connections
+                                                                .lock()
+                                                                .unwrap();
+                                                            conns.push(ActiveNativeConnection {
+                                                                auth_key_hash: identity
+                                                                    .auth_key_hash
+                                                                    .clone(),
+                                                                close_tx: Some(close_tx),
+                                                            });
+                                                        }
+                                                        handle_connection(
+                                                            liven_stream,
+                                                            state_clone,
+                                                            identity.capabilities,
+                                                            identity.allowed_tags,
+                                                            Some(close_rx),
+                                                            false,
+                                                            permit,
+                                                        )
+                                                        .await;
+                                                    } else {
+                                                        handle_connection(
+                                                            liven_stream,
+                                                            state_clone,
+                                                            crate::security::CAP_NONE,
+                                                            Vec::new(),
+                                                            None,
+                                                            false,
+                                                            permit,
+                                                        )
+                                                        .await;
+                                                    }
+                                                } else {
+                                                    tracing::error!(
+                                                        "mTLS handshake succeeded but no client CN was extracted. Terminating stream."
+                                                    );
                                                 }
-                                                handle_connection(
-                                                    liven_stream,
-                                                    state_clone,
-                                                    identity.capabilities,
-                                                    identity.allowed_tags,
-                                                    Some(close_rx),
-                                                    false,
-                                                )
-                                                .await;
-                                            } else {
-                                                handle_connection(
-                                                    liven_stream,
-                                                    state_clone,
-                                                    crate::security::CAP_NONE,
-                                                    Vec::new(),
-                                                    None,
-                                                    false,
-                                                )
-                                                .await;
                                             }
-                                        } else {
-                                            tracing::error!(
-                                                "mTLS handshake succeeded but no client CN was extracted. Terminating stream."
-                                            );
+                                            Err(e) => {
+                                                tracing::error!("mTLS handshake failed: {}", e);
+                                            }
                                         }
-                                    }
-                                    Err(e) => {
-                                        tracing::error!("mTLS handshake failed: {}", e);
+                                    } else {
+                                        tracing::error!(
+                                            "Production mode but TLS acceptor is missing. Terminating stream."
+                                        );
                                     }
                                 }
-                            } else {
-                                tracing::error!(
-                                    "Production mode but TLS acceptor is missing. Terminating stream."
-                                );
-                            }
+                            });
                         }
-                    });
+                        Err(e) => {
+                            tracing::error!("Failed to acquire connection semaphore permit: {}", e);
+                        }
+                    }
                 }
                 Err(e) => {
                     tracing::error!("TCP accept error: {}", e);
@@ -578,6 +585,7 @@ pub async fn run_server(
         allowed_tags: Vec<u32>,
         close_rx: Option<tokio::sync::oneshot::Receiver<()>>,
         is_auth_key_mode: bool,
+        _permit: tokio::sync::OwnedSemaphorePermit,
     ) where
         S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
     {
@@ -816,6 +824,7 @@ pub fn check_query_capabilities(query_str: &str, capabilities: u8) -> bool {
             }
             crate::types::Query::Drop { .. } => (capabilities & crate::security::CAP_ADMIN) != 0,
             crate::types::Query::ListStreams => (capabilities & crate::security::CAP_READ) != 0,
+            crate::types::Query::Status => (capabilities & crate::security::CAP_READ) != 0,
             crate::types::Query::Pipeline(stages) => {
                 let mut requires_write = false;
                 for stage in &stages {
@@ -952,25 +961,56 @@ async fn handle_socket(socket: WebSocket, state: Arc<ServerState>) {
 
     tokio::spawn(async move {
         while let Some(query_str) = query_rx.recv().await {
-            match parse_pipeline(&query_str) {
-                Ok(stages) => {
-                    let stream = execute_query_stream(engine_query.clone(), stages);
-                    let mut stream = Box::pin(stream);
-                    while let Some(record) = stream.next().await {
-                        let resp = WsResponse::QueryResult { data: record };
-                        if let Ok(msg_str) = serde_json::to_string(&resp) {
-                            let mut sender_guard = sender_for_query.lock().await;
-                            if sender_guard.send(Message::Text(msg_str)).await.is_err() {
-                                break;
+            let query_trimmed = query_str.trim();
+            let is_tail = (query_trimmed.starts_with("tail(\"") && query_trimmed.ends_with("\")"))
+                || (query_trimmed.starts_with("tail('") && query_trimmed.ends_with("')"));
+
+            if is_tail {
+                let stream_name = if query_trimmed.starts_with("tail(\"") {
+                    query_trimmed["tail(\"".len()..query_trimmed.len() - "\")".len()].to_string()
+                } else {
+                    query_trimmed["tail('".len()..query_trimmed.len() - "')".len()].to_string()
+                };
+
+                let mut rx = engine_query.subscribe();
+                loop {
+                    match rx.recv().await {
+                        Ok(record) => {
+                            if record.stream_name == stream_name || stream_name == "*" {
+                                let resp = WsResponse::QueryResult { data: record };
+                                if let Ok(msg_str) = serde_json::to_string(&resp) {
+                                    let mut sender_guard = sender_for_query.lock().await;
+                                    if sender_guard.send(Message::Text(msg_str)).await.is_err() {
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                        Err(_) => break,
+                    }
+                }
+            } else {
+                match parse_pipeline(&query_str) {
+                    Ok(stages) => {
+                        let stream = execute_query_stream(engine_query.clone(), stages);
+                        let mut stream = Box::pin(stream);
+                        while let Some(record) = stream.next().await {
+                            let resp = WsResponse::QueryResult { data: record };
+                            if let Ok(msg_str) = serde_json::to_string(&resp) {
+                                let mut sender_guard = sender_for_query.lock().await;
+                                if sender_guard.send(Message::Text(msg_str)).await.is_err() {
+                                    break;
+                                }
                             }
                         }
                     }
-                }
-                Err(e) => {
-                    let resp = WsResponse::Error { message: e };
-                    if let Ok(msg_str) = serde_json::to_string(&resp) {
-                        let mut sender_guard = sender_for_query.lock().await;
-                        let _ = sender_guard.send(Message::Text(msg_str)).await;
+                    Err(e) => {
+                        let resp = WsResponse::Error { message: e };
+                        if let Ok(msg_str) = serde_json::to_string(&resp) {
+                            let mut sender_guard = sender_for_query.lock().await;
+                            let _ = sender_guard.send(Message::Text(msg_str)).await;
+                        }
                     }
                 }
             }

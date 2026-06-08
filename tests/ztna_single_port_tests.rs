@@ -193,6 +193,8 @@ async fn test_ztna_development_mode() {
             host: "127.0.0.1".to_string(),
             db_port: port,
             webui_port: port - 1,
+            max_connections: 10000,
+            broadcast_capacity: 4096,
         },
         storage: StorageConfig {
             data_directory: test_dir.to_string_lossy().to_string(),
@@ -265,6 +267,8 @@ async fn test_ztna_production_mode_cleartext_rejected() {
             host: "127.0.0.1".to_string(),
             db_port: port,
             webui_port: port - 1,
+            max_connections: 10000,
+            broadcast_capacity: 4096,
         },
         storage: StorageConfig {
             data_directory: test_dir.to_string_lossy().to_string(),
@@ -377,6 +381,8 @@ async fn test_ztna_production_mode_mtls_success_with_filtering() {
             host: "127.0.0.1".to_string(),
             db_port: port,
             webui_port: port - 1,
+            max_connections: 10000,
+            broadcast_capacity: 4096,
         },
         storage: StorageConfig {
             data_directory: test_dir.to_string_lossy().to_string(),

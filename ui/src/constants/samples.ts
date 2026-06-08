@@ -36,6 +36,13 @@ export const fetchSamples = [
     hint: "Supports ==, !=, >, <, >=, <=, in, contains(), startsWith(), endsWith(), between()",
   },
   {
+    title: "Vector Similarity Filter",
+    badge: "VECTOR",
+    code: 'from("embeddings") | vector_filter(value, [10, -20, 30], 0.85)',
+    desc: "Filter records using native quantized embedding cosine similarity relative to a query vector.",
+    hint: "Highly optimized vector calculations compute cosine similarity on-the-fly with zero-allocation.",
+  },
+  {
     title: "Filter by Key Prefix",
     badge: "FILTER",
     code: 'from("users") | filter(key startsWith "user_")',
@@ -119,6 +126,20 @@ export const fetchSamples = [
     desc: "Retrieve the complete list of active stream partitions currently managed by LIVEN.",
     hint: "Useful for discovering stream schemas and allocation details.",
   },
+  {
+    title: "Real-time Stream Listen",
+    badge: "LISTEN",
+    code: 'from("orders").listen()',
+    desc: "Programmatically subscribe to a stream and receive real-time data events continuously.",
+    hint: "Automatically triggers a live WebSocket continuous stream subscription in the Query Console.",
+  },
+  {
+    title: "Tail Real-time Stream",
+    badge: "TAIL",
+    code: 'tail("orders")',
+    desc: "Low-level subscription query to tail incoming events of a stream partition in real-time.",
+    hint: "Feeds updates automatically into the Query Console via direct WebSocket subscription.",
+  },
 ];
 
 // ============ WRITE / INSERT OPERATIONS ============
@@ -143,6 +164,20 @@ export const insertSamples = [
     code: 'from("events").insert("click:cta_btn:1717068000", { userId: "user_102", duration_ms: 12 })',
     desc: "Stream a chronological event using a deterministic composite key created by your application.",
     hint: "Stream-First Architecture: Mandating client-side keys preserves maximum database write-throughput.",
+  },
+  {
+    title: "Insert Vector Embedding",
+    badge: "VECTOR",
+    code: 'from("embeddings").insert("doc_101", [12, -45, 98, -128, 127])',
+    desc: "Insert a native 8-bit quantized vector embedding for semantic search indexing.",
+    hint: "Vectors are stored in-memory as efficient i8 contiguous segments and support high-speed similarity filtering.",
+  },
+  {
+    title: "Insert Document with Embedding Field",
+    badge: "INSERT",
+    code: 'from("documents").insert("doc_102", { text: "Hello LIVEN", embedding: [12, -45, 98] })',
+    desc: "Insert structured document records containing semantic text and associated vector embeddings.",
+    hint: "Pipeline filtering stages can parse and filter nested properties as well as full payloads.",
   },
 ];
 

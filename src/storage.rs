@@ -66,6 +66,9 @@ pub struct StorageEngine {
     max_index_ram_bytes: u64,
     pub index_ram_bytes: Arc<AtomicU64>,
     pub streams_set: Arc<Mutex<HashSet<String>>>,
+    pub max_connections: usize,
+    pub broadcast_capacity: usize,
+    pub conn_semaphore: Arc<tokio::sync::Semaphore>,
 }
 
 use std::cell::RefCell;
@@ -80,7 +83,22 @@ impl StorageEngine {
         let path = data_dir.as_ref().to_path_buf();
         fs::create_dir_all(&path).map_err(|e| e.to_string())?;
 
-        let (broadcast_tx, _) = broadcast::channel(1000);
+        let cfg_opt = crate::config::AppConfig::load().ok();
+
+        let max_connections = if let Some(ref cfg) = cfg_opt {
+            cfg.server.max_connections
+        } else {
+            10000
+        };
+
+        let broadcast_capacity = if let Some(ref cfg) = cfg_opt {
+            cfg.server.broadcast_capacity
+        } else {
+            4096
+        };
+
+        let conn_semaphore = Arc::new(tokio::sync::Semaphore::new(max_connections));
+        let (broadcast_tx, _) = broadcast::channel(broadcast_capacity);
 
         let current_sequence_id = Arc::new(AtomicU64::new(1));
         let active_segment_id = Arc::new(AtomicU64::new(1));
@@ -92,8 +110,6 @@ impl StorageEngine {
 
         let (tx, rx) = std::sync::mpsc::sync_channel(2048);
         let ring_buffer = ring_buffer::LogRingBuffer::new(tx);
-
-        let cfg_opt = crate::config::AppConfig::load().ok();
 
         let (sync_mode, sync_interval_ms) = if let Some(ref cfg) = cfg_opt {
             (cfg.storage.sync_mode.clone(), cfg.storage.sync_interval_ms)
@@ -149,6 +165,9 @@ impl StorageEngine {
             max_index_ram_bytes,
             index_ram_bytes: index_ram_bytes.clone(),
             streams_set: streams_set.clone(),
+            max_connections,
+            broadcast_capacity,
+            conn_semaphore,
         };
 
         engine.recover()?;
@@ -207,6 +226,17 @@ impl StorageEngine {
 
     pub fn subscribe(&self) -> broadcast::Receiver<Record> {
         self.broadcast_tx.subscribe()
+    }
+
+    pub fn with_broadcast_capacity(mut self, capacity: usize) -> Self {
+        self.broadcast_capacity = capacity;
+        self
+    }
+
+    pub fn with_max_connections(mut self, limit: usize) -> Self {
+        self.max_connections = limit;
+        self.conn_semaphore = Arc::new(tokio::sync::Semaphore::new(limit));
+        self
     }
 
     /// Gets the next monotonic sequence ID

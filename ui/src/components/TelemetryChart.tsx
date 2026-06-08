@@ -29,23 +29,15 @@ function formatYLabel(val: number): string {
 }
 
 // Resolve colors to match light/dark themes
-function resolveThemeColors(resolvedTheme: "light" | "dark") {
-  const isDark = resolvedTheme === "dark";
+function resolveThemeColors(_resolvedTheme: "light" | "dark") {
   return {
     reads: {
-      stroke: isDark ? "#10b981" : "#059669",
-      gradientStart: isDark
-        ? "rgba(16, 185, 129, 0.15)"
-        : "rgba(5, 150, 105, 0.12)",
-      gradientEnd: "rgba(16, 185, 129, 0.0)",
+      stroke: "#FF5C35", // 🧡 Vibrant Anthropic Coral
+      solidFill: "rgba(255, 92, 53, 0.03)",
     },
     writes: {
-      // Changed from Rose/Red to Amber/Orange
-      stroke: isDark ? "#f59e0b" : "#d97706", // amber-500 or amber-600
-      gradientStart: isDark
-        ? "rgba(245, 158, 11, 0.15)"
-        : "rgba(217, 119, 6, 0.12)",
-      gradientEnd: "rgba(245, 158, 11, 0.0)",
+      stroke: "#FFB830", // 💛 Vibrant Sunlit Gold
+      solidFill: "rgba(255, 184, 48, 0.03)",
     },
   };
 }
@@ -199,13 +191,7 @@ export default function TelemetryChart({
           stroke: colors.reads.stroke,
           width: 2.2,
           paths: uPlot.paths?.spline?.(), // <-- Enable spline curved line drawing
-          fill: (self) => {
-            const ctx = self.ctx;
-            const gradient = ctx.createLinearGradient(0, 15, 0, height - 30);
-            gradient.addColorStop(0, colors.reads.gradientStart);
-            gradient.addColorStop(1, colors.reads.gradientEnd);
-            return gradient;
-          },
+          fill: colors.reads.solidFill,
           points: { show: false },
         },
         {
@@ -213,13 +199,7 @@ export default function TelemetryChart({
           stroke: colors.writes.stroke,
           width: 2.2,
           paths: uPlot.paths?.spline?.(), // <-- Enable spline curved line drawing
-          fill: (self) => {
-            const ctx = self.ctx;
-            const gradient = ctx.createLinearGradient(0, 15, 0, height - 30);
-            gradient.addColorStop(0, colors.writes.gradientStart);
-            gradient.addColorStop(1, colors.writes.gradientEnd);
-            return gradient;
-          },
+          fill: colors.writes.solidFill,
           points: { show: false },
         },
       ],
@@ -377,25 +357,25 @@ export default function TelemetryChart({
         {/* Dynamic Color-Coded Header Legend */}
         <div className="flex items-center gap-5 text-xs font-mono font-semibold select-none">
           <div className="flex items-center gap-2 px-2.5 py-1 rounded bg-zinc-50 dark:bg-zinc-800/30 border border-zinc-500/10">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_6px_rgba(16,185,129,0.5)]" />
+            <span className="w-2 h-2 rounded-full bg-primary animate-pulse shadow-glow" />
             <span className="text-zinc-400 dark:text-zinc-500 font-medium tracking-wider text-[9px] uppercase">
               Reads/sec
             </span>
             <span
               ref={legendReadsRef}
-              className="text-emerald-600 dark:text-emerald-400 font-bold font-mono"
+              className="text-primary font-bold font-mono"
             >
               {currentReadsVal.toLocaleString()}
             </span>
           </div>
           <div className="flex items-center gap-2 px-2.5 py-1 rounded bg-zinc-50 dark:bg-zinc-800/30 border border-zinc-500/10">
-            <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse shadow-[0_0_6px_rgba(245,158,11,0.5)]" />
+            <span className="w-2 h-2 rounded-full bg-secondary animate-pulse shadow-glow-cyan" />
             <span className="text-zinc-400 dark:text-zinc-500 font-medium tracking-wider text-[9px] uppercase">
               Writes/sec
             </span>
             <span
               ref={legendWritesRef}
-              className="text-amber-600 dark:text-amber-400 font-bold font-mono"
+              className="text-secondary font-bold font-mono"
             >
               {currentWritesVal.toLocaleString()}
             </span>
@@ -436,22 +416,22 @@ export default function TelemetryChart({
           <div ref={tooltipTimeRef} className="text-zinc-400 font-medium" />
           <div className="flex items-center justify-between gap-4 mt-0.5">
             <span className="flex items-center gap-1.5 font-semibold text-white">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+              <span className="w-1.5 h-1.5 rounded-full bg-primary" />
               Reads:
             </span>
             <span
               ref={tooltipReadsValueRef}
-              className="font-bold text-emerald-400 dark:text-emerald-300"
+              className="font-bold text-primary"
             />
           </div>
           <div className="flex items-center justify-between gap-4">
             <span className="flex items-center gap-1.5 font-semibold text-white">
-              <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+              <span className="w-1.5 h-1.5 rounded-full bg-secondary" />
               Writes:
             </span>
             <span
               ref={tooltipWritesValueRef}
-              className="font-bold text-amber-500 dark:text-amber-400"
+              className="font-bold text-secondary"
             />
           </div>
         </div>

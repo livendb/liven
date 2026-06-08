@@ -53,6 +53,7 @@ fn parse_stage(input: &str) -> IResult<&str, PipelineStage> {
         parse_delete_stage,
         parse_trash_stage,
         parse_filter_stage,
+        parse_vector_filter_stage,
         parse_map_stage,
         parse_window_stage,
         parse_limit_stage,
@@ -224,6 +225,48 @@ fn parse_filter_stage(input: &str) -> IResult<&str, PipelineStage> {
     let (input, _) = tag("filter")(input)?;
     let (input, expr) = delimited(char('('), ws(parse_filter_expr), char(')'))(input)?;
     Ok((input, PipelineStage::Filter { expr }))
+}
+
+fn parse_vector_filter_stage(input: &str) -> IResult<&str, PipelineStage> {
+    let (input, _) = tag("vector_filter")(input)?;
+    let (input, _) = char('(')(input)?;
+    let (input, field) = ws(parse_identifier)(input)?;
+    let (input, _) = char(',')(input)?;
+    let (input, query_val) = ws(parse_data_value)(input)?;
+    let (input, _) = char(',')(input)?;
+    let (input, threshold_val) = ws(parse_data_value)(input)?;
+    let (input, _) = char(')')(input)?;
+
+    let query_vector = match crate::executor::to_vector(&query_val) {
+        Some(v) => v,
+        None => {
+            return Err(nom::Err::Error(nom::error::Error::new(
+                input,
+                nom::error::ErrorKind::Tag,
+            )))
+        }
+    };
+
+    let threshold = match threshold_val {
+        DataValue::Float(f) => f,
+        DataValue::Int(i) => OrderedFloat(i as f64),
+        DataValue::UInt(u) => OrderedFloat(u as f64),
+        _ => {
+            return Err(nom::Err::Error(nom::error::Error::new(
+                input,
+                nom::error::ErrorKind::Tag,
+            )))
+        }
+    };
+
+    Ok((
+        input,
+        PipelineStage::VectorFilter {
+            field,
+            query_vector,
+            threshold,
+        },
+    ))
 }
 
 fn parse_filter_expr(input: &str) -> IResult<&str, FilterExpr> {
@@ -538,6 +581,17 @@ pub fn parse_query(input: &str) -> Result<Query, String> {
                 .is_empty())
     {
         return Ok(Query::ListStreams);
+    }
+
+    if trimmed == "status"
+        || trimmed == "status()"
+        || (trimmed.starts_with("status(")
+            && trimmed.ends_with(")")
+            && trimmed["status(".len()..trimmed.len() - 1]
+                .trim()
+                .is_empty())
+    {
+        return Ok(Query::Status);
     }
 
     if trimmed.starts_with("drop") {

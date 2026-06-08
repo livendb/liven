@@ -3,6 +3,9 @@ environment = "development"
 host = "127.0.0.1"
 db_port = 43121
 webui_port = 43120
+max_connections = 10000
+broadcast_capacity = 4096
+
 
 [security]
 master_key = "bcac3bd8e48be28c1d96029352f693ef9c8ae894cbb84b69d2b26c4fd2415efc"

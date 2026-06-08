@@ -58,12 +58,12 @@ export default function Navbar({
             onClick={() => handleTabClick(item.id)}
             className={`w-full text-left pl-4 pr-3 py-3 text-[14px] font-bold tracking-wider transition-all flex items-center gap-3 border-l-2 ${
               isActive
-                ? "border-emerald-500 bg-green-100 dark:bg-zinc-800"
-                : "border-transparent text-zinc-600 hover:bg-green-50 dark:hover:text-zinc-300 dark:text-zinc-100 dark:hover:bg-zinc-600"
+                ? "border-primary bg-zinc-100 dark:bg-zinc-700 text-primary"
+                : "border-transparent text-text-muted hover:bg-zinc-100 dark:hover:dark:bg-zinc-700 hover:text-text-main dark:text-text-muted dark:hover:text-text-main"
             }`}
           >
             <Icon
-              className={`w-4 h-4 ${isActive ? "text-emerald-500" : "text-zinc-600 dark:text-gray-50"}`}
+              className={`w-4 h-4 ${isActive ? "text-primary" : "text-text-muted dark:text-text-muted"}`}
             />
             <span>{item.label}</span>
           </button>
@@ -140,9 +140,9 @@ export default function Navbar({
           {/* LOGO AND BRAND HEADER */}
           <div className="px-6 flex flex-row gap-1.5">
             <img src={"logo.png"} className="h-7" />
-            <h1 className="font-semibold text-lg leading-none mt-2 tracking-wider text-emerald-500  select-none">
+            <h1 className="font-semibold text-lg leading-none mt-2 tracking-wider text-primary select-none">
               Liven
-              <span className="text-emerald-500">DB</span>
+              <span className="text-accent">DB</span>
             </h1>
           </div>
 
@@ -169,9 +169,9 @@ export default function Navbar({
           >
             <Menu className="w-5 h-5 text-zinc-900 dark:text-zinc-100" />
           </button>
-          <h1 className="font-semibold text-sm leading-none tracking-wider text-emerald-500 select-none">
+          <h1 className="font-semibold text-sm leading-none tracking-wider text-primary select-none">
             Liven
-            <span className="text-emerald-500">DB</span>
+            <span className="text-accent">DB</span>
           </h1>
         </div>
       </header>
@@ -192,9 +192,9 @@ export default function Navbar({
               {/* Drawer Header */}
               <div className="px-5 flex items-center justify-between">
                 <div className="flex flex-col gap-1">
-                  <h1 className="font-semibold text-base leading-none tracking-wider text-emerald-500  select-none">
+                  <h1 className="font-semibold text-base leading-none tracking-wider text-primary select-none">
                     Liven
-                    <span className="text-emerald-500">DB</span>
+                    <span className="text-accent">DB</span>
                   </h1>
                 </div>
                 <button

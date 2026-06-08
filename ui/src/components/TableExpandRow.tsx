@@ -153,7 +153,7 @@ export default function TableExpandRow({ record }: TableExpandRowProps) {
                           className={`w-1.5 h-1.5 rounded-full ${
                             record.flags & 0x02
                               ? "bg-rose-500"
-                              : "bg-emerald-500"
+                              : "bg-accent"
                           }`}
                         />
                         0x0{record.flags} (

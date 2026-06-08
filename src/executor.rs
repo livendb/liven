@@ -69,6 +69,7 @@ pub fn evaluate_record_field(record: &Record, field: &str) -> Option<DataValue> 
         "timestamp" => Some(DataValue::Int(record.timestamp)),
         "sequence_id" => Some(DataValue::UInt(record.sequence_id)),
         "stream" => Some(DataValue::String(record.stream_name.clone())),
+        "value" => Some(record.value.clone()),
         _ => extract_field(&record.value, field),
     }
 }
@@ -188,6 +189,49 @@ fn to_f64(val: &DataValue) -> Option<f64> {
         DataValue::Array(_) => None,
         _ => None,
     }
+}
+
+pub fn to_vector(val: &DataValue) -> Option<Vec<i8>> {
+    match val {
+        DataValue::Vector(v) => Some(v.clone()),
+        DataValue::Array(arr) => {
+            let mut vec = Vec::with_capacity(arr.len());
+            for item in arr {
+                match item {
+                    DataValue::Int(i) => vec.push(*i as i8),
+                    DataValue::UInt(u) => vec.push(*u as i8),
+                    DataValue::Float(f) => vec.push(f.into_inner() as i8),
+                    _ => return None,
+                }
+            }
+            Some(vec)
+        }
+        _ => None,
+    }
+}
+
+pub fn cosine_similarity(a: &[i8], b: &[i8]) -> Option<f64> {
+    if a.len() != b.len() || a.is_empty() {
+        return None;
+    }
+    let mut dot_product: i64 = 0;
+    let mut norm_a: i64 = 0;
+    let mut norm_b: i64 = 0;
+
+    for (&x, &y) in a.iter().zip(b.iter()) {
+        let x_i = x as i64;
+        let y_i = y as i64;
+        dot_product += x_i * y_i;
+        norm_a += x_i * x_i;
+        norm_b += y_i * y_i;
+    }
+
+    if norm_a == 0 || norm_b == 0 {
+        return Some(0.0);
+    }
+
+    let sim = (dot_product as f64) / ((norm_a as f64).sqrt() * (norm_b as f64).sqrt());
+    Some(sim)
 }
 
 /// Dynamic projection mapping for columns.
@@ -670,6 +714,31 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> Result<Vec<Record
                 .collect();
             Ok(records)
         }
+        Query::Status => {
+            let max_connections = engine.max_connections;
+            let active_connections = max_connections - engine.conn_semaphore.available_permits();
+            let broadcast_capacity = engine.broadcast_capacity;
+
+            let timestamp = std::time::SystemTime::now()
+                .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as i64;
+
+            let value_str = format!(
+                r#"{{"max_connections":{},"active_connections":{},"broadcast_capacity":{}}}"#,
+                max_connections, active_connections, broadcast_capacity
+            );
+
+            Ok(vec![Record {
+                sequence_id: 0,
+                timestamp,
+                type_tag: 5,
+                flags: 0,
+                stream_name: "status".to_string(),
+                key: crate::storage::key::StreamKey::from_str_truncated("metrics"),
+                value: DataValue::String(value_str),
+            }])
+        }
     }
 }
 
@@ -701,6 +770,22 @@ pub fn apply_pipeline_stages_to_vec(
             }
             PipelineStage::Filter { expr } => {
                 records.retain(|r| evaluate_filter_expr(r, expr));
+            }
+            PipelineStage::VectorFilter {
+                field,
+                query_vector,
+                threshold,
+            } => {
+                records.retain(|r| {
+                    if let Some(val) = evaluate_record_field(r, field) {
+                        if let Some(record_vec) = to_vector(&val) {
+                            if let Some(sim) = cosine_similarity(&record_vec, query_vector) {
+                                return sim >= threshold.into_inner();
+                            }
+                        }
+                    }
+                    false
+                });
             }
             PipelineStage::Get { key } => {
                 records.retain(|r| r.key.as_str() == *key);

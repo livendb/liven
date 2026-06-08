@@ -28,6 +28,11 @@ export default {
           hover: 'var(--color-secondary-hover)',
           light: 'var(--color-secondary-light)',
         },
+        accent: {
+          DEFAULT: 'var(--color-accent)',
+          hover: 'var(--color-accent-hover)',
+          light: 'var(--color-accent-light)',
+        },
         'body-bg': 'var(--color-body-bg)',
         'panel-bg': 'var(--color-panel-bg)',
         'navbar-bg': 'var(--color-navbar-bg)',

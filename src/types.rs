@@ -47,6 +47,11 @@ pub enum PipelineStage {
     Filter {
         expr: FilterExpr,
     },
+    VectorFilter {
+        field: String,
+        query_vector: Vec<i8>,
+        threshold: OrderedFloat<f64>,
+    },
     Get {
         key: String,
     },
@@ -158,6 +163,7 @@ pub enum Query {
         pipeline: Vec<PipelineStage>,
     },
     ListStreams,
+    Status,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]

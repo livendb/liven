@@ -146,8 +146,8 @@ export default function QueryGuideModal({
                       >
                         {copiedText === sample.code ? (
                           <>
-                            <Check className="w-3.5 h-3.5 text-emerald-500" />{" "}
-                            <span className="text-emerald-500 font-bold">
+                            <Check className="w-3.5 h-3.5 text-accent" />{" "}
+                            <span className="text-accent font-bold">
                               Copied
                             </span>
                           </>
@@ -168,7 +168,7 @@ export default function QueryGuideModal({
                             "info",
                           );
                         }}
-                        className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-sm bg-primary text-white hover:bg-emerald-600 transition-all text-xs font-bold shadow-sm hover:/25"
+                        className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-sm bg-primary text-white hover:bg-primary-hover transition-all text-xs font-bold shadow-sm hover:/25"
                       >
                         <Play className="w-3.5 h-3.5 fill-current" />
                         <span>Load Query</span>

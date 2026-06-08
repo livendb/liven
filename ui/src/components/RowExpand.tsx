@@ -91,7 +91,7 @@ export default function RowExpand({ record }: RowExpandProps) {
                 <span className="w-1.5 h-1.5 rounded-full bg-zinc-400 dark:bg-zinc-500" />
                 Engine Metrics / System View
               </span>
-              <span className="text-[10px] font-bold text-primary dark:text-emerald-500 hover:underline">
+              <span className="text-[10px] font-bold text-primary dark:text-accent hover:underline">
                 {isMetricsOpen ? "Hide Metrics" : "Show Metrics"}
               </span>
             </button>
@@ -134,7 +134,7 @@ export default function RowExpand({ record }: RowExpandProps) {
                   <span className="inline-flex items-center gap-1.5 font-semibold text-zinc-800 dark:text-zinc-200">
                     <span
                       className={`w-1.5 h-1.5 rounded-full ${
-                        record.flags & 0x02 ? "bg-rose-500" : "bg-emerald-500"
+                        record.flags & 0x02 ? "bg-rose-500" : "bg-accent"
                       }`}
                     />
                     0x0{record.flags} (
