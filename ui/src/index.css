@@ -1,0 +1,121 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+    /* Premium Forest Green (#054925) Primary */
+    --color-primary: #054925;
+    --color-primary-hover: #032b1a;
+    --color-primary-light: #166e3a;
+    --color-primary-glow: rgba(5, 73, 37, 0.35);
+
+    /* Complementary Warm Amber-Gold Secondary */
+    --color-secondary: #d97706;
+    --color-secondary-hover: #b45309;
+    --color-secondary-light: #f59e0b;
+    --color-secondary-glow: rgba(217, 119, 6, 0.35);
+
+    /* Sidebar/Header specific background */
+    --color-navbar-bg: #042d16;
+
+    /* Page-wide settings */
+    --color-body-bg: #f2f6f3; /* Sage Pale Cool-Grey background */
+    --color-panel-bg: #ffffff; /* Solid crisp white cards */
+    --color-border-subtle: #d2e2d7; /* Subtle sage border */
+    --color-text-main: #0f172a;
+    --color-text-muted: #475569;
+}
+
+.dark {
+    /* Accessible Vibrant Green for Dark Mode */
+    --color-primary: #054925;
+    --color-primary-hover: #148f4a;
+    --color-primary-light: #36cf88;
+    --color-primary-glow: rgba(27, 178, 106, 0.35);
+
+    /* Legible Amber-Gold for Dark Mode */
+    --color-secondary: #fbbf24;
+    --color-secondary-hover: #f59e0b;
+    --color-secondary-light: #fcd34d;
+    --color-secondary-glow: rgba(251, 191, 36, 0.35);
+
+    /* Deeper Forest Black for Sidebar */
+    --color-navbar-bg: #03140a;
+
+    /* Dark Mode Layout backgrounds */
+    --color-body-bg: #0a120d; /* Deep forest-black matte body */
+    --color-panel-bg: #121e16; /* Deep forest-slate card backgrounds */
+    --color-border-subtle: #1d3325; /* Subtle dark forest borders */
+    --color-text-main: #f8fafc;
+    --color-text-muted: #94a3b8;
+}
+
+@layer base {
+    body {
+        font-family: "Inter", sans-serif;
+    }
+
+    code,
+    pre {
+        font-family:
+            Fira Code,
+            "JetBrains Mono",
+            monospace;
+    }
+}
+
+/* Custom gorgeous scrollbar for premium feeling */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: rgba(24, 24, 27, 0.1);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(24, 24, 27, 0.2);
+}
+
+/* Glassmorphism premium panels style utility */
+.glass-panel {
+    background: var(--color-panel-bg);
+    border: 1px solid var(--color-border-subtle);
+    box-shadow:
+        0 1px 3px rgba(0, 0, 0, 0.02),
+        0 1px 2px rgba(0, 0, 0, 0.04);
+    transition:
+        background-color 0.3s,
+        border-color 0.3s,
+        box-shadow 0.3s;
+}
+
+.glass-panel-glow {
+    box-shadow: 0 0 15px -3px var(--color-primary-glow);
+}
+
+.dark ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.dark .glass-panel {
+    background: var(--color-panel-bg);
+    border: 1px solid var(--color-border-subtle);
+    box-shadow:
+        0 4px 6px -1px rgba(0, 0, 0, 0.2),
+        0 2px 4px -1px rgba(0, 0, 0, 0.1);
+}
+
+.dark .glass-panel-glow {
+    box-shadow: 0 0 15px -3px var(--color-primary-glow);
+}

@@ -1,0 +1,229 @@
+// ============ READ / FETCH OPERATIONS ============
+export const fetchSamples = [
+  {
+    title: "Fetch by Key",
+    badge: "GET",
+    code: 'from("users") | get("user_102")',
+    desc: "Direct key lookup — fastest way to retrieve a specific record.",
+    hint: "O(1) lookup time. Returns single record or null if not found.",
+  },
+  {
+    title: "Fetch Multiple Keys",
+    badge: "FILTER",
+    code: 'from("users") | filter(key in ["user_102", "user_103", "user_104"])',
+    desc: "Fetch multiple specific keys using the set membership 'in' operator.",
+    hint: "Highly optimized; leverages the in-memory SkipMap index directly.",
+  },
+  {
+    title: "Fetch All Records",
+    badge: "FROM",
+    code: 'from("users")',
+    desc: "Fetch all active records in a stream.",
+    hint: "Use with limit() on large streams to prevent client-side memory bloating.",
+  },
+  {
+    title: "Limit Result Count",
+    badge: "LIMIT",
+    code: 'from("logs") | limit(100)',
+    desc: "Cap the maximum number of records evaluated and returned by the stream query.",
+    hint: "Highly recommended for active dashboard console views to prevent accidental massive full scans.",
+  },
+  {
+    title: "Filter Items",
+    badge: "FILTER",
+    code: 'from("orders") | filter(amount > 100)',
+    desc: "Filter records where property conditions match.",
+    hint: "Supports ==, !=, >, <, >=, <=, in, contains(), startsWith(), endsWith(), between()",
+  },
+  {
+    title: "Filter by Key Prefix",
+    badge: "FILTER",
+    code: 'from("users") | filter(key startsWith "user_")',
+    desc: "Filter keys by prefix pattern matching.",
+    hint: "Extremely fast because keys are sorted chronologically in the index layer.",
+  },
+  {
+    title: "Chain Multiple Filters",
+    badge: "FILTER",
+    code: 'from("logs") | filter(status == "error") | filter(timestamp > 1700000000)',
+    desc: "Apply multiple filter conditions sequentially down the pipeline.",
+    hint: "Performance tip: Order matters. Place your most restrictive filters first.",
+  },
+  {
+    title: "Filter with Logical Operators",
+    badge: "FILTER",
+    code: 'from("orders") | filter(amount > 100 and status == "completed")',
+    desc: "Combine complex evaluation conditions with 'and', 'or', and 'not'.",
+    hint: "Use parentheses to enforce explicit evaluation order: (a == 1 or b == 2) and c == 3",
+  },
+  {
+    title: "Map Fields",
+    badge: "MAP",
+    code: 'from("users") | map(name, email, status)',
+    desc: "Project only specific fields from each record to reduce payload size.",
+    hint: "Reduces network bandwidth usage and accelerates frontend rendering.",
+  },
+  {
+    title: "Count Items",
+    badge: "COUNT",
+    code: 'from("users") | count()',
+    desc: "Get total number of records matching criteria.",
+    hint: "Executes directly against metadata frameworks—much faster than pulling records.",
+  },
+  {
+    title: "Group Items",
+    badge: "GROUP",
+    code: 'from("orders") | group(status, count(), sum(amount))',
+    desc: "Group data by specific fields and compute real-time aggregations.",
+    hint: "Supported aggregations: count(), sum(), avg(), min(), max(), first(), last()",
+  },
+  {
+    title: "Sort Items",
+    badge: "SORT",
+    code: 'from("orders") | sort(timestamp, desc)',
+    desc: "Sort records by field in ascending (asc) or descending (desc) order.",
+    hint: "Default streaming is chronological; use desc to get newest records first.",
+  },
+  {
+    title: "Paginate Items",
+    badge: "PAGE",
+    code: 'from("users") | page(2, 50)',
+    desc: "Built-in offsetless pagination: page(pageNumber, pageSize).",
+    hint: "Page 1 is the base layer. VASTLY superior performance to standard SQL offset limits.",
+  },
+  {
+    title: "Paginate with Cursor",
+    badge: "PAGE",
+    code: 'from("events") | page(cursor("2026-05-30T11:42:00Z"), 50)',
+    desc: "Cursor-based pagination for high-velocity real-time event streams.",
+    hint: "Eliminate pagination drift caused by concurrent updates during read states.",
+  },
+  {
+    title: "Enrich Stream Data",
+    badge: "ENRICH",
+    code: 'from("orders") | enrich("customers", "customer_id")',
+    desc: "Perform a left join to enrich the current record stream with data from another stream using a matching join key.",
+    hint: "Combines data from primary stream and enriched source stream on matching join keys.",
+  },
+  {
+    title: "Sliding Window",
+    badge: "WINDOW",
+    code: 'from("logs") | window(10000, average)',
+    desc: "Aggregate records over sliding time windows of a specified duration in milliseconds.",
+    hint: "Aggregation strategies: count, sum, average.",
+  },
+  {
+    title: "Discover Active Streams",
+    badge: "STREAMS",
+    code: 'streams()',
+    desc: "Retrieve the complete list of active stream partitions currently managed by KondaDB.",
+    hint: "Useful for discovering stream schemas and allocation details.",
+  },
+];
+
+// ============ WRITE / INSERT OPERATIONS ============
+export const insertSamples = [
+  {
+    title: "Insert Single Record",
+    badge: "INSERT",
+    code: 'from("users").insert("user_102", { name: "Alice", email: "alice@example.com" })',
+    desc: "Insert a completely unique key-value entry into the data stream.",
+    hint: "Strict Integrity: Fails safely with a KeyAlreadyExists error if the key is already indexed.",
+  },
+  {
+    title: "Insert Multiple Records (Bulk Batch)",
+    badge: "BATCH",
+    code: 'from("users").insert([["user_103", { name: "Bob" }], ["user_104", { name: "Charlie" }]])',
+    desc: "Batch insert multiple unique records atomically in a single structural array.",
+    hint: "If any key already exists in the SkipMap, the entire batch aborts to preserve integrity.",
+  },
+  {
+    title: "Insert Stream Event (Client-Keyed)",
+    badge: "STREAM",
+    code: 'from("events").insert("click:cta_btn:1717068000", { userId: "user_102", duration_ms: 12 })',
+    desc: "Stream a chronological event using a deterministic composite key created by your application.",
+    hint: "Stream-First Architecture: Mandating client-side keys preserves maximum database write-throughput.",
+  },
+];
+
+// ============ OVERRIDE / UPSERT OPERATIONS ============
+export const upsertSamples = [
+  {
+    title: "Upsert Record by Key",
+    badge: "UPSERT",
+    code: 'from("users").upsert("user_102", { name: "Alice", status: "active", updated: true })',
+    desc: "Force-write a key-value record. Overwrites the existing value if the key already exists.",
+    hint: "Appends a new version frame to the log file and atomically updates the in-memory SkipMap pointer.",
+  },
+  {
+    title: "Bulk Upsert Records",
+    badge: "UPSERT",
+    code: 'from("inventory").upsert([["SKU-001", { qty: 150 }], ["SKU-002", { qty: 85 }]])',
+    desc: "Perform a high-velocity batch override across multiple key parameters simultaneously.",
+    hint: "Superseded historical records remain on disk as dead weight until a log compaction cycle runs.",
+  },
+];
+
+// ============ UPDATE OPERATIONS ============
+export const updateSamples = [
+  {
+    title: "Update by Key",
+    badge: "UPDATE",
+    code: 'from("users").update("user_102", { status: "active", lastLogin: now() })',
+    desc: "Update specific properties of a record matching an explicit key identifier.",
+    hint: "Delta update—appends changes to disk and merges them during read execution.",
+  },
+  {
+    title: "Update Multiple Keys",
+    badge: "UPDATE",
+    code: 'from("users") | filter(key in ["user_102", "user_103"]) .update({ status: "inactive" })',
+    desc: "Select a fixed array of records using filters, then execute a bulk update.",
+    hint: "Atomic pointer redirection occurs immediately upon successful log write.",
+  },
+  {
+    title: "Update with Filter Pipeline",
+    badge: "UPDATE",
+    code: 'from("orders") | filter(status == "pending") .update({ status: "processing" })',
+    desc: "Scan a stream pipeline and apply mutations across all matched criteria.",
+    hint: "Pipelines build the target collection safely; the terminal dot-method applies changes.",
+  },
+  {
+    title: "Update with Computed Values",
+    badge: "UPDATE",
+    code: 'from("products") | filter(price < 10) .update({ price: price * 1.1, updatedAt: now() })',
+    desc: "Update property values dynamically by referencing current field parameters.",
+    hint: "Supports native mathematical operations, mutations, and internal function counters.",
+  },
+];
+
+// ============ DELETE / REMOVE OPERATIONS ============
+export const deleteSamples = [
+  {
+    title: "Delete by Key",
+    badge: "DELETE",
+    code: 'from("users").delete("user_102")',
+    desc: "Delete a specific key completely out of the active retrieval pathway.",
+    hint: "Soft deletion writes a tombstone flag to the log. Reclaimed completely on compaction.",
+  },
+  {
+    title: "Delete with Filter Pipeline",
+    badge: "DELETE",
+    code: 'from("users") | filter(status == "inactive") .delete()',
+    desc: "Perform a sweeping conditional deletion of records matching filter pipelines.",
+    hint: "Pipelines isolate targeted arrays safely, while terminal dot-execution alters state.",
+  },
+  {
+    title: "Empty All Stream Records",
+    badge: "EMPTY",
+    code: 'from("logs").empty()',
+    desc: "Completely clear and truncate all records inside an active stream partition.",
+    hint: "Highly efficient log truncation. Wipes entries but preserves the stream allocation profile.",
+  },
+  {
+    title: "Drop Entire Stream Schema",
+    badge: "DROP",
+    code: 'drop("old_metrics_2025")',
+    desc: "Completely drop a structural stream partition directory from the host system file architecture.",
+    hint: "Administrative Action: Instantly unlinks all `.vivo` segments and completely removes data maps from memory.",
+  },
+];

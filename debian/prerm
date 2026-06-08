@@ -1,0 +1,21 @@
+#!/bin/sh
+# debian/prerm - KondaDB pre-removal script
+set -e
+
+case "$1" in
+    remove)
+        if [ -d /run/systemd/system ] || [ -d /lib/systemd/system ]; then
+            echo "Stopping and disabling KondaDB background service..."
+            systemctl stop kondadb || true
+            systemctl disable kondadb || true
+        fi
+        ;;
+    upgrade|failed-upgrade|deconfigure)
+        ;;
+    *)
+        echo "prerm called with unknown argument \`$1'" >&2
+        exit 1
+        ;;
+esac
+
+exit 0

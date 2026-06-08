@@ -1,0 +1,10 @@
+/target
+data*
+node_modules
+dist
+certs
+auth_*
+.env
+.DS_Store
+*.log
+

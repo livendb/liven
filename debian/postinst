@@ -1,0 +1,41 @@
+#!/bin/sh
+# debian/postinst - KondaDB post-installation script
+set -e
+
+case "$1" in
+    configure)
+        # 1. Secure and preserve data directory
+        if [ -d /var/lib/kondadb ]; then
+            echo "KondaDB data directory '/var/lib/kondadb' already exists. Preserving existing .konda data blocks."
+        else
+            echo "Creating KondaDB data directory with secure permissions (700)..."
+            mkdir -p /var/lib/kondadb
+            chmod 700 /var/lib/kondadb
+        fi
+
+        # Create log directory with secure permissions (700)
+        if [ ! -d /var/log/kondadb ]; then
+            echo "Creating KondaDB log directory with secure permissions (700)..."
+            mkdir -p /var/log/kondadb
+            chmod 700 /var/log/kondadb
+        fi
+
+        # 2. Configure systemd integration
+        if [ -d /run/systemd/system ] || [ -d /lib/systemd/system ]; then
+            echo "Reloading systemd daemon..."
+            systemctl daemon-reload || true
+            
+            echo "Enabling and starting KondaDB background service..."
+            systemctl enable kondadb || true
+            systemctl restart kondadb || true
+        fi
+        ;;
+    abort-upgrade|abort-remove|abort-deconfigure)
+        ;;
+    *)
+        echo "postinst called with unknown argument \`$1'" >&2
+        exit 1
+        ;;
+esac
+
+exit 0

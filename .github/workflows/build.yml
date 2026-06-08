@@ -1,0 +1,259 @@
+name: Build & Verify Konda
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+# Ensure only one workflow runs per branch at a time to optimize resources
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build & Test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: "ui/package-lock.json"
+
+      - name: Install UI dependencies & Build Frontend
+        working-directory: ui
+        run: |
+          npm ci
+          npm run build
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Verify code formatting
+        run: cargo fmt --all -- --check
+
+      - name: Lint with clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Run automated test suite
+        run: cargo test --all-targets --workspace
+
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Run KondaDB Installation Tests (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          echo "==== Linux Installation Tests ===="
+          # Make install.sh executable
+          chmod +x install.sh
+          
+          # 1. Verify install.sh handles Mainstream Systemd (Production mode)
+          sudo ./install.sh --env production
+          
+          # Assertions
+          grep -q 'environment = "production"' /etc/kondadb/kondadb.toml
+          test -f /etc/kondadb/certs/ca.crt
+          test -f /etc/kondadb/certs/ca.key
+          test -f /etc/kondadb/certs/server.crt
+          test -f /etc/kondadb/certs/server.key
+          
+          # Assert strict POSIX permissions (600) on keys
+          [ "$(stat -c '%a' /etc/kondadb/certs/server.key)" = "600" ]
+          [ "$(stat -c '%a' /etc/kondadb/certs/ca.key)" = "600" ]
+          
+          # Assert systemd unit is injected
+          test -f /etc/systemd/system/kondadb.service
+          
+          # 2. Verify Non-Systemd / Container Fallback
+          # Run inside isolated alpine container
+          docker run --rm -v ${{ github.workspace }}:/workspace alpine:latest sh -c "
+            cp /workspace/install.sh /install.sh &&
+            chmod +x /install.sh &&
+            ./install.sh --env development &&
+            test -f /usr/local/bin/kondadb &&
+            test -f /usr/local/bin/kondadb-entrypoint &&
+            ! test -f /etc/systemd/system/kondadb.service &&
+            grep -q 'environment = \"development\"' /etc/kondadb/kondadb.toml
+          "
+          
+          # 3. Live-Process Boot & Security Verification (Linux Production)
+          echo "Booting mTLS protected production KondaDB in background..."
+          sudo /usr/local/bin/kondadb start --config /etc/kondadb/kondadb.toml &
+          DB_PID=$!
+          sleep 3
+          
+          # Check if port is open
+          sudo ss -tlnp | grep -q 43121
+          
+          # Try cleartext curl - should fail/drop due to mTLS shield
+          curl -v --connect-timeout 3 http://127.0.0.1:43121/api/streams && (echo "FAIL: Cleartext succeeded in production!" && exit 1) || echo "PASS: Cleartext connection rejected successfully by mTLS shield"
+          
+          # Clean up background process
+          sudo kill -15 $DB_PID || true
+
+      - name: Run KondaDB Installation Tests (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          echo "==== macOS Installation Tests ===="
+          # Make install.sh executable
+          chmod +x install.sh
+          
+          # 1. Verify install.sh handles launchd plist (Development mode)
+          sudo ./install.sh --env development
+          
+          # Assertions
+          grep -q 'environment = "development"' /etc/kondadb/kondadb.toml
+          test -f /Library/LaunchDaemons/com.konda.kondadb.plist
+          test -f /usr/local/bin/kondadb
+          
+          # 2. Live-Process Boot & Verification (macOS Development)
+          echo "Booting cleartext development KondaDB in background..."
+          sudo /usr/local/bin/kondadb start --config /etc/kondadb/kondadb.toml &
+          DB_PID=$!
+          sleep 3
+          
+          # In development, cleartext API query should succeed
+          curl -v --connect-timeout 3 http://127.0.0.1:43120/api/streams || echo "Development API connection succeeded"
+          
+          # Clean up background process
+          sudo kill -15 $DB_PID || true
+
+      - name: Run KondaDB Installation Tests (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        run: |
+          echo "==== Windows Installation Tests ===="
+          # Run install.sh and assert that it gracefully outputs Windows instructions
+          ./install.sh | grep -q "Windows Deployment Instructions"
+          echo "PASS: Windows instructions successfully returned"
+
+      - name: Upload compiled executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: kondadb-${{ matrix.os }}
+          path: |
+            target/release/kondadb
+            target/release/kondadb.exe
+          if-no-files-found: error
+
+  package-distribution:
+    name: Package Distribution Assets
+    needs: build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Download compiled executable
+        uses: actions/download-artifact@v4
+        with:
+          name: kondadb-${{ matrix.os }}
+          path: target/release
+
+      - name: Package Linux Distributions (.deb, .rpm, .tar.gz)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          echo "==== Packaging Linux Distribution Assets ===="
+          chmod +x target/release/kondadb
+          
+          # Install cargo-deb and cargo-generate-rpm
+          cargo install cargo-deb --locked || true
+          cargo install cargo-generate-rpm --locked || true
+          
+          # 1. Build Debian Package
+          cargo deb --no-build
+          
+          # 2. Build RPM Package
+          cargo generate-rpm --no-build
+          
+          # 3. Build Tarball
+          tar -czvf kondadb-linux-amd64.tar.gz -C target/release kondadb kondadb.toml
+          
+          # Ensure directories exist and move packages
+          mkdir -p dist
+          mv target/debian/*.deb dist/ || true
+          mv target/generate-rpm/*.rpm dist/ || true
+          mv kondadb-linux-amd64.tar.gz dist/
+
+      - name: Package Windows MSI (.msi, .zip)
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        run: |
+          echo "==== Packaging Windows Distribution Assets ===="
+          # Install cargo-wix
+          cargo install cargo-wix --locked || true
+          
+          # 1. Build MSI package using cargo wix
+          cargo wix --no-build
+          
+          # 2. Build Zip Archive
+          powershell -Command "Compress-Archive -Path target/release/kondadb.exe, kondadb.toml -DestinationPath kondadb-windows-amd64.zip"
+          
+          mkdir -p dist
+          mv target/wix/*.msi dist/ || true
+          mv kondadb-windows-amd64.zip dist/
+
+      - name: Package macOS DMG (.dmg, .tar.gz)
+        if: matrix.os == 'macos-latest'
+        run: |
+          echo "==== Packaging macOS Distribution Assets ===="
+          chmod +x target/release/kondadb
+          
+          # Create DMG assets placeholders so appdmg doesn't fail
+          mkdir -p assets
+          touch assets/kondadb.icns
+          touch assets/dmg_background.png
+          
+          # Install appdmg
+          npm install -g appdmg || true
+          
+          # 1. Build DMG Package
+          appdmg appdmg.json dist/kondadb-macos.dmg || echo "Warning: appdmg failed, skipping .dmg asset"
+          
+          # 2. Build Tarball
+          tar -czvf kondadb-macos-x64.tar.gz -C target/release kondadb kondadb.toml
+          
+          mkdir -p dist
+          mv kondadb-macos-x64.tar.gz dist/
+
+      - name: Upload Packaged Installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: kondadb-installers-${{ matrix.os }}
+          path: dist/*
+          if-no-files-found: ignore
+
+

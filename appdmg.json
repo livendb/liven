@@ -1,0 +1,13 @@
+{
+  "title": "KondaDB",
+  "icon": "assets/kondadb.icns",
+  "background": "assets/dmg_background.png",
+  "icon-size": 96,
+  "window": {
+    "size": { "width": 600, "height": 400 }
+  },
+  "contents": [
+    { "x": 448, "y": 170, "type": "link", "path": "/Applications" },
+    { "x": 192, "y": 170, "type": "file", "path": "target/release/kondadb" }
+  ]
+}

@@ -1,0 +1,37 @@
+[server]
+environment = "development"
+host = "127.0.0.1"
+db_port = 43121
+webui_port = 43120
+
+[security]
+master_key = "bcac3bd8e48be28c1d96029352f693ef9c8ae894cbb84b69d2b26c4fd2415efc"
+mode = "auth_key" # Options: "auth_key", "none"
+
+[security.auth_key]
+system_stream = "auth_keys"
+allow_local_auto_generation = true
+
+
+[storage]
+data_directory = "./data"
+
+[limits]
+max_concurrent_streams = 32
+max_open_file_descriptors = 64
+max_index_ram_mb = 16
+max_segment_size_mb = 16
+
+# For local hardware device
+# [limits]
+# max_concurrent_streams = 32
+# max_open_file_descriptors = 64
+# max_index_ram_mb = 16
+# max_segment_size_mb = 16
+
+# For edge
+# [limits]
+# max_concurrent_streams = 64
+# max_open_file_descriptors = 128
+# max_index_ram_mb = 64
+# max_segment_size_mb = 32
