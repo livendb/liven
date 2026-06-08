@@ -100,7 +100,7 @@ export default function Dashboard({
           <h3 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
             {formatBytes(metrics.disk_size)}
           </h3>
-          <p className="text-[11px] text-emerald-500 mt-2 font-mono tabular-nums">
+          <p className="text-[11px] text-primary-500 mt-2 font-mono tabular-nums">
             RAM Usage:{" "}
             <span className="font-semibold text-zinc-700 dark:text-zinc-300">
               {(metrics.ram_usage / (1024 * 1024)).toFixed(2)} MB
@@ -116,7 +116,7 @@ export default function Dashboard({
           <h3 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
             {metrics.total_streams || streams.length}
           </h3>
-          <p className="text-[11px] text-emerald-500 mt-2 font-medium">
+          <p className="text-[11px] text-primary-500 mt-2 font-medium">
             Discoverable database streams
           </p>
         </div>
@@ -129,7 +129,7 @@ export default function Dashboard({
           <h3 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
             {metrics.key_count.toLocaleString()}
           </h3>
-          <p className="text-[11px] text-emerald-500 mt-2 font-medium">
+          <p className="text-[11px] text-primary-500 mt-2 font-medium">
             In-Memory SkipMap Index
           </p>
         </div>
@@ -140,12 +140,12 @@ export default function Dashboard({
             Compacted Engine State
           </span>
           <div className="flex items-center gap-2">
-            <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.6)]" />
+            <span className="h-2 w-2 rounded-full bg-primary-500 animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.6)]" />
             <span className="text-2xl font-bold tracking-tight text-foreground">
               Healthy
             </span>
           </div>
-          <p className="text-[11px] text-emerald-500 mt-2 font-medium">
+          <p className="text-[11px] text-primary-500 mt-2 font-medium">
             Background thread online
           </p>
         </div>
@@ -243,7 +243,7 @@ export default function Dashboard({
                   "text-zinc-500 dark:text-zinc-400 font-mono text-[10px]";
                 if (act.type === "success") {
                   levelText =
-                    "text-emerald-500 dark:text-emerald-400 font-mono text-[10px]";
+                    "text-primary-500 dark:text-primary-400 font-mono text-[10px]";
                 } else if (act.type === "warn") {
                   levelText =
                     "text-amber-500 dark:text-amber-400 font-mono text-[10px]";
@@ -352,7 +352,7 @@ export default function Dashboard({
                 </div>
               </div>
               <div className="flex items-center gap-1.5 text-xs font-mono font-medium text-zinc-650 dark:text-zinc-350 bg-zinc-150/30 dark:bg-zinc-800/20 px-2 py-0.5 rounded border border-zinc-500/10 w-fit">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="w-1.5 h-1.5 rounded-full bg-primary-500 animate-pulse" />
                 <span>
                   {metrics ? metrics.key_count.toLocaleString() : "0"} indexed
                   keys
@@ -377,7 +377,7 @@ export default function Dashboard({
               </div>
               <div className="flex items-center gap-1.5 text-xs font-mono font-medium text-zinc-650 dark:text-zinc-350 bg-zinc-150/30 dark:bg-zinc-800/20 px-2 py-0.5 rounded border border-zinc-500/10 w-fit">
                 <span
-                  className={`w-1.5 h-1.5 rounded-full ${wsConnected ? "bg-emerald-500 animate-pulse" : "bg-rose-500"}`}
+                  className={`w-1.5 h-1.5 rounded-full ${wsConnected ? "bg-primary-500 animate-pulse" : "bg-rose-500"}`}
                 />
                 <span>{wsConnected ? "100% Integrity Guard" : "Offline"}</span>
               </div>
@@ -400,7 +400,7 @@ export default function Dashboard({
               </div>
               <div className="flex items-center gap-1.5 text-xs font-mono font-medium text-zinc-650 dark:text-zinc-350 bg-zinc-150/30 dark:bg-zinc-800/20 px-2 py-0.5 rounded border border-zinc-500/10 w-fit">
                 <span
-                  className={`w-1.5 h-1.5 rounded-full ${wsConnected ? "bg-emerald-500 animate-pulse" : "bg-rose-500"}`}
+                  className={`w-1.5 h-1.5 rounded-full ${wsConnected ? "bg-primary-500 animate-pulse" : "bg-rose-500"}`}
                 />
                 <span>{wsConnected ? "Segment Lock: ACTIVE" : "Offline"}</span>
               </div>
@@ -423,7 +423,7 @@ export default function Dashboard({
               </div>
               <div className="flex items-center gap-1.5 text-xs font-mono font-medium text-zinc-650 dark:text-zinc-350 bg-zinc-150/30 dark:bg-zinc-800/20 px-2 py-0.5 rounded border border-zinc-500/10 w-fit">
                 <span
-                  className={`w-1.5 h-1.5 rounded-full ${wsConnected ? "bg-emerald-500 animate-pulse" : "bg-rose-500"}`}
+                  className={`w-1.5 h-1.5 rounded-full ${wsConnected ? "bg-primary-500 animate-pulse" : "bg-rose-500"}`}
                 />
                 <span>Sync: 0.24ms latency</span>
               </div>

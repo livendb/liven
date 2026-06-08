@@ -123,6 +123,9 @@ pub fn datavalue_to_json(val: &DataValue) -> serde_json::Value {
         DataValue::Array(arr) => {
             serde_json::Value::Array(arr.iter().map(datavalue_to_json).collect())
         }
+        DataValue::Vector(vec) => {
+            serde_json::Value::Array(vec.iter().map(|&x| serde_json::Value::Number(x.into())).collect())
+        }
     }
 }
 

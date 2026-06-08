@@ -152,7 +152,8 @@ impl LivenClient {
                                     format!("<Binary: {} bytes>", b.len())
                                 }
                                 crate::types::DataValue::Array(arr) => format!("{:?}", arr),
-                             };
+                                crate::types::DataValue::Vector(vec) => format!("{:?}", vec),
+                            };
                             println!(
                                 "\x1b[32m[tail]\x1b[0m \x1b[1mSeq:\x1b[0m #{} | \x1b[1mKey:\x1b[0m {} | \x1b[1mValue:\x1b[0m {}",
                                 record.sequence_id, record.key, val_str

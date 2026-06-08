@@ -11,6 +11,15 @@ pub enum DataValue {
     String(String),
     Binary(Vec<u8>),
     Array(Vec<DataValue>),
+    Vector(Vec<i8>), // Native quantized vector variant
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[repr(u8)]
+pub enum PayloadType {
+    RawBytes = 0x01,
+    Structured = 0x02,
+    QuantizedVector = 0x03,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -179,6 +188,7 @@ impl DataValue {
             DataValue::String(_) => 5,
             DataValue::Binary(_) => 6,
             DataValue::Array(_) => 7,
+            DataValue::Vector(_) => 8,
         }
     }
 }
@@ -203,6 +213,7 @@ impl std::fmt::Display for DataValue {
                 }
                 write!(f, "]")
             }
+            DataValue::Vector(v) => write!(f, "{:?}", v),
         }
     }
 }

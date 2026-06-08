@@ -1,4 +1,4 @@
-#![forbid(unsafe_code)]
+// LIVEN library entry point
 
 pub mod client;
 pub mod codec;

@@ -3,51 +3,51 @@
 @tailwind utilities;
 
 :root {
-    /* Premium Forest Green (#054925) Primary */
-    --color-primary: #054925;
-    --color-primary-hover: #032b1a;
-    --color-primary-light: #166e3a;
-    --color-primary-glow: rgba(5, 73, 37, 0.35);
+    /* Electric Cyan/Teal Primary — Representing Stream Velocity */
+    --color-primary: #0ea5e9; /* Vibrant Sky Cyan */
+    --color-primary-hover: #0284c7; /* Focused Ocean Cyan */
+    --color-primary-light: #38bdf8; /* Light Cyan highlight */
+    --color-primary-glow: rgba(14, 165, 233, 0.25);
 
-    /* Complementary Warm Amber-Gold Secondary */
-    --color-secondary: #d97706;
-    --color-secondary-hover: #b45309;
-    --color-secondary-light: #f59e0b;
-    --color-secondary-glow: rgba(217, 119, 6, 0.35);
+    /* Cryptographic Amethyst/Indigo Secondary — Representing Zero-Trust mTLS */
+    --color-secondary: #6366f1; /* Deep Indigo Security */
+    --color-secondary-hover: #4f46e5; /* Focused Security Blue */
+    --color-secondary-light: #818cf8; /* Light Indigo Accent */
+    --color-secondary-glow: rgba(99, 102, 241, 0.25);
 
-    /* Sidebar/Header specific background */
-    --color-navbar-bg: #042d16;
+    /* Sidebar/Header specific background (Clean Obsidian Slate) */
+    --color-navbar-bg: #0f172a;
 
     /* Page-wide settings */
-    --color-body-bg: #f2f6f3; /* Sage Pale Cool-Grey background */
-    --color-panel-bg: #ffffff; /* Solid crisp white cards */
-    --color-border-subtle: #d2e2d7; /* Subtle sage border */
-    --color-text-main: #0f172a;
-    --color-text-muted: #475569;
+    --color-body-bg: #f8fafc; /* Ultra-clean, premium cool grey */
+    --color-panel-bg: #ffffff; /* Crisp white surface cards */
+    --color-border-subtle: #e2e8f0; /* Modern crisp layout borders */
+    --color-text-main: #0f172a; /* Slate-900 high contrast text */
+    --color-text-muted: #64748b; /* Slate-500 secondary descriptions */
 }
 
 .dark {
-    /* Accessible Vibrant Green for Dark Mode */
-    --color-primary: #054925;
-    --color-primary-hover: #148f4a;
-    --color-primary-light: #36cf88;
-    --color-primary-glow: rgba(27, 178, 106, 0.35);
+    /* Accessible High-Octane Neon Cyan for Dark Mode Terminal Feel */
+    --color-primary: #06b6d4; /* High-visibility Neon Cyan */
+    --color-primary-hover: #22d3ee; /* Electric Cyan glow state */
+    --color-primary-light: #67e8f9; /* Crisp highlight border color */
+    --color-primary-glow: rgba(6, 182, 212, 0.35);
 
-    /* Legible Amber-Gold for Dark Mode */
-    --color-secondary: #fbbf24;
-    --color-secondary-hover: #f59e0b;
-    --color-secondary-light: #fcd34d;
-    --color-secondary-glow: rgba(251, 191, 36, 0.35);
+    /* Accessible Luminous Purple for Cryptographic Tokens */
+    --color-secondary: #a855f7; /* Luminous Orchid Purple */
+    --color-secondary-hover: #c084fc; /* Fluid Orchid hover state */
+    --color-secondary-light: #d8b4fe; /* Accent highlight edge color */
+    --color-secondary-glow: rgba(168, 85, 247, 0.35);
 
-    /* Deeper Forest Black for Sidebar */
-    --color-navbar-bg: #03140a;
+    /* True Industrial Obsidian Black for Sidebar */
+    --color-navbar-bg: #030712; /* Deep matte grid background */
 
     /* Dark Mode Layout backgrounds */
-    --color-body-bg: #0a120d; /* Deep forest-black matte body */
-    --color-panel-bg: #121e16; /* Deep forest-slate card backgrounds */
-    --color-border-subtle: #1d3325; /* Subtle dark forest borders */
-    --color-text-main: #f8fafc;
-    --color-text-muted: #94a3b8;
+    --color-body-bg: #090d16; /* Low-profile core matrix canvas */
+    --color-panel-bg: #111827; /* Clean dark panels */
+    --color-border-subtle: #1f2937; /* Sleek hardware border dividers */
+    --color-text-main: #f8fafc; /* Pure code readability text */
+    --color-text-muted: #94a3b8; /* Structural comment text */
 }
 
 @layer base {
@@ -57,10 +57,7 @@
 
     code,
     pre {
-        font-family:
-            Fira Code,
-            "JetBrains Mono",
-            monospace;
+        font-family: "Fira Code", "JetBrains Mono", monospace;
     }
 }
 
@@ -75,29 +72,12 @@
 }
 
 ::-webkit-scrollbar-thumb {
-    background: rgba(24, 24, 27, 0.1);
+    background: rgba(15, 23, 42, 0.1);
     border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-    background: rgba(24, 24, 27, 0.2);
-}
-
-/* Glassmorphism premium panels style utility */
-.glass-panel {
-    background: var(--color-panel-bg);
-    border: 1px solid var(--color-border-subtle);
-    box-shadow:
-        0 1px 3px rgba(0, 0, 0, 0.02),
-        0 1px 2px rgba(0, 0, 0, 0.04);
-    transition:
-        background-color 0.3s,
-        border-color 0.3s,
-        box-shadow 0.3s;
-}
-
-.glass-panel-glow {
-    box-shadow: 0 0 15px -3px var(--color-primary-glow);
+    background: rgba(15, 23, 42, 0.2);
 }
 
 .dark ::-webkit-scrollbar-thumb {
@@ -106,16 +86,4 @@
 
 .dark ::-webkit-scrollbar-thumb:hover {
     background: rgba(255, 255, 255, 0.2);
-}
-
-.dark .glass-panel {
-    background: var(--color-panel-bg);
-    border: 1px solid var(--color-border-subtle);
-    box-shadow:
-        0 4px 6px -1px rgba(0, 0, 0, 0.2),
-        0 2px 4px -1px rgba(0, 0, 0, 0.1);
-}
-
-.dark .glass-panel-glow {
-    box-shadow: 0 0 15px -3px var(--color-primary-glow);
 }

@@ -649,7 +649,7 @@ impl StorageEngine {
                 return Err("CRC32 integrity check failed during positional read".to_string());
             }
 
-            let (stream_name, key, value) = deserialize_payload_borrowed(target_slice)?;
+            let (stream_name, key, value) = deserialize_payload_borrowed(target_slice, type_tag)?;
             let stream_key = crate::storage::key::StreamKey::from_str(key)?;
 
             Ok(Record {
@@ -796,7 +796,7 @@ impl StorageEngine {
                     let actual_crc = crc32fast::hash(target_slice);
                     if actual_crc == crc32 {
                         if let Ok((stream_name, key, value)) =
-                            deserialize_payload_borrowed(target_slice)
+                            deserialize_payload_borrowed(target_slice, type_tag)
                         {
                             if let Ok(stream_key) = crate::storage::key::StreamKey::from_str(key) {
                                 return Ok(Some(Record {
@@ -1376,11 +1376,22 @@ pub fn serialize_payload_into(stream_name: &str, key: &str, value: &DataValue, b
     buf.extend_from_slice(&(key_bytes.len() as u16).to_be_bytes());
     buf.extend_from_slice(key_bytes);
 
-    let _ = rmp_serde::encode::write(buf, value);
+    match value {
+        DataValue::Vector(vec) => {
+            let ptr = vec.as_ptr() as *const u8;
+            let len = vec.len();
+            let u8_slice = unsafe { std::slice::from_raw_parts(ptr, len) };
+            buf.extend_from_slice(u8_slice);
+        }
+        _ => {
+            let _ = rmp_serde::encode::write(buf, value);
+        }
+    }
 }
 
 fn deserialize_payload_borrowed<'a>(
     payload: &'a [u8],
+    type_tag: u8,
 ) -> Result<(&'a str, &'a str, DataValue), String> {
     if payload.len() < 4 {
         return Err("Payload too short".to_string());
@@ -1403,15 +1414,78 @@ fn deserialize_payload_borrowed<'a>(
         .map_err(|e| e.to_string())?;
 
     let val_offset = key_offset + key_len;
-    let value: DataValue =
-        rmp_serde::from_slice(&payload[val_offset..]).map_err(|e| e.to_string())?;
+    let value = if type_tag == 8 {
+        let raw_bytes = &payload[val_offset..];
+        let ptr = raw_bytes.as_ptr() as *const i8;
+        let count = raw_bytes.len();
+        let vec_i8 = unsafe { std::slice::from_raw_parts(ptr, count) }.to_vec();
+        DataValue::Vector(vec_i8)
+    } else {
+        rmp_serde::from_slice(&payload[val_offset..]).map_err(|e| e.to_string())?
+    };
 
     Ok((stream_name, key, value))
 }
 
 pub fn deserialize_payload(payload: &[u8]) -> Result<(String, String, DataValue), String> {
-    let (stream_name, key, value) = deserialize_payload_borrowed(payload)?;
+    let (stream_name, key, value) = deserialize_payload_borrowed(payload, 0x02)?;
     Ok((stream_name.to_string(), key.to_string(), value))
+}
+
+pub struct FrameReader<'a> {
+    pub data: &'a [u8],
+}
+
+impl<'a> FrameReader<'a> {
+    pub fn new(data: &'a [u8]) -> Self {
+        Self { data }
+    }
+
+    pub fn as_vector_slice(&self) -> Option<&[i8]> {
+        if self.data.len() < 26 {
+            return None;
+        }
+        let type_tag = self.data[16];
+        if type_tag != 8 {
+            return None;
+        }
+        let payload_len = u32::from_be_bytes([
+            self.data[18],
+            self.data[19],
+            self.data[20],
+            self.data[21],
+        ]) as usize;
+
+        if self.data.len() < 26 + payload_len {
+            return None;
+        }
+
+        let payload = &self.data[26..26 + payload_len];
+        if payload.len() < 4 {
+            return None;
+        }
+
+        let stream_len = u16::from_be_bytes([payload[0], payload[1]]) as usize;
+        if payload.len() < 4 + stream_len {
+            return None;
+        }
+
+        let key_len_offset = 2 + stream_len;
+        let key_len = u16::from_be_bytes([
+            payload[key_len_offset],
+            payload[key_len_offset + 1],
+        ]) as usize;
+
+        let val_offset = key_len_offset + 2 + key_len;
+        if payload.len() < val_offset {
+            return None;
+        }
+
+        let raw_bytes = &payload[val_offset..];
+        let ptr = raw_bytes.as_ptr() as *const i8;
+        let len = raw_bytes.len();
+        Some(unsafe { std::slice::from_raw_parts(ptr, len) })
+    }
 }
 
 pub fn deserialize_payload_fuzz(payload: &[u8]) -> Result<(String, String, DataValue), String> {

@@ -193,6 +193,7 @@ fn format_records_table(records: &[Record]) -> Vec<String> {
             DataValue::String(s) => s.clone(),
             DataValue::Binary(b) => format!("<Binary: {} bytes>", b.len()),
             DataValue::Array(arr) => format!("{:?}", arr),
+            DataValue::Vector(v) => format!("{:?}", v),
         };
         row.push(val_str);
         rows.push(row);
@@ -946,6 +947,7 @@ pub async fn run_shell(auth_key: Option<String>) -> Result<(), Box<dyn std::erro
                         DataValue::String(s) => s.clone(),
                         DataValue::Binary(b) => format!("<Binary: {} bytes>", b.len()),
                         DataValue::Array(arr) => format!("{:?}", arr),
+                        DataValue::Vector(v) => format!("{:?}", v),
                     };
                     logs.push(format!(
                         " [tail] Seq: #{} | Key: {} | Value: {}",

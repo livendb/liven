@@ -76,6 +76,11 @@ impl AppendTarget {
                     }
                     DataValue::Binary(b) => serde_json::Value::String(format!("{:?}", b)),
                     DataValue::Array(_) => serde_json::Value::Array(vec![]),
+                    DataValue::Vector(v) => serde_json::Value::Array(
+                        v.into_iter()
+                            .map(|x| serde_json::Value::Number(serde_json::Number::from(x)))
+                            .collect(),
+                    ),
                 };
                 batch.push(serde_json::json!({
                     "stream": stream,

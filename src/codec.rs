@@ -13,6 +13,7 @@ pub enum LivenFrame {
     Response { signature: Vec<u8> },
     Ok,
     Err(String),
+    Vector(Vec<i8>),
 }
 
 pub struct LivenCodec {
@@ -51,9 +52,33 @@ impl Decoder for LivenCodec {
         src.advance(4);
         let data = src.split_to(len);
 
-        let frame: LivenFrame = rmp_serde::from_slice(&data)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-        Ok(Some(frame))
+        if data.is_empty() {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "Empty TCP frame payload"));
+        }
+
+        let discriminator = data[0];
+        if discriminator == 0x03 {
+            let raw_bytes = &data[1..];
+            let ptr = raw_bytes.as_ptr() as *const i8;
+            let count = raw_bytes.len();
+            let vec_i8 = unsafe { std::slice::from_raw_parts(ptr, count) }.to_vec();
+            Ok(Some(LivenFrame::Vector(vec_i8)))
+        } else if discriminator == 0x02 {
+            let frame: LivenFrame = rmp_serde::from_slice(&data[1..])
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+            Ok(Some(frame))
+        } else {
+            // Robust fallback for backward compatibility
+            match rmp_serde::from_slice::<LivenFrame>(&data) {
+                Ok(frame) => Ok(Some(frame)),
+                Err(_) => {
+                    Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("Unknown TCP frame discriminator: {}", discriminator),
+                    ))
+                }
+            }
+        }
     }
 }
 
@@ -61,14 +86,27 @@ impl Encoder<LivenFrame> for LivenCodec {
     type Error = io::Error;
 
     fn encode(&mut self, item: LivenFrame, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        let serialized =
-            rmp_serde::to_vec(&item).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-        let payload_len = serialized.len();
-
-        dst.reserve(4 + payload_len);
-        dst.extend_from_slice(&(payload_len as u32).to_be_bytes());
-        dst.extend_from_slice(&serialized);
-
+        match item {
+            LivenFrame::Vector(vec) => {
+                let payload_len = 1 + vec.len();
+                dst.reserve(4 + payload_len);
+                dst.extend_from_slice(&(payload_len as u32).to_be_bytes());
+                dst.extend_from_slice(&[0x03]);
+                let ptr = vec.as_ptr() as *const u8;
+                let len = vec.len();
+                let u8_slice = unsafe { std::slice::from_raw_parts(ptr, len) };
+                dst.extend_from_slice(u8_slice);
+            }
+            other => {
+                let serialized = rmp_serde::to_vec(&other)
+                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+                let payload_len = 1 + serialized.len();
+                dst.reserve(4 + payload_len);
+                dst.extend_from_slice(&(payload_len as u32).to_be_bytes());
+                dst.extend_from_slice(&[0x02]);
+                dst.extend_from_slice(&serialized);
+            }
+        }
         Ok(())
     }
 }
