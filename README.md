@@ -1,128 +1,122 @@
 # LIVEN ⚡
 
-LIVEN is a fast, lightweight database built to capture, store, and stream data in real time. It is designed to handle continuous streams of information—like AI tracking, live sports activities, financial market updates, or device logs—and make that data instantly searchable.
+LIVEN is a high-performance, lightweight stream database and vector similarity engine engineered to capture, store, secure, and stream high-velocity data in real time. It is designed to handle continuous streams of information—such as AI agent reasoning, real-time prediction markets, IoT telemetry, and live sports analytics—while maintaining deterministic safety limits, Zero-Trust security shields, and sub-microsecond query performance.
 
 ---
 
-## What It Does
+## Technical Architecture & Design System
 
-*   **Instant Data Ingestion:** Safely records massive streams of incoming data without slowing down or creating bottlenecks.
-*   **Crash-Proof Safety:** Writes data down securely the exact millisecond it happens, ensuring no information is lost or corrupted if the system goes down.
-*   **Lightning-Fast Lookups:** Finds and retrieves any specific piece of historical data completely instantly.
-*   **Automatic Cleanup:** Runs quiet background cleanups to compress files and clear out old deleted data, keeping your storage clean and efficient.
-*   **Two Visual Dashboards:**
-    *   **Interactive Terminal View (TUI):** A built-in terminal dashboard for monitoring performance and data flows directly from your command line.
-    *   **Modern Web Dashboard:** A beautiful, real-time web interface to browse your data streams, run search queries, and view records in clean list or table layouts.
-
----
-
-## How It Works Under the Hood
-
-When data flows into LIVEN, it moves through a streamlined, highly secure pipeline:
+The core LIVEN engine is designed from the ground up for predictable resource allocation, cryptographic safety, and lock-free execution speeds. Below is the end-to-end design system of how data flows safely into the engine:
 
 ```mermaid
 graph TD
-    Client[Your Application / Web UI] -- Real-time Streams --> Server[LIVEN Server]
-    Server -- Immediate Queue --> Memory[Fast Safe Buffer]
-    Memory -- Permanent Save --> Storage[Secure Disk Files]
-    Memory -- Speed Index --> Map[Instant Search Map]
-    Storage & Map --> Engine[Instant Search Engine]
+    Client["Your Application / Web UI"] -- "mTLS / TCP Connection" --> Shield["ZTNA mTLS Security Shield"]
+    Shield -- "Authenticated Channels Only" --> Semaphore["Tokio Connection Semaphore (max_connections)"]
+    Semaphore -- "Acquired Permit" --> Worker["Connection Worker Task (RAII drop cleanup)"]
+    Worker -- "Query String" --> Parser["Query Compilation VM / Parser"]
+    Parser -- "Compiled AST" --> Executor["VM Query Executor"]
+    Executor -- "Write / Append" --> Buffer["Active Log Memory Buffer"]
+    Buffer -- "fdatasync disk barrier" --> Storage["On-Disk Sealed Segments (.liven)"]
+    Buffer -- "Real-time Dispatch" --> Broadcast["Broadcast Channel (broadcast_capacity)"]
+    Broadcast -- "WebSocket Streams" --> ClientStream["Live Streaming Clients / .listen() / tail()"]
+    Executor -- "Point Lookup" --> Index["Lock-Free SkipMap Index"]
+    Storage -- "Automatic Merging" --> Compactor["Defragmentation Compactor & Tombstone Reaper"]
 ```
 
 ---
 
-## Getting Started
+## Premium System Capabilities
 
-### Prerequisites
+### 🛡️ Zero-Trust Network Architecture (ZTNA) & mTLS Shield
+LIVEN features a single-port secure network implementation. It automatically wraps all transport boundaries in mutual TLS (mTLS) with custom CA validation chains:
+* **Production Mode**: Enforces strict client certificate validation, immediately dropping unauthenticated, cleartext, or invalid handshakes at the TCP boundary.
+* **Granular ACL Verification**: Employs client Common Name (CN) filtering to map incoming connection keys to specific stream scopes, securing multi-tenant operations.
 
-Make sure you have **Rust** (Rust 2024 edition) and **Node.js** installed on your computer.
+### 🚦 Bounded Client Concurrency (Connection Bounding)
+To prevent server starvation, connection boundaries are actively controlled by a central `tokio::sync::Semaphore` permit coordinator:
+* **Permit-Limit**: Instantiated using the configured `max_connections` limit.
+* **RAII Drop Lifecycle**: Acquires an owned permit before spawning connection worker loops. Upon connection closing, standard RAII drop instantly releases the permit, establishing a strict upper bound on thread and connection footprint.
 
-### 1. Run the Database Server
+### 🧬 Real-Time Stream Tailing & Listening
+Clients can subscribe to instant write feeds using the built-in streaming query VM stages:
+* **`.listen()` and `tail()`**: Subscriptions tap directly into internal, highly-buffered broadcast channels (configured with `broadcast_capacity` to prevent memory leaks on slow readers).
+* **Live Indicators**: The built-in Web Query Console features dynamic, pulsing emerald streaming badges (`TAILING LIVE STREAM`), inline streaming telemetry feeds, and interactive STOP action controls.
 
-```bash
-# Build the database program
-cargo build --release
+### 📐 Quantized Vector Similarity Engine
+LIVEN incorporates deep vector processing pipelines directly inside its storage engine:
+* **Binary Quantization Codec**: Compresses high-dimensional vectors into spatial bit arrays, reducing memory footprints.
+* **Cosine Similarity VM Steps**: Executes high-speed cosine similarity filters in compiled pipeline query loops, enabling ultra-fast spatial search capabilities directly on historical logs.
 
-# Start the LIVEN server
-cargo run --bin liven
-```
-
-### 2. Launch the Web Dashboard
-
-```bash
-# Move into the user interface folder
-cd ui
-
-# Install layout dependencies
-npm install
-
-# Start the live web interface
-npm run dev
-```
-
----
-
-## Running Tests & Benchmarks (Dev Mode)
-
-To run the robust test suite or profile the engine's performance bounds during development:
-
-```bash
-# Run all unit, integration, and syntax tests
-cargo test
-
-# Run Criterion-powered micro-benchmarks (profiles ingestion / search loops)
-cargo bench
-```
+### ⏱️ Deterministic Resource Budgeting
+* **OOM Prevention (`max_index_ram_mb`):** Measures SkipMap pointer and key allocation sizes. Rejects writes transactionally with `"Index RAM limit exceeded"` if they violate the RAM ceiling while prioritizing delete/tombstone operations.
+* **LRU File Cache (`max_open_file_descriptors`):** Evicts inactive segment file descriptors in real time to prevent the operating system from encountering `EMFILE` limits under high stream densities.
 
 ---
 
 ## Simple Configuration (`liven.toml`)
 
-You can easily manage your network ports, storage folders, and strict runtime limits from a single configuration file:
+Configure network ports, secure boundaries, and strict resource budgets from a single configuration file:
 
 ```toml
 [server]
 environment = "development"
 host = "127.0.0.1"
-db_port = 43121      # Port for your data streams
-webui_port = 43120   # Port to open your web dashboard
+db_port = 43121             # Native binary wire port
+webui_port = 43120          # Web Query Console port
+max_connections = 10000     # Strict Semaphore concurrency boundary
+broadcast_capacity = 4096   # Memory buffer ceiling for streaming queries
 
 [storage]
-data_directory = "./data"   # Folder where files are stored safely
+data_directory = "./data"   # Safe permanent storage folder
 
 [limits]
-max_concurrent_streams = 32      # Maximum unique streams allowed concurrently
-max_open_file_descriptors = 64   # Strict ceiling on cached open file handles
+max_concurrent_streams = 32      # Maximum unique streams allowed
+max_open_file_descriptors = 64   # Strict ceiling on cached file handles
 max_index_ram_mb = 16            # Limit on SkipMap in-memory index footprint
-max_segment_size_mb = 16         # Active log-file size threshold before rolling
+max_segment_size_mb = 16         # Active log segment roll threshold
 ```
 
 ---
 
-## Deterministic Resource Budgeting & Safety Limits
+## Performance & Ingestion Benchmarks
 
-LIVEN is engineered to run reliably under tight, predictable resource ceilings. Rather than letting resource consumption scale unchecked, the storage engine enforces strict bounds to prevent critical system failures:
+Criterion-powered micro-benchmarks profiles LIVEN under tight, single-threaded resource budgets:
 
-*   **OOM Prevention (`max_index_ram_mb`):** LIVEN dynamically profiles in-memory index footprint by measuring pointer and structure overhead (`compound_key.len() + 64` bytes). Writes are pre-validated transactionally on the caller thread and rejected with `"Index RAM limit exceeded"` if they violate this budget. Delete/tombstone operations are always allowed, permitting immediate memory reclamation.
-*   **EMFILE (File Descriptor) Prevention (`max_open_file_descriptors`):** Dynamic LRU-style pruning of the file handle cache ensures the database never exceeds its file descriptor allocation limit. Inactive read-only segment file handles are evicted and automatically closed by the operating system once any active reader drops their reference, completely mitigating resource exhaustion.
-*   **Stream Ceilings (`max_concurrent_streams`):** Keeps stream ingestion bounded, preventing indexing and descriptor counts from scaling uncontrollably. Stream boundaries are checked sequentially on recovery (halting bad engines fast) and transactionally on write paths.
-*   **Segment Size Limits (`max_segment_size_mb`):** Sets a clear boundary on the active log-file size, ensuring rapid rolling, efficient compaction, and predictable chunking.
+* **Query Compilation Speed**: ~291 ns for simple parsing stages; ~697 ns for complex, multi-stage pipelines.
+* **Lock-Free Point-Lookups**: ~1.35 µs for key hits; sub-100 ns (~99 ns) to instantly prune non-existent keys.
+* **Strict Durability Ingestion**: ~238 writes/second with individual hardware `fdatasync` disk-sync barriers active, rising to thousands of batch writes/second in memory-buffered writes.
+* **Baseline Footprint**: ~12MB lightweight operational memory baseline on boot.
 
 ---
 
-## Current LIVEN Stats & Performance
+## Quick Start
 
-Our automated micro-benchmarks demonstrate the exact performance profile of the storage engine under tight execution limits:
+### 1. Launch LIVEN Server
+```bash
+# Compile and boot LIVEN server using liven.toml
+cargo build --release
+cargo run --bin liven -- start --config liven.toml
+```
 
-* **Query Parsing Speed:** ~291 ns for simple filters; ~697 ns for complex, multi-stage telemetry pipelines.
-* **Point-Lookup Latency:** ~1.35 µs for existing keys using lock-free index positional reads; sub-100 ns (~99 ns) to instantly prune non-existent keys.
-* **Fully Safe Ingestion Rate:** ~119 batches/second (~238 writes/second) when running in strict durability mode (forces a physical `fdatasync` disk-sync barrier per batch of 2 records to ensure absolute crash resistance).
-* **Storage Integrity:** Every structural frame is sealed with a custom CRC32 chunk hash, verified automatically on recovery.
-* **Memory Footprint:** ~12MB lightweight operational baseline.
+### 2. Launch the Web Query Console
+```bash
+cd ui
+npm install
+npm run dev
+```
+
+### 3. Run Verification Suite & Benchmarks
+```bash
+# Run all tests (unit, integration, ZTNA, parser, and storage compaction)
+cargo test
+
+# Run micro-benchmarks
+cargo bench
+```
 
 ---
 
 ## Contributors
 
-*   **Olalekan** — Lead Developer & Architect
-*   **LIVEN Contributors** — Open-source community creators
+* **Olalekan** — Lead Developer & Architect
+* **LIVEN Contributors** — Open-source community creators
