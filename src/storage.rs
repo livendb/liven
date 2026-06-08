@@ -1479,12 +1479,9 @@ impl<'a> FrameReader<'a> {
         if type_tag != 8 {
             return None;
         }
-        let payload_len = u32::from_be_bytes([
-            self.data[18],
-            self.data[19],
-            self.data[20],
-            self.data[21],
-        ]) as usize;
+        let payload_len =
+            u32::from_be_bytes([self.data[18], self.data[19], self.data[20], self.data[21]])
+                as usize;
 
         if self.data.len() < 26 + payload_len {
             return None;
@@ -1501,10 +1498,8 @@ impl<'a> FrameReader<'a> {
         }
 
         let key_len_offset = 2 + stream_len;
-        let key_len = u16::from_be_bytes([
-            payload[key_len_offset],
-            payload[key_len_offset + 1],
-        ]) as usize;
+        let key_len =
+            u16::from_be_bytes([payload[key_len_offset], payload[key_len_offset + 1]]) as usize;
 
         let val_offset = key_len_offset + 2 + key_len;
         if payload.len() < val_offset {

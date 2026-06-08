@@ -243,7 +243,7 @@ fn parse_vector_filter_stage(input: &str) -> IResult<&str, PipelineStage> {
             return Err(nom::Err::Error(nom::error::Error::new(
                 input,
                 nom::error::ErrorKind::Tag,
-            )))
+            )));
         }
     };
 
@@ -255,7 +255,7 @@ fn parse_vector_filter_stage(input: &str) -> IResult<&str, PipelineStage> {
             return Err(nom::Err::Error(nom::error::Error::new(
                 input,
                 nom::error::ErrorKind::Tag,
-            )))
+            )));
         }
     };
 

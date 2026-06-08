@@ -53,7 +53,10 @@ impl Decoder for LivenCodec {
         let data = src.split_to(len);
 
         if data.is_empty() {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "Empty TCP frame payload"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Empty TCP frame payload",
+            ));
         }
 
         let discriminator = data[0];
@@ -71,12 +74,10 @@ impl Decoder for LivenCodec {
             // Robust fallback for backward compatibility
             match rmp_serde::from_slice::<LivenFrame>(&data) {
                 Ok(frame) => Ok(Some(frame)),
-                Err(_) => {
-                    Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        format!("Unknown TCP frame discriminator: {}", discriminator),
-                    ))
-                }
+                Err(_) => Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("Unknown TCP frame discriminator: {}", discriminator),
+                )),
             }
         }
     }

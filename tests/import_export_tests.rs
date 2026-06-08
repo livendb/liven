@@ -300,9 +300,7 @@ usr_2,Bob,25,false,\"{\"\"role\"\":\"\"user\"\"}\"
         .env("LIVENDB__SERVER__DB_PORT", test_port)
         .env("LIVENDB__SERVER__WEBUI_PORT", test_webui_port)
         .env("HOME", test_dir) // Override HOME so it defaults to test_dir/Downloads
-        .args(&[
-            "run", "--bin", "liven", "--", "export", "--format", "jsonl",
-        ])
+        .args(&["run", "--bin", "liven", "--", "export", "--format", "jsonl"])
         .status()
         .expect("Failed to execute export all streams command");
     assert!(export_all_status.success());

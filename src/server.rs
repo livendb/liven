@@ -468,14 +468,21 @@ pub async fn run_server(
                     let state_clone = state_for_tcp.clone();
                     let acceptor_opt = tls_acceptor.clone();
 
-                    match state_clone.engine.conn_semaphore.clone().acquire_owned().await {
+                    match state_clone
+                        .engine
+                        .conn_semaphore
+                        .clone()
+                        .acquire_owned()
+                        .await
+                    {
                         Ok(permit) => {
                             tokio::spawn(async move {
                                 let _ = stream.set_nodelay(true);
 
                                 if is_dev {
                                     let liven_stream = LivenStream::Cleartext(stream);
-                                    let is_auth_key = state_clone.config.security.mode == "auth_key";
+                                    let is_auth_key =
+                                        state_clone.config.security.mode == "auth_key";
                                     let caps = if is_auth_key {
                                         crate::security::CAP_NONE
                                     } else {
@@ -500,17 +507,22 @@ pub async fn run_server(
                                                     session
                                                         .peer_certificates()
                                                         .and_then(|certs| certs.first())
-                                                        .and_then(|cert| extract_cn_from_der(cert.as_ref()))
+                                                        .and_then(|cert| {
+                                                            extract_cn_from_der(cert.as_ref())
+                                                        })
                                                 };
 
                                                 if let Some(cn) = cn_opt {
                                                     let identity_opt = {
-                                                        let cache =
-                                                            state_clone.identity_cache.read().unwrap();
+                                                        let cache = state_clone
+                                                            .identity_cache
+                                                            .read()
+                                                            .unwrap();
                                                         cache.get(&cn).cloned()
                                                     };
 
-                                                    let liven_stream = LivenStream::Encrypted(tls_stream);
+                                                    let liven_stream =
+                                                        LivenStream::Encrypted(tls_stream);
                                                     if let Some(identity) = identity_opt {
                                                         let (close_tx, close_rx) =
                                                             tokio::sync::oneshot::channel::<()>();

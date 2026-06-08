@@ -177,7 +177,9 @@ impl LivenClient {
     pub async fn listen(
         mut self,
         stream_name: &str,
-    ) -> io::Result<std::pin::Pin<Box<dyn futures_util::Stream<Item = io::Result<Record>> + Send + 'static>>> {
+    ) -> io::Result<
+        std::pin::Pin<Box<dyn futures_util::Stream<Item = io::Result<Record>> + Send + 'static>>,
+    > {
         let query_str = format!("tail(\"{}\")", stream_name);
         self.framed.send(LivenFrame::Query(query_str)).await?;
 

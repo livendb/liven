@@ -21,7 +21,6 @@ fn default_broadcast_capacity() -> usize {
     4096
 }
 
-
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct StorageConfig {
     pub data_directory: String,
@@ -157,8 +156,7 @@ impl AppConfig {
                 .map(|b| format!("{:02x}", b))
                 .collect::<String>();
 
-            let _ =
-                update_master_key_in_toml(std::path::Path::new("liven.toml"), &generated_mkey);
+            let _ = update_master_key_in_toml(std::path::Path::new("liven.toml"), &generated_mkey);
             config.security.master_key = Some(generated_mkey);
         }
 
