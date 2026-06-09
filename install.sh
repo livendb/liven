@@ -159,13 +159,13 @@ EOF
 elif [ "$OS" = "Darwin" ]; then
     echo "macOS detected. Configuring launchd plist template..."
     mkdir -p /Library/LaunchDaemons
-    cat << 'EOF' > /Library/LaunchDaemons/com.liven.livendb.plist
+    cat << 'EOF' > /Library/LaunchDaemons/com.liven.liven.plist
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.liven.livendb</string>
+    <string>com.liven.liven</string>
     <key>ProgramArguments</key>
     <array>
         <string>/usr/local/bin/liven</string>
@@ -183,4 +183,3 @@ EOF
 fi
 
 echo "✨ LIVEN system installation completed successfully!"
-

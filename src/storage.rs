@@ -1106,10 +1106,10 @@ fn get_process_memory() -> u64 {
     {
         if let Ok(statm) = std::fs::read_to_string("/proc/self/statm") {
             let fields: Vec<&str> = statm.split_whitespace().collect();
-            if let Some(rss_pages_str) = fields.get(1) {
-                if let Ok(rss_pages) = rss_pages_str.parse::<u64>() {
-                    return rss_pages * 4096;
-                }
+            if let Some(rss_pages_str) = fields.get(1)
+                && let Ok(rss_pages) = rss_pages_str.parse::<u64>()
+            {
+                return rss_pages * 4096;
             }
         }
     }
