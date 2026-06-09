@@ -89,8 +89,9 @@ jobs:
           test -f /etc/systemd/system/liven.service
 
           # 2. Verify Non-Systemd / Container Fallback
-          # Run inside isolated alpine container
-          docker run --rm -v ${{ github.workspace }}:/workspace alpine:latest sh -c "
+          # Uses Debian (glibc) — the LIVEN binary is compiled against glibc.
+          # Alpine/musl support will be provided via a dedicated Dockerfile later.
+          docker run --rm -v ${{ github.workspace }}:/workspace debian:bookworm-slim sh -c "
             cp /workspace/install.sh /install.sh &&
             chmod +x /install.sh &&
             mkdir -p /target/release &&
