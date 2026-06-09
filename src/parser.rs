@@ -622,10 +622,8 @@ fn find_outer_comma(input: &str) -> Option<usize> {
                 ')' => paren_depth -= 1,
                 '{' => brace_depth += 1,
                 '}' => brace_depth -= 1,
-                ',' => {
-                    if bracket_depth == 0 && paren_depth == 0 && brace_depth == 0 {
-                        return Some(i);
-                    }
+                ',' if bracket_depth == 0 && paren_depth == 0 && brace_depth == 0 => {
+                    return Some(i);
                 }
                 _ => {}
             }
@@ -769,18 +767,16 @@ pub fn parse_query(input: &str) -> Result<Query, String> {
                 ')' => paren_depth -= 1,
                 '{' => brace_depth += 1,
                 '}' => brace_depth -= 1,
-                '.' => {
-                    if bracket_depth == 0 && paren_depth == 0 && brace_depth == 0 {
-                        let rest: String = chars[i..].iter().collect();
-                        if rest.starts_with(".update")
-                            || rest.starts_with(".delete")
-                            || rest.starts_with(".empty")
-                            || rest.starts_with(".insert")
-                            || rest.starts_with(".upsert")
-                            || rest.starts_with(".listen")
-                        {
-                            dot_index = Some(i);
-                        }
+                '.' if bracket_depth == 0 && paren_depth == 0 && brace_depth == 0 => {
+                    let rest: String = chars[i..].iter().collect();
+                    if rest.starts_with(".update")
+                        || rest.starts_with(".delete")
+                        || rest.starts_with(".empty")
+                        || rest.starts_with(".insert")
+                        || rest.starts_with(".upsert")
+                        || rest.starts_with(".listen")
+                    {
+                        dot_index = Some(i);
                     }
                 }
                 _ => {}
