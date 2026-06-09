@@ -1,18 +1,28 @@
+#[cfg(feature = "server")]
 use liven::client::LivenClient;
+#[cfg(feature = "server")]
 use liven::config::{
     AppConfig, AuthKeyConfig, LimitsConfig, SecurityConfig, ServerConfig, StorageConfig,
 };
 #[cfg(feature = "server")]
 use liven::server::{AuthKeyRecord, run_server};
+#[cfg(feature = "server")]
 use liven::storage::StorageEngine;
+#[cfg(feature = "server")]
 use liven::types::DataValue;
+#[cfg(feature = "server")]
 use std::fs;
+#[cfg(feature = "server")]
 use std::sync::Arc;
+#[cfg(feature = "server")]
 use std::time::Duration;
+#[cfg(feature = "server")]
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+#[cfg(feature = "server")]
 use tokio::net::TcpStream;
 
 // HTTP helper to send raw requests to local server
+#[cfg(feature = "server")]
 async fn send_http_request(
     port: u16,
     method: &str,

@@ -1,10 +1,16 @@
+#[cfg(feature = "server")]
 use liven::client::LivenClient;
+#[cfg(feature = "server")]
 use liven::config::{AppConfig, LimitsConfig, SecurityConfig, ServerConfig, StorageConfig};
 #[cfg(feature = "server")]
 use liven::server::run_server;
+#[cfg(feature = "server")]
 use liven::storage::StorageEngine;
+#[cfg(feature = "server")]
 use std::fs;
+#[cfg(feature = "server")]
 use std::sync::Arc;
+#[cfg(feature = "server")]
 use std::time::Duration;
 
 #[cfg(feature = "server")]

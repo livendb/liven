@@ -424,8 +424,6 @@ impl StorageEngine {
             .open(&active_path)
             .map_err(|e| e.to_string())?;
 
-        file.lock_exclusive()
-            .map_err(|e| format!("Failed to lock active segment: {}", e))?;
         let active_len = file.metadata().map_err(|e| e.to_string())?.len();
 
         let mut active_file_guard = self.active_file.lock().unwrap();
@@ -1370,7 +1368,7 @@ fn execute_batch_append(
 
     if *active_size_guard + (frame_buf.len() as u64) > max_segment_size {
         if let Some(old_file) = active_file_guard.take() {
-            let _ = old_file.unlock();
+            let _ = old_file.sync_all();
         }
 
         let new_active_id = current_sequence_id.load(Ordering::SeqCst);
@@ -1383,9 +1381,6 @@ fn execute_batch_append(
             .append(true)
             .open(&new_path)
             .map_err(|e| e.to_string())?;
-
-        file.lock_exclusive()
-            .map_err(|e| format!("Failed to lock active segment: {}", e))?;
 
         *active_file_guard = Some(file);
         *active_size_guard = 0;
@@ -1653,7 +1648,6 @@ impl Drop for StorageEngine {
         if let Ok(mut active_file_guard) = self.active_file.lock()
             && let Some(file) = active_file_guard.take()
         {
-            let _ = file.unlock();
             let _ = file.sync_all();
         }
     }

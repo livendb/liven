@@ -1,15 +1,23 @@
+#[cfg(feature = "server")]
 use liven::client::LivenClient;
+#[cfg(feature = "server")]
 use liven::config::{
     AppConfig, LimitsConfig, SecurityConfig, ServerConfig, StorageConfig, ZtnaConfig,
 };
 #[cfg(feature = "server")]
 use liven::server::run_server;
+#[cfg(feature = "server")]
 use liven::storage::StorageEngine;
+#[cfg(feature = "server")]
 use std::fs;
+#[cfg(feature = "server")]
 use std::path::Path;
+#[cfg(feature = "server")]
 use std::sync::Arc;
+#[cfg(feature = "server")]
 use std::time::Duration;
 
+#[cfg(feature = "server")]
 fn generate_test_certs(dir: &Path) {
     // Write CA config file
     let ca_conf_path = dir.join("ca.conf");
