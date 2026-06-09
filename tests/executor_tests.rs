@@ -1,6 +1,7 @@
 use liven::executor::{
     apply_pipeline_stages_to_vec, compare_values, execute_query, extract_field, project_record,
 };
+use liven::parser::parse_query;
 use liven::storage::StorageEngine;
 use liven::types::{DataValue, FilterExpr, Op, PipelineStage, Query, Record};
 
@@ -288,6 +289,513 @@ fn test_status_query() {
     assert_eq!(metrics_2["active_connections"], 1);
 
     drop(permit);
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
+// ============ CORRELATE TESTS ============
+
+#[test]
+fn test_correlate_matches_within_window() {
+    let thread_id = std::thread::current().id();
+    let temp_dir = std::env::temp_dir().join(format!(
+        "test_correlate_window_{:?}_{}",
+        thread_id,
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let engine = StorageEngine::new(&temp_dir, 1024 * 1024).unwrap();
+
+    // Setup: stream "transactions" with record at timestamp=1000, user_id="u1"
+    let txn_val = r#"{"user_id": "u1", "amount": 50}"#;
+    engine
+        .append(
+            "transactions",
+            "txn_1",
+            DataValue::String(txn_val.to_string()),
+            false,
+        )
+        .unwrap();
+
+    // Setup: stream "logins" with record at timestamp=800, user_id="u1"
+    let login_val = r#"{"user_id": "u1", "ip": "192.168.1.1"}"#;
+    engine
+        .append(
+            "logins",
+            "login_1",
+            DataValue::String(login_val.to_string()),
+            false,
+        )
+        .unwrap();
+
+    // Query: from("transactions") | correlate("logins", "user_id", within: 500)
+    let query =
+        parse_query("from(\"transactions\") | correlate(\"logins\", \"user_id\", within: 500)")
+            .unwrap();
+    let result = execute_query(&engine, &query).unwrap();
+
+    // Assert: Result contains 1 record with correlated_count: 1
+    assert_eq!(result.len(), 1);
+    let val_str = match &result[0].value {
+        DataValue::String(s) => s,
+        _ => panic!("Expected DataValue::String"),
+    };
+    let parsed: serde_json::Value = serde_json::from_str(val_str).unwrap();
+    assert_eq!(parsed["correlated_count"], 1);
+    assert_eq!(parsed["user_id"], "u1");
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_correlate_discards_outside_window() {
+    let thread_id = std::thread::current().id();
+    let temp_dir = std::env::temp_dir().join(format!(
+        "test_correlate_outside_window_{:?}_{}",
+        thread_id,
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let engine = StorageEngine::new(&temp_dir, 1024 * 1024).unwrap();
+
+    // Use explicit timestamps via Record struct directly to test window boundary
+    // Setup: stream "transactions" with record at timestamp=1000, user_id="u1"
+    let txn = Record {
+        sequence_id: 1,
+        timestamp: 1000,
+        type_tag: 5,
+        flags: 0x01,
+        stream_name: "transactions".to_string(),
+        key: liven::storage::key::StreamKey::from_str_truncated("txn_1"),
+        value: DataValue::String(r#"{"user_id": "u1"}"#.to_string()),
+    };
+
+    // Setup: stream "logins" with record at timestamp=200, user_id="u1" (outside 500ms window)
+
+    // Apply Correlate stage via apply_pipeline_stages_to_vec with explicit timestamp records
+    let mut records: Vec<Record> = vec![txn];
+    // We also need the login record in the engine's historical scan, so append it
+    engine
+        .append(
+            "logins",
+            "login_1",
+            DataValue::String(r#"{"user_id": "u1"}"#.to_string()),
+            false,
+        )
+        .unwrap();
+
+    let stages = vec![PipelineStage::Correlate {
+        source_stream: "logins".to_string(),
+        join_key: "user_id".to_string(),
+        within_ms: 500,
+    }];
+    apply_pipeline_stages_to_vec(&mut records, &engine, &stages);
+
+    // Assert: result is empty — login at timestamp 200 is outside the 500ms window of txn at 1000
+    assert!(
+        records.is_empty(),
+        "Expected empty result, got {} records",
+        records.len()
+    );
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_correlate_no_key_match_discards_record() {
+    let thread_id = std::thread::current().id();
+    let temp_dir = std::env::temp_dir().join(format!(
+        "test_correlate_no_key_match_{:?}_{}",
+        thread_id,
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let engine = StorageEngine::new(&temp_dir, 1024 * 1024).unwrap();
+
+    // Setup: stream "transactions" with user_id="u1"
+    engine
+        .append(
+            "transactions",
+            "txn_1",
+            DataValue::String(r#"{"user_id": "u1"}"#.to_string()),
+            false,
+        )
+        .unwrap();
+
+    // Setup: stream "logins" with user_id="u2" (different user)
+    engine
+        .append(
+            "logins",
+            "login_1",
+            DataValue::String(r#"{"user_id": "u2"}"#.to_string()),
+            false,
+        )
+        .unwrap();
+
+    // Query: from("transactions") | correlate("logins", "user_id", within: 5000)
+    let query =
+        parse_query("from(\"transactions\") | correlate(\"logins\", \"user_id\", within: 5000)")
+            .unwrap();
+    let result = execute_query(&engine, &query).unwrap();
+
+    // Assert: result is empty — no matching user_id
+    assert!(result.is_empty());
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
+// ============ SEQUENCE TESTS ============
+
+#[test]
+fn test_sequence_complete_match() {
+    let thread_id = std::thread::current().id();
+    let temp_dir = std::env::temp_dir().join(format!(
+        "test_seq_complete_{:?}_{}",
+        thread_id,
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let engine = StorageEngine::new(&temp_dir, 1024 * 1024).unwrap();
+
+    // Setup: stream "telemetry" with records
+    let r1 = r#"{"event": "cpu_spike"}"#;
+    let r2 = r#"{"event": "memory_leak"}"#;
+    engine
+        .append(
+            "telemetry",
+            "rec_1",
+            DataValue::String(r1.to_string()),
+            false,
+        )
+        .unwrap();
+    engine
+        .append(
+            "telemetry",
+            "rec_2",
+            DataValue::String(r2.to_string()),
+            false,
+        )
+        .unwrap();
+
+    // Query: sequence(event == "cpu_spike", then: event == "memory_leak", within: 500)
+    let query = parse_query(
+        "from(\"telemetry\") | sequence(event == \"cpu_spike\", then: event == \"memory_leak\", within: 500)",
+    )
+    .unwrap();
+    let result = execute_query(&engine, &query).unwrap();
+
+    // Assert: result contains 1 record — the memory_leak record that completed the sequence
+    assert_eq!(result.len(), 1);
+    let val_str = match &result[0].value {
+        DataValue::String(s) => s,
+        _ => panic!("Expected DataValue::String"),
+    };
+    let parsed: serde_json::Value = serde_json::from_str(val_str).unwrap();
+    assert_eq!(parsed["event"], "memory_leak");
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_sequence_window_expired() {
+    let thread_id = std::thread::current().id();
+    let temp_dir = std::env::temp_dir().join(format!(
+        "test_seq_window_expired_{:?}_{}",
+        thread_id,
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let engine = StorageEngine::new(&temp_dir, 1024 * 1024).unwrap();
+
+    // We inject records with explicit timestamps via the Record struct directly
+    let rec1 = Record {
+        sequence_id: 1,
+        timestamp: 100,
+        type_tag: 5,
+        flags: 0x01,
+        stream_name: "telemetry".to_string(),
+        key: liven::storage::key::StreamKey::from_str_truncated("rec_1"),
+        value: DataValue::String(r#"{"event": "cpu_spike"}"#.to_string()),
+    };
+    let rec2 = Record {
+        sequence_id: 2,
+        timestamp: 700,
+        type_tag: 5,
+        flags: 0x01,
+        stream_name: "telemetry".to_string(),
+        key: liven::storage::key::StreamKey::from_str_truncated("rec_2"),
+        value: DataValue::String(r#"{"event": "memory_leak"}"#.to_string()),
+    };
+
+    let mut records: Vec<Record> = vec![rec1, rec2];
+    let stages = vec![PipelineStage::Sequence {
+        steps: vec![
+            FilterExpr::Simple {
+                field: "event".to_string(),
+                operator: Op::Eq,
+                value: DataValue::String("cpu_spike".to_string()),
+            },
+            FilterExpr::Simple {
+                field: "event".to_string(),
+                operator: Op::Eq,
+                value: DataValue::String("memory_leak".to_string()),
+            },
+        ],
+        within_ms: 500,
+    }];
+    apply_pipeline_stages_to_vec(&mut records, &engine, &stages);
+
+    // Assert: result is empty — window of 500ms expired before memory_leak at 700
+    assert!(records.is_empty());
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_sequence_out_of_order_no_false_match() {
+    let thread_id = std::thread::current().id();
+    let temp_dir = std::env::temp_dir().join(format!(
+        "test_seq_out_of_order_{:?}_{}",
+        thread_id,
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let engine = StorageEngine::new(&temp_dir, 1024 * 1024).unwrap();
+
+    // memory_leak appears before cpu_spike (wrong order)
+    let rec1 = Record {
+        sequence_id: 1,
+        timestamp: 100,
+        type_tag: 5,
+        flags: 0x01,
+        stream_name: "telemetry".to_string(),
+        key: liven::storage::key::StreamKey::from_str_truncated("rec_1"),
+        value: DataValue::String(r#"{"event": "memory_leak"}"#.to_string()),
+    };
+    let rec2 = Record {
+        sequence_id: 2,
+        timestamp: 200,
+        type_tag: 5,
+        flags: 0x01,
+        stream_name: "telemetry".to_string(),
+        key: liven::storage::key::StreamKey::from_str_truncated("rec_2"),
+        value: DataValue::String(r#"{"event": "cpu_spike"}"#.to_string()),
+    };
+
+    let mut records: Vec<Record> = vec![rec1, rec2];
+    let stages = vec![PipelineStage::Sequence {
+        steps: vec![
+            FilterExpr::Simple {
+                field: "event".to_string(),
+                operator: Op::Eq,
+                value: DataValue::String("cpu_spike".to_string()),
+            },
+            FilterExpr::Simple {
+                field: "event".to_string(),
+                operator: Op::Eq,
+                value: DataValue::String("memory_leak".to_string()),
+            },
+        ],
+        within_ms: 500,
+    }];
+    apply_pipeline_stages_to_vec(&mut records, &engine, &stages);
+
+    // Assert: result is empty — events are in wrong order
+    assert!(records.is_empty());
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_sequence_too_many_steps_rejected() {
+    // Build a sequence query string with 11 then: steps
+    let mut query_str = String::from("from(\"t\") | sequence(a == 1");
+    for i in 0..11 {
+        query_str.push_str(&format!(", then: a == {}", i + 2));
+    }
+    query_str.push_str(", within: 1000)");
+
+    let result = parse_query(&query_str);
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(
+        err.contains("Sequence pattern too complex: maximum 10 steps allowed"),
+        "Expected max steps error, got: {}",
+        err
+    );
+}
+
+// ============ CHAIN TESTS ============
+
+#[test]
+fn test_chain_single_hop() {
+    let thread_id = std::thread::current().id();
+    let temp_dir = std::env::temp_dir().join(format!(
+        "test_chain_single_hop_{:?}_{}",
+        thread_id,
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let engine = StorageEngine::new(&temp_dir, 1024 * 1024).unwrap();
+
+    // Setup: stream "prompts" key="p1", value={prompt_id: "p1", text: "Hello"}
+    engine
+        .append(
+            "prompts",
+            "p1",
+            DataValue::String(r#"{"prompt_id": "p1", "text": "Hello"}"#.to_string()),
+            false,
+        )
+        .unwrap();
+
+    // Setup: stream "responses" key="p1", value={response_id: "r1", text: "Hi"}
+    engine
+        .append(
+            "responses",
+            "p1",
+            DataValue::String(r#"{"response_id": "r1", "text": "Hi"}"#.to_string()),
+            false,
+        )
+        .unwrap();
+
+    // Query: from("prompts") | chain("responses", "prompt_id")
+    let query = parse_query("from(\"prompts\") | chain(\"responses\", prompt_id)").unwrap();
+    let result = execute_query(&engine, &query).unwrap();
+
+    // Assert: Result contains 1 record with fields from both streams
+    assert_eq!(result.len(), 1);
+    let val_str = match &result[0].value {
+        DataValue::String(s) => s,
+        _ => panic!("Expected DataValue::String"),
+    };
+    let parsed: serde_json::Value = serde_json::from_str(val_str).unwrap();
+    assert_eq!(parsed["text"], "Hello");
+    assert!(parsed.get("responses").is_some());
+    assert_eq!(parsed["responses"]["text"], "Hi");
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_chain_two_hops() {
+    let thread_id = std::thread::current().id();
+    let temp_dir = std::env::temp_dir().join(format!(
+        "test_chain_two_hops_{:?}_{}",
+        thread_id,
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let engine = StorageEngine::new(&temp_dir, 1024 * 1024).unwrap();
+
+    // Setup: stream "prompts" key="p1", value={prompt_id: "p1"}
+    engine
+        .append(
+            "prompts",
+            "p1",
+            DataValue::String(r#"{"prompt_id": "p1"}"#.to_string()),
+            false,
+        )
+        .unwrap();
+
+    // Setup: stream "responses" key="p1", value={response_id: "r1", prompt_id: "p1"}
+    engine
+        .append(
+            "responses",
+            "p1",
+            DataValue::String(r#"{"response_id": "r1", "prompt_id": "p1"}"#.to_string()),
+            false,
+        )
+        .unwrap();
+
+    // Setup: stream "memory" key="r1", value={memory_id: "m1", response_id: "r1"}
+    engine
+        .append(
+            "memory",
+            "r1",
+            DataValue::String(r#"{"memory_id": "m1", "response_id": "r1"}"#.to_string()),
+            false,
+        )
+        .unwrap();
+
+    // Query: from("prompts") | chain("responses", "prompt_id") | chain("memory", "response_id")
+    let query = parse_query(
+        "from(\"prompts\") | chain(\"responses\", prompt_id) | chain(\"memory\", response_id)",
+    )
+    .unwrap();
+    let result = execute_query(&engine, &query).unwrap();
+
+    // Assert: result contains fields from all three streams
+    assert_eq!(result.len(), 1);
+    let val_str = match &result[0].value {
+        DataValue::String(s) => s,
+        _ => panic!("Expected DataValue::String"),
+    };
+    let parsed: serde_json::Value = serde_json::from_str(val_str).unwrap();
+    assert!(parsed.get("responses").is_some());
+    assert!(parsed.get("memory").is_some());
+    assert_eq!(parsed["prompt_id"], "p1");
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_chain_no_match_retains_record() {
+    let thread_id = std::thread::current().id();
+    let temp_dir = std::env::temp_dir().join(format!(
+        "test_chain_no_match_{:?}_{}",
+        thread_id,
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let engine = StorageEngine::new(&temp_dir, 1024 * 1024).unwrap();
+
+    // Setup: stream "prompts" key="p1", value={prompt_id: "p1"}
+    engine
+        .append(
+            "prompts",
+            "p1",
+            DataValue::String(r#"{"prompt_id": "p1", "text": "Hello"}"#.to_string()),
+            false,
+        )
+        .unwrap();
+
+    // Stream "responses" is empty — no data inserted
+
+    // Query: from("prompts") | chain("responses", "prompt_id")
+    let query = parse_query("from(\"prompts\") | chain(\"responses\", prompt_id)").unwrap();
+    let result = execute_query(&engine, &query).unwrap();
+
+    // Assert: Result contains 1 record with unchanged value (left join behavior)
+    assert_eq!(result.len(), 1);
+    let val_str = match &result[0].value {
+        DataValue::String(s) => s,
+        _ => panic!("Expected DataValue::String"),
+    };
+    let parsed: serde_json::Value = serde_json::from_str(val_str).unwrap();
+    assert_eq!(parsed["text"], "Hello");
+    // No "responses" field should be present since there was no match
+    assert!(
+        parsed.get("responses").is_none(),
+        "Left join should not add nested field when no match exists"
+    );
 
     let _ = std::fs::remove_dir_all(&temp_dir);
 }

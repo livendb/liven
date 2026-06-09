@@ -103,6 +103,9 @@ pub struct AppConfig {
 }
 
 impl AppConfig {
+    /// Loads config from the default liven.toml file path.
+    /// Used by the server binary — reads liven.toml, liven.conf,
+    /// and environment variables.
     pub fn load() -> Result<Self, ConfigError> {
         let builder = Config::builder()
             // Layer 1: Hardcoded internal defaults
@@ -161,6 +164,46 @@ impl AppConfig {
         }
 
         Ok(config)
+    }
+
+    /// Creates an AppConfig from programmatic values.
+    /// Used by the embedded API — no file system access.
+    pub fn from_embedded(
+        data_directory: &str,
+        max_streams: usize,
+        max_index_ram_mb: usize,
+        max_segment_mb: usize,
+        max_open_fds: usize,
+        broadcast_capacity: usize,
+    ) -> Self {
+        AppConfig {
+            server: ServerConfig {
+                environment: "embedded".to_string(),
+                host: "127.0.0.1".to_string(),
+                db_port: 43121,
+                webui_port: 43120,
+                max_connections: 1,
+                broadcast_capacity,
+            },
+            storage: StorageConfig {
+                data_directory: data_directory.to_string(),
+                max_segment_size_mb: max_segment_mb,
+                sync_mode: "always".to_string(),
+                sync_interval_ms: 100,
+            },
+            limits: LimitsConfig {
+                max_concurrent_streams: max_streams,
+                max_open_file_descriptors: max_open_fds,
+                max_index_ram_mb,
+                max_segment_size_mb: max_segment_mb,
+            },
+            security: SecurityConfig {
+                mode: "none".to_string(),
+                auth_key: None,
+                master_key: None,
+                ztna: None,
+            },
+        }
     }
 }
 

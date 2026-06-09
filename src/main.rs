@@ -11,6 +11,8 @@
 )]
 
 mod cli;
+
+#[cfg(feature = "tui")]
 mod tui;
 
 #[tokio::main]

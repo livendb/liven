@@ -91,6 +91,30 @@ pub enum PipelineStage {
         field: String,
         aggregations: Vec<String>,
     },
+    /// Windowed join: links records from two streams on a shared key
+    /// within a time boundary. Used for behavioral correlation across
+    /// streams — fraud detection, anomaly signals, session linking.
+    Correlate {
+        source_stream: String,
+        join_key: String,
+        within_ms: u64,
+    },
+    /// Ordered event pattern detection within a time window using a
+    /// finite state machine. Used for predictive failure detection,
+    /// fraud pattern matching, and behavioral flow analysis.
+    Sequence {
+        steps: Vec<FilterExpr>,
+        within_ms: u64,
+    },
+    /// Causal chain traversal: follows key relationships across
+    /// multiple streams hop by hop by remapping join keys at each
+    /// stage. Used for AI memory linking, transaction lineage,
+    /// and multi-step event tracing. Left join — no match retains
+    /// the record with its original value.
+    Chain {
+        target_stream: String,
+        join_key: String,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]

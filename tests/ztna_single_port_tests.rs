@@ -2,6 +2,7 @@ use liven::client::LivenClient;
 use liven::config::{
     AppConfig, LimitsConfig, SecurityConfig, ServerConfig, StorageConfig, ZtnaConfig,
 };
+#[cfg(feature = "server")]
 use liven::server::run_server;
 use liven::storage::StorageEngine;
 use std::fs;
@@ -173,6 +174,7 @@ extendedKeyUsage = clientAuth
     assert!(status.success());
 }
 
+#[cfg(feature = "server")]
 #[tokio::test]
 async fn test_ztna_development_mode() {
     let test_dir = std::env::temp_dir().join(format!(
@@ -244,6 +246,7 @@ async fn test_ztna_development_mode() {
     let _ = fs::remove_dir_all(&test_dir);
 }
 
+#[cfg(feature = "server")]
 #[tokio::test]
 async fn test_ztna_production_mode_cleartext_rejected() {
     let test_dir = std::env::temp_dir().join(format!(
@@ -322,6 +325,7 @@ async fn test_ztna_production_mode_cleartext_rejected() {
     let _ = fs::remove_dir_all(&test_dir);
 }
 
+#[cfg(feature = "server")]
 #[tokio::test]
 async fn test_ztna_production_mode_mtls_success_with_filtering() {
     use futures_util::{SinkExt, StreamExt};

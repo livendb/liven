@@ -156,10 +156,10 @@ export default function Login({ onLoginSuccess }: LoginProps) {
 
         {success && (
           <div
-            className={`flex items-start gap-3 p-4 border rounded-2xl text-xs mb-6 animate-pulse ${
+            className={`flex items-start gap-3 p-4 border rounded-2xl text-xs mb-6 animate-shake ${
               resolvedTheme === "dark"
-                ? "bg-accent/10 border-accent/20 text-accent"
-                : "bg-accent/5 border-accent/25 text-accent"
+                ? "bg-emerald-950/30 border-emerald-500/20 text-emerald-200"
+                : "bg-emerald-50 border-emerald-200 text-emerald-800"
             }`}
           >
             <span>Key Authenticated! Securing admin session...</span>
@@ -180,7 +180,7 @@ export default function Login({ onLoginSuccess }: LoginProps) {
                 type={showPassword ? "text" : "password"}
                 value={authKey}
                 onChange={(e) => setAuthKey(e.target.value)}
-                className={`w-full pl-4 pr-11 py-3.5 font-mono text-xs rounded-2xl border focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all duration-300 ${
+                className={`w-full pl-4 pr-11 py-3.5 font-mono text-xs rounded-2xl border focus:outline-none focus:outline-slate-600 transition-all duration-300 ${
                   resolvedTheme === "dark"
                     ? "bg-zinc-950/50 border-zinc-800 text-zinc-100 placeholder-zinc-700"
                     : "bg-zinc-50 border-zinc-200 text-zinc-900 placeholder-zinc-400"

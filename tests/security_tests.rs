@@ -2,6 +2,7 @@ use liven::client::LivenClient;
 use liven::config::{
     AppConfig, AuthKeyConfig, LimitsConfig, SecurityConfig, ServerConfig, StorageConfig,
 };
+#[cfg(feature = "server")]
 use liven::server::{AuthKeyRecord, run_server};
 use liven::storage::StorageEngine;
 use liven::types::DataValue;
@@ -67,6 +68,7 @@ async fn send_http_request(
     (status_code, parsed_headers, body_part)
 }
 
+#[cfg(feature = "server")]
 #[tokio::test]
 async fn test_auth_key_handshake_lifecycle() {
     let test_dir = std::env::temp_dir().join(format!(
@@ -185,6 +187,7 @@ async fn test_auth_key_handshake_lifecycle() {
     let _ = fs::remove_dir_all(&test_dir);
 }
 
+#[cfg(feature = "server")]
 #[tokio::test]
 async fn test_rest_auth_key_challenge_login_lifecycle() {
     let test_dir = std::env::temp_dir().join(format!(
@@ -465,6 +468,7 @@ async fn test_rest_auth_key_challenge_login_lifecycle() {
     let _ = fs::remove_dir_all(&test_dir);
 }
 
+#[cfg(feature = "server")]
 #[test]
 fn test_continuous_edge_check_query_capabilities() {
     use liven::security::{CAP_ADMIN, CAP_NONE, CAP_READ, CAP_ROOT, CAP_WRITE};

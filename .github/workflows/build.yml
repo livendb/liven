@@ -52,6 +52,12 @@ jobs:
       - name: Lint with clippy
         run: cargo clippy --all-targets -- -D warnings
 
+      - name: Build embedded core (no default features)
+        run: cargo check --no-default-features
+
+      - name: Test embedded core (no default features)
+        run: cargo test --no-default-features
+
       - name: Run automated test suite
         run: cargo test --all-targets --workspace
 
@@ -64,24 +70,24 @@ jobs:
           echo "==== Linux Installation Tests ===="
           # Make install.sh executable
           chmod +x install.sh
-          
+
           # 1. Verify install.sh handles Mainstream Systemd (Production mode)
           sudo ./install.sh --env production
-          
+
           # Assertions
           grep -q 'environment = "production"' /etc/liven/liven.toml
           test -f /etc/liven/certs/ca.crt
           test -f /etc/liven/certs/ca.key
           test -f /etc/liven/certs/server.crt
           test -f /etc/liven/certs/server.key
-          
+
           # Assert strict POSIX permissions (600) on keys
           [ "$(stat -c '%a' /etc/liven/certs/server.key)" = "600" ]
           [ "$(stat -c '%a' /etc/liven/certs/ca.key)" = "600" ]
-          
+
           # Assert systemd unit is injected
           test -f /etc/systemd/system/liven.service
-          
+
           # 2. Verify Non-Systemd / Container Fallback
           # Run inside isolated alpine container
           docker run --rm -v ${{ github.workspace }}:/workspace alpine:latest sh -c "
@@ -93,19 +99,19 @@ jobs:
             ! test -f /etc/systemd/system/liven.service &&
             grep -q 'environment = \"development\"' /etc/liven/liven.toml
           "
-          
+
           # 3. Live-Process Boot & Security Verification (Linux Production)
           echo "Booting mTLS protected production LIVEN in background..."
           sudo /usr/local/bin/liven start --config /etc/liven/liven.toml &
           DB_PID=$!
           sleep 3
-          
+
           # Check if port is open
           sudo ss -tlnp | grep -q 43121
-          
+
           # Try cleartext curl - should fail/drop due to mTLS shield
           curl -v --connect-timeout 3 http://127.0.0.1:43121/api/streams && (echo "FAIL: Cleartext succeeded in production!" && exit 1) || echo "PASS: Cleartext connection rejected successfully by mTLS shield"
-          
+
           # Clean up background process
           sudo kill -15 $DB_PID || true
 
@@ -115,24 +121,28 @@ jobs:
           echo "==== macOS Installation Tests ===="
           # Make install.sh executable
           chmod +x install.sh
-          
+
           # 1. Verify install.sh handles launchd plist (Development mode)
           sudo ./install.sh --env development
-          
+
           # Assertions
           grep -q 'environment = "development"' /etc/liven/liven.toml
           test -f /Library/LaunchDaemons/com.liven.liven.plist
           test -f /usr/local/bin/liven
-          
+
           # 2. Live-Process Boot & Verification (macOS Development)
           echo "Booting cleartext development LIVEN in background..."
           sudo /usr/local/bin/liven start --config /etc/liven/liven.toml &
           DB_PID=$!
           sleep 3
-          
+
           # In development, cleartext API query should succeed
-          curl -v --connect-timeout 3 http://127.0.0.1:43120/api/streams || echo "Development API connection succeeded"
-          
+          if curl -v --connect-timeout 3 http://127.0.0.1:43120/api/streams; then
+            echo "PASS: Development API connection succeeded"
+          else
+            echo "FAIL: Development API connection failed" && exit 1
+          fi
+
           # Clean up background process
           sudo kill -15 $DB_PID || true
 
@@ -189,20 +199,20 @@ jobs:
         run: |
           echo "==== Packaging Linux Distribution Assets ===="
           chmod +x target/release/liven
-          
+
           # Install cargo-deb and cargo-generate-rpm
-          cargo install cargo-deb --locked || true
-          cargo install cargo-generate-rpm --locked || true
-          
+          cargo install cargo-deb --locked 2>&1 || echo "Warning: cargo-deb installation failed, skipping .deb package"
+          cargo install cargo-generate-rpm --locked 2>&1 || echo "Warning: cargo-generate-rpm installation failed, skipping .rpm package"
+
           # 1. Build Debian Package
           cargo deb --no-build
-          
+
           # 2. Build RPM Package
           cargo generate-rpm --no-build
-          
+
           # 3. Build Tarball
           tar -czvf liven-linux-amd64.tar.gz -C target/release liven liven.toml
-          
+
           # Ensure directories exist and move packages
           mkdir -p dist
           mv target/debian/*.deb dist/ || true
@@ -215,14 +225,14 @@ jobs:
         run: |
           echo "==== Packaging Windows Distribution Assets ===="
           # Install cargo-wix
-          cargo install cargo-wix --locked || true
-          
+          cargo install cargo-wix --locked 2>&1 || echo "Warning: cargo-wix installation failed, skipping .msi package"
+
           # 1. Build MSI package using cargo wix
           cargo wix --no-build
-          
+
           # 2. Build Zip Archive
           powershell -Command "Compress-Archive -Path target/release/liven.exe, liven.toml -DestinationPath liven-windows-amd64.zip"
-          
+
           mkdir -p dist
           mv target/wix/*.msi dist/ || true
           mv liven-windows-amd64.zip dist/
@@ -232,21 +242,23 @@ jobs:
         run: |
           echo "==== Packaging macOS Distribution Assets ===="
           chmod +x target/release/liven
-          
+
           # Create DMG assets placeholders so appdmg doesn't fail
           mkdir -p assets
           touch assets/liven.icns
           touch assets/dmg_background.png
-          
+
           # Install appdmg
-          npm install -g appdmg || true
-          
-          # 1. Build DMG Package
-          appdmg appdmg.json dist/liven-macos.dmg || echo "Warning: appdmg failed, skipping .dmg asset"
-          
+          if npm install -g appdmg 2>&1; then
+            # 1. Build DMG Package
+            appdmg appdmg.json dist/liven-macos.dmg || echo "Warning: appdmg failed, skipping .dmg asset"
+          else
+            echo "Warning: appdmg installation failed, skipping .dmg asset"
+          fi
+
           # 2. Build Tarball
           tar -czvf liven-macos-x64.tar.gz -C target/release liven liven.toml
-          
+
           mkdir -p dist
           mv liven-macos-x64.tar.gz dist/
 
@@ -256,5 +268,3 @@ jobs:
           name: liven-installers-${{ matrix.os }}
           path: dist/*
           if-no-files-found: ignore
-
-

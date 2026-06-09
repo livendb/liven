@@ -59,6 +59,13 @@ impl Decoder for LivenCodec {
             let raw_bytes = &data[1..];
             let ptr = raw_bytes.as_ptr() as *const i8;
             let count = raw_bytes.len();
+            // SAFETY: `raw_bytes` is a valid &[u8] slice obtained from `split_to(len)` on a
+            // `BytesMut`. Reinterpreting u8 as i8 is sound because both types have the same
+            // size (1 byte), alignment (1), and bit layout. The resulting slice is immediately
+            // converted to an owned Vec<i8> via `.to_vec()`, which copies the bytes. The
+            // original `data` bytes are dropped after this scope, but the Vec owns its memory.
+            // If the discriminator encoding changes or `raw_bytes` could be aliased, this
+            // safety justification would need to be revisited.
             let vec_i8 = unsafe { std::slice::from_raw_parts(ptr, count) }.to_vec();
             Ok(Some(LivenFrame::Vector(vec_i8)))
         } else if discriminator == 0x02 {
@@ -90,6 +97,13 @@ impl Encoder<LivenFrame> for LivenCodec {
                 dst.extend_from_slice(&[0x03]);
                 let ptr = vec.as_ptr() as *const u8;
                 let len = vec.len();
+                // SAFETY: `vec` is a valid Vec<i8> whose backing allocation is live for the
+                // duration of this scope. Reinterpreting i8 as u8 is sound because both types
+                // have the same size (1 byte), alignment (1), and bit layout. The resulting
+                // slice is only used to feed `extend_from_slice`, which copies the bytes into
+                // `dst`. No aliasing occurs, and the slice does not outlive `vec` or the
+                // current scope. If this code is modified to store or return the slice, this
+                // safety justification would need to be revisited.
                 let u8_slice = unsafe { std::slice::from_raw_parts(ptr, len) };
                 dst.extend_from_slice(u8_slice);
             }

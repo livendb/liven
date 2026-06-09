@@ -6,6 +6,8 @@ import {
   insertSamples,
   updateSamples,
   deleteSamples,
+  upsertSamples,
+  relationshipSamples,
 } from "../constants/samples";
 
 export interface QueryGuideModalProps {
@@ -26,7 +28,7 @@ export default function QueryGuideModal({
   addActivity,
 }: QueryGuideModalProps) {
   const [helpActiveTab, setHelpActiveTab] = useState<
-    "fetch" | "insert" | "update" | "delete"
+    "fetch" | "insert" | "upsert" | "update" | "delete" | "relationship"
   >("fetch");
   const [copiedText, setCopiedText] = useState("");
 
@@ -44,10 +46,14 @@ export default function QueryGuideModal({
         return fetchSamples;
       case "insert":
         return insertSamples;
+      case "upsert":
+        return upsertSamples;
       case "update":
         return updateSamples;
       case "delete":
         return deleteSamples;
+      case "relationship":
+        return relationshipSamples;
       default:
         return fetchSamples;
     }
@@ -59,10 +65,14 @@ export default function QueryGuideModal({
         return "Fetch";
       case "insert":
         return "Insert";
+      case "upsert":
+        return "Upsert";
       case "update":
         return "Update";
       case "delete":
         return "Delete";
+      case "relationship":
+        return "Relations";
       default:
         return tab;
     }
@@ -88,7 +98,16 @@ export default function QueryGuideModal({
 
         {/* Tab buttons */}
         <div className="flex items-center gap-2 p-1.5 bg-body-bg/80 dark:bg-zinc-900 border border-slate-200/50 dark:border-zinc-800 rounded-md mt-5 shrink-0 w-fit">
-          {(["fetch", "insert", "update", "delete"] as const).map((tab) => (
+          {(
+            [
+              "fetch",
+              "insert",
+              "upsert",
+              "update",
+              "delete",
+              "relationship",
+            ] as const
+          ).map((tab) => (
             <button
               key={tab}
               onClick={() => setHelpActiveTab(tab)}
@@ -113,10 +132,15 @@ export default function QueryGuideModal({
                   className="p-6 rounded-md border border-slate-200/80 dark:border-zinc-800/80 bg-panel-bg/70 dark:bg-panel-bg/40 hover:border-primary/40 dark:hover:border-primary/30 hover:shadow-md hover:translate-y-[-2px] transition-all duration-300 flex flex-col justify-between space-y-4 group shadow-sm"
                 >
                   <div className="space-y-2">
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between gap-2">
                       <span className="font-bold text-slate-900 dark:text-slate-100 text-[15px] tracking-tight">
                         {sample.title}
                       </span>
+                      {(sample as any).badge && (
+                        <span className="text-[10px] font-extrabold uppercase tracking-widest px-2 py-0.5 rounded-sm bg-zinc-200 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 shrink-0">
+                          {(sample as any).badge}
+                        </span>
+                      )}
                     </div>
                     <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-400 font-medium">
                       {sample.desc}

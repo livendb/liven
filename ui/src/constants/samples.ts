@@ -122,7 +122,7 @@ export const fetchSamples = [
   {
     title: "Discover Active Streams",
     badge: "STREAMS",
-    code: 'streams()',
+    code: "streams()",
     desc: "Retrieve the complete list of active stream partitions currently managed by LIVEN.",
     hint: "Useful for discovering stream schemas and allocation details.",
   },
@@ -259,6 +259,59 @@ export const deleteSamples = [
     badge: "DROP",
     code: 'drop("old_metrics_2025")',
     desc: "Completely drop a structural stream partition directory from the host system file architecture.",
-    hint: "Administrative Action: Instantly unlinks all `.vivo` segments and completely removes data maps from memory.",
+    hint: "Administrative Action: Instantly unlinks all `.liven` segments and completely removes data maps from memory.",
+  },
+];
+
+// ============ RELATIONSHIP OPERATIONS ============
+export const relationshipSamples = [
+  {
+    title: "Correlate Streams by Time Window",
+    badge: "CORRELATE",
+    code: 'from("transactions") | correlate("logins", "user_id", within: 60000)',
+    desc: "Join two streams on a shared key within a time window. Retains and enriches records that have matching events in the correlated stream.",
+    hint: "Place restrictive filters before correlate to reduce the record set before the windowed join executes.",
+  },
+  {
+    title: "Correlate for Fraud Detection",
+    badge: "CORRELATE",
+    code: 'from("transactions") | filter(amount > 1000) | correlate("logins", "user_id", within: 300000)',
+    desc: "Detect high-value transactions with no associated login event in the preceding time window — a fraud signal.",
+    hint: "Filter before correlate reduces cost. The within value is in milliseconds: 300000 = 5 minutes.",
+  },
+  {
+    title: "Detect Event Sequences",
+    badge: "SEQUENCE",
+    code: 'from("telemetry") | sequence(event == "cpu_spike", then: event == "memory_leak", within: 30000)',
+    desc: "Detect ordered event patterns within a time boundary using a finite state machine. Returns the record that completes each sequence.",
+    hint: "Sequence resets when the time window expires. Maximum 10 steps per sequence pattern.",
+  },
+  {
+    title: "Detect Repeated Failed Logins",
+    badge: "SEQUENCE",
+    code: 'from("auth") | sequence(action == "login_fail", then: action == "login_fail", then: action == "login_fail", within: 60000)',
+    desc: "Detect three consecutive login failures within 60 seconds — a brute force signal.",
+    hint: "Each completed sequence emits the final matching record. The FSM resets after each match.",
+  },
+  {
+    title: "Chain Stream Relationships",
+    badge: "CHAIN",
+    code: 'from("prompts") | chain("responses", "prompt_id")',
+    desc: "Follow a causal relationship from one stream to another by remapping the join key at each hop.",
+    hint: "Chain is a left join — records without a match in the target stream are retained with their original value.",
+  },
+  {
+    title: "Multi-Hop Chain Traversal",
+    badge: "CHAIN",
+    code: 'from("prompts") | chain("responses", "prompt_id") | chain("memory", "response_id")',
+    desc: "Traverse a causal chain across multiple streams. Each hop follows the relationship one level deeper.",
+    hint: "Use for AI memory linking, transaction lineage, and multi-step event tracing.",
+  },
+  {
+    title: "Transaction Lineage",
+    badge: "CHAIN",
+    code: 'from("orders") | chain("shipments", "order_id") | chain("deliveries", "shipment_id")',
+    desc: "Follow an order through its full fulfillment chain across three streams in a single query.",
+    hint: "Each chain stage remaps the join key to the next relationship in the chain.",
   },
 ];

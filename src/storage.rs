@@ -69,6 +69,8 @@ pub struct StorageEngine {
     pub max_connections: usize,
     pub broadcast_capacity: usize,
     pub conn_semaphore: Arc<tokio::sync::Semaphore>,
+    compaction_counter: Arc<AtomicU64>,
+    pub write_lock: Arc<Mutex<()>>,
 }
 
 use std::cell::RefCell;
@@ -83,19 +85,17 @@ impl StorageEngine {
         let path = data_dir.as_ref().to_path_buf();
         fs::create_dir_all(&path).map_err(|e| e.to_string())?;
 
-        let cfg_opt = crate::config::AppConfig::load().ok();
-
-        let max_connections = if let Some(ref cfg) = cfg_opt {
-            cfg.server.max_connections
-        } else {
-            10000
-        };
-
-        let broadcast_capacity = if let Some(ref cfg) = cfg_opt {
-            cfg.server.broadcast_capacity
-        } else {
-            4096
-        };
+        // Standalone defaults — no file system read from liven.toml.
+        // The server binary calls set_max_streams, set_max_index_ram_bytes,
+        // and set_max_fds after construction. Embedded users configure
+        // via LivenConfig.
+        let max_connections: usize = 10000;
+        let broadcast_capacity: usize = 4096;
+        let sync_mode: String = "always".to_string();
+        let sync_interval_ms: u64 = 100;
+        let max_streams: usize = 32;
+        let max_fds: usize = 64;
+        let max_index_ram_bytes: u64 = 16 * 1024 * 1024;
 
         let conn_semaphore = Arc::new(tokio::sync::Semaphore::new(max_connections));
         let (broadcast_tx, _) = broadcast::channel(broadcast_capacity);
@@ -111,40 +111,10 @@ impl StorageEngine {
         let (tx, rx) = std::sync::mpsc::sync_channel(2048);
         let ring_buffer = ring_buffer::LogRingBuffer::new(tx);
 
-        let (sync_mode, sync_interval_ms) = if let Some(ref cfg) = cfg_opt {
-            (cfg.storage.sync_mode.clone(), cfg.storage.sync_interval_ms)
-        } else {
-            ("always".to_string(), 100)
-        };
-
-        let max_streams = if let Some(ref cfg) = cfg_opt {
-            cfg.limits.max_concurrent_streams
-        } else {
-            32
-        };
-
-        let max_fds = if let Some(ref cfg) = cfg_opt {
-            cfg.limits.max_open_file_descriptors
-        } else {
-            64
-        };
-
-        let max_index_ram_bytes = if let Some(ref cfg) = cfg_opt {
-            cfg.limits.max_index_ram_mb as u64 * 1024 * 1024
-        } else {
-            16 * 1024 * 1024
-        };
-
-        let max_segment_size = if max_segment_size < 1024 * 1024 {
-            max_segment_size
-        } else if let Some(ref cfg) = cfg_opt {
-            cfg.limits.max_segment_size_mb as u64 * 1024 * 1024
-        } else {
-            max_segment_size
-        };
-
         let index_ram_bytes = Arc::new(AtomicU64::new(0));
         let streams_set = Arc::new(Mutex::new(HashSet::new()));
+        let compaction_counter = Arc::new(AtomicU64::new(u64::MAX / 2));
+        let write_lock = Arc::new(Mutex::new(()));
 
         let engine = Self {
             data_dir: path,
@@ -168,6 +138,8 @@ impl StorageEngine {
             max_connections,
             broadcast_capacity,
             conn_semaphore,
+            compaction_counter: compaction_counter.clone(),
+            write_lock: write_lock.clone(),
         };
 
         engine.recover()?;
@@ -853,6 +825,128 @@ impl StorageEngine {
         Ok(records)
     }
 
+    /// Scans historical records but stops early once `max_records` have been collected.
+    /// This allows early-termination optimizations for queries with a LIMIT clause.
+    pub fn scan_historical_limited(&self, max_records: usize) -> Result<Vec<Record>, String> {
+        let mut segments = Vec::new();
+
+        for entry in fs::read_dir(&self.data_dir).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let path = entry.path();
+            if path.is_file()
+                && path.extension().and_then(|s| s.to_str()) == Some("liven")
+                && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
+                && let Ok(segment_id) = stem.parse::<u64>()
+            {
+                segments.push((segment_id, path));
+            }
+        }
+
+        segments.sort_by_key(|a| a.0);
+
+        let mut records = Vec::new();
+
+        for (segment_id, _path) in &segments {
+            if records.len() >= max_records {
+                break;
+            }
+
+            let file = match self.get_or_load_file_handle(*segment_id) {
+                Ok(f) => f,
+                Err(e) => {
+                    if e.contains("Cannot mmap 0-byte file") || e.contains("is empty") {
+                        continue;
+                    }
+                    return Err(e);
+                }
+            };
+            let file_len = file.metadata().map_err(|e| e.to_string())?.len();
+            let mut offset = 0;
+
+            while offset + 26 <= file_len && records.len() < max_records {
+                let mut header_buf = [0u8; 26];
+                if file.read_exact_at(&mut header_buf, offset).is_err() {
+                    break;
+                }
+
+                let seq_id = u64::from_be_bytes([
+                    header_buf[0],
+                    header_buf[1],
+                    header_buf[2],
+                    header_buf[3],
+                    header_buf[4],
+                    header_buf[5],
+                    header_buf[6],
+                    header_buf[7],
+                ]);
+                let timestamp = i64::from_be_bytes([
+                    header_buf[8],
+                    header_buf[9],
+                    header_buf[10],
+                    header_buf[11],
+                    header_buf[12],
+                    header_buf[13],
+                    header_buf[14],
+                    header_buf[15],
+                ]);
+                let type_tag = header_buf[16];
+                let flags = header_buf[17];
+                let payload_len = u32::from_be_bytes([
+                    header_buf[18],
+                    header_buf[19],
+                    header_buf[20],
+                    header_buf[21],
+                ]) as usize;
+                let crc32 = u32::from_be_bytes([
+                    header_buf[22],
+                    header_buf[23],
+                    header_buf[24],
+                    header_buf[25],
+                ]);
+
+                if offset + 26 + (payload_len as u64) > file_len {
+                    break;
+                }
+
+                let payload_record = READ_STAGING_BUFFER.with(|buf_cell| {
+                    let mut local_buf = buf_cell.borrow_mut();
+                    if local_buf.len() < payload_len {
+                        local_buf.resize(payload_len, 0);
+                    }
+                    let target_slice = &mut local_buf[..payload_len];
+                    file.read_exact_at(target_slice, offset + 26)
+                        .map_err(|e| e.to_string())?;
+
+                    let actual_crc = crc32fast::hash(target_slice);
+                    if actual_crc == crc32
+                        && let Ok((stream_name, key, value)) =
+                            deserialize_payload_borrowed(target_slice, type_tag)
+                        && let Ok(stream_key) = crate::storage::key::StreamKey::from_str(key)
+                    {
+                        return Ok(Some(Record {
+                            sequence_id: seq_id,
+                            timestamp,
+                            type_tag,
+                            flags,
+                            stream_name: stream_name.to_string(),
+                            key: stream_key,
+                            value,
+                        }));
+                    }
+                    Ok::<Option<Record>, String>(None)
+                })?;
+
+                if let Some(rec) = payload_record {
+                    records.push(rec);
+                }
+
+                offset += 26 + (payload_len as u64);
+            }
+        }
+
+        Ok(records)
+    }
+
     /// Performs background compaction of historical files
     pub fn compact(&self) -> Result<(), String> {
         info!("Starting log compaction...");
@@ -893,9 +987,9 @@ impl StorageEngine {
         );
 
         // We will write compacted records into a brand new compacted segment file
-        // To avoid conflicts, we use a unique segment ID, e.g., using a high sequence number or a compaction prefix
-        // Let's use the highest sequence number seen + 1 as the segment ID
-        let compacted_segment_id = self.current_sequence_id.load(Ordering::SeqCst) + 100000;
+        // To avoid conflicts, we use a dedicated compaction counter that lives in a reserved
+        // range (starting at u64::MAX / 2) that sequence IDs will never reach during normal operation.
+        let compacted_segment_id = self.compaction_counter.fetch_add(1, Ordering::SeqCst);
         let compacted_path = self.segment_path(compacted_segment_id);
 
         let mut comp_file = OpenOptions::new()
@@ -1303,7 +1397,14 @@ fn execute_batch_append(
         .ok_or("No active file handle found")?;
     let current_offset = *active_size_guard;
 
-    file.write_all(&frame_buf).map_err(|e| e.to_string())?;
+    file.write_all(&frame_buf).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::StorageFull || e.kind() == std::io::ErrorKind::WriteZero
+        {
+            "Disk full: unable to append to segment. Free disk space and retry.".to_string()
+        } else {
+            e.to_string()
+        }
+    })?;
 
     if sync_mode == "always" {
         file.sync_data().map_err(|e| e.to_string())?;
@@ -1405,6 +1506,12 @@ pub fn serialize_payload_into(stream_name: &str, key: &str, value: &DataValue, b
         DataValue::Vector(vec) => {
             let ptr = vec.as_ptr() as *const u8;
             let len = vec.len();
+            // SAFETY: `vec` is a valid Vec<i8>, live for the duration of this function call.
+            // Reinterpreting i8 as u8 is sound because both types have the same size (1 byte),
+            // alignment (1), and bit layout. The resulting slice is immediately copied into
+            // `buf` via `extend_from_slice`, so it does not outlive `vec`. If the DataValue
+            // variant changes or the buffer is stored instead of copied, this safety
+            // justification would need to be revisited.
             let u8_slice = unsafe { std::slice::from_raw_parts(ptr, len) };
             buf.extend_from_slice(u8_slice);
         }
@@ -1443,6 +1550,13 @@ fn deserialize_payload_borrowed(
         let raw_bytes = &payload[val_offset..];
         let ptr = raw_bytes.as_ptr() as *const i8;
         let count = raw_bytes.len();
+        // SAFETY: `raw_bytes` is a valid &[u8] slice derived from the payload, whose
+        // lifetime is bounded by the caller's borrow. Reinterpreting u8 as i8 is sound
+        // because both types have the same size (1 byte), alignment (1), and bit layout.
+        // The resulting slice is immediately converted to an owned Vec<i8> via `.to_vec()`,
+        // which copies the bytes, so the resulting DataValue does not borrow from `payload`.
+        // If the type_tag encoding changes or `payload` could be mutated concurrently,
+        // this safety justification would need to be revisited.
         let vec_i8 = unsafe { std::slice::from_raw_parts(ptr, count) }.to_vec();
         DataValue::Vector(vec_i8)
     } else {
@@ -1504,6 +1618,12 @@ impl<'a> FrameReader<'a> {
         let raw_bytes = &payload[val_offset..];
         let ptr = raw_bytes.as_ptr() as *const i8;
         let len = raw_bytes.len();
+        // SAFETY: `raw_bytes` is a valid &[u8] slice derived from `self.data`, which is
+        // borrowed for the lifetime `'a` of the FrameReader. Reinterpreting u8 as i8 is
+        // sound because both types have the same size (1 byte), alignment (1), and bit
+        // layout. The returned &[i8] has lifetime `'a` tied to the FrameReader's borrow,
+        // so it cannot outlive the underlying data. If the type_tag check were removed or
+        // the payload layout changed, this safety justification would need to be revisited.
         Some(unsafe { std::slice::from_raw_parts(ptr, len) })
     }
 }

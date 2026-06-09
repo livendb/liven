@@ -13,9 +13,13 @@
 pub mod client;
 pub mod codec;
 pub mod config;
+pub mod embed;
 pub mod executor;
 pub mod parser;
 pub mod security;
-pub mod server;
 pub mod storage;
 pub mod types;
+pub use embed::Liven;
+
+#[cfg(feature = "server")]
+pub mod server;

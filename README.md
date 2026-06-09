@@ -1,6 +1,6 @@
 # LIVEN ⚡
 
-LIVEN is a high-performance, lightweight stream database and vector similarity engine engineered to capture, store, secure, and stream high-velocity data in real time. It is designed to handle continuous streams of information—such as AI agent reasoning, real-time prediction markets, IoT telemetry, and live sports analytics—while maintaining deterministic safety limits, Zero-Trust security shields, and sub-microsecond query performance.
+LIVEN is a high-performance, lightweight stream database and vector similarity engine engineered to capture, store, secure, and stream high-velocity data in real time. It is designed to handle continuous streams of information—such as AI agent reasoning, real-time prediction markets, IoT telemetry, and live sports analytics—while maintaining deterministic safety limits, Zero-Trust security shields, and ~1.35µs point lookups for existing keys; ~99ns for non-existent key pruning.
 
 ---
 
@@ -31,6 +31,7 @@ graph TD
 LIVEN features a single-port secure network implementation. It automatically wraps all transport boundaries in mutual TLS (mTLS) with custom CA validation chains:
 * **Production Mode**: Enforces strict client certificate validation, immediately dropping unauthenticated, cleartext, or invalid handshakes at the TCP boundary.
 * **Granular ACL Verification**: Employs client Common Name (CN) filtering to map incoming connection keys to specific stream scopes, securing multi-tenant operations.
+* **Note**: mTLS is disabled by default. To enable, set `security.ztna.enabled = true` and provide valid certificate paths.
 
 ### 🚦 Bounded Client Concurrency (Connection Bounding)
 To prevent server starvation, connection boundaries are actively controlled by a central `tokio::sync::Semaphore` permit coordinator:
@@ -44,7 +45,7 @@ Clients can subscribe to instant write feeds using the built-in streaming query 
 
 ### 📐 Quantized Vector Similarity Engine
 LIVEN incorporates deep vector processing pipelines directly inside its storage engine:
-* **Binary Quantization Codec**: Compresses high-dimensional vectors into spatial bit arrays, reducing memory footprints.
+* **Int8 Quantization Codec**: Vectors are stored as int8 (i8) arrays, reducing memory vs float32 by 4x.
 * **Cosine Similarity VM Steps**: Executes high-speed cosine similarity filters in compiled pipeline query loops, enabling ultra-fast spatial search capabilities directly on historical logs.
 
 ### ⏱️ Deterministic Resource Budgeting
@@ -82,10 +83,26 @@ max_segment_size_mb = 16         # Active log segment roll threshold
 
 Criterion-powered micro-benchmarks profiles LIVEN under tight, single-threaded resource budgets:
 
-* **Query Compilation Speed**: ~291 ns for simple parsing stages; ~697 ns for complex, multi-stage pipelines.
-* **Lock-Free Point-Lookups**: ~1.35 µs for key hits; sub-100 ns (~99 ns) to instantly prune non-existent keys.
-* **Strict Durability Ingestion**: ~238 writes/second with individual hardware `fdatasync` disk-sync barriers active, rising to thousands of batch writes/second in memory-buffered writes.
+* **Query Compilation Speed**: ~258 ns for simple parsing stages; ~647 ns for complex, multi-stage pipelines.
+* **Lock-Free Point-Lookups**: ~1.30 µs for key hits; ~97 ns to instantly prune non-existent keys.
+* **Strict Durability Ingestion**: ~244 writes/second with individual hardware `fdatasync` disk-sync barriers active, rising to thousands of batch writes/second in memory-buffered writes.
+* **Quantized Vector Append**: ~8 ms per 2-record batch for int8 vectors, ~4x faster lookup vs MessagePack array encoding.
 * **Baseline Footprint**: ~12MB lightweight operational memory baseline on boot.
+
+---
+
+## Binary Size
+
+LIVEN compiles to different sizes depending on enabled features:
+
+| Build command | Features | Approximate size |
+|---|---|---|
+| `cargo build --release` | Full (server + TUI + TLS) | ~7.6MB |
+| `cargo build --release --no-default-features` | Embedded core only | ~1.5MB |
+| `cargo build --release --no-default-features --features tls` | Embedded + TLS | ~2MB |
+| `cargo build --release --no-default-features --features server` | Server without TUI | ~6MB |
+
+See [`EMBEDDING.md`](./EMBEDDING.md) for details on using LIVEN as an embedded library.
 
 ---
 

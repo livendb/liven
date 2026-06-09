@@ -6,6 +6,123 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::SystemTime;
 
+/// Finite state machine for ordered event pattern detection within a time window.
+/// Processes records sequentially and emits the record that completes each sequence.
+pub struct SequenceMatcher {
+    steps: Vec<FilterExpr>,
+    current_step: usize,
+    window_start_ms: i64,
+    within_ms: u64,
+    partial_matches: Vec<Record>,
+}
+
+impl SequenceMatcher {
+    /// Creates a new SequenceMatcher for the given steps and time window.
+    pub fn new(steps: Vec<FilterExpr>, within_ms: u64) -> Self {
+        Self {
+            steps,
+            current_step: 0,
+            window_start_ms: 0,
+            within_ms,
+            partial_matches: Vec::new(),
+        }
+    }
+
+    /// Process one record. Returns Some(record) if this record completes the sequence.
+    /// Returns None otherwise.
+    pub fn process(&mut self, record: &Record) -> Option<Record> {
+        if self.current_step == 0 {
+            if evaluate_filter_expr(record, &self.steps[0]) {
+                self.window_start_ms = record.timestamp;
+                self.current_step = 1;
+                self.partial_matches.push(record.clone());
+                if self.current_step >= self.steps.len() {
+                    self.reset();
+                }
+            }
+            None
+        } else if self.current_step > 0 {
+            // Check window expiry
+            if record.timestamp - self.window_start_ms > self.within_ms as i64 {
+                self.reset();
+                // Re-process this record from step 1
+                if evaluate_filter_expr(record, &self.steps[0]) {
+                    self.window_start_ms = record.timestamp;
+                    self.current_step = 1;
+                    self.partial_matches.push(record.clone());
+                }
+                return None;
+            }
+
+            if evaluate_filter_expr(record, &self.steps[self.current_step]) {
+                self.current_step += 1;
+                self.partial_matches.push(record.clone());
+                if self.current_step >= self.steps.len() {
+                    let completed = self.partial_matches.last().cloned();
+                    self.reset();
+                    return completed;
+                }
+            }
+            None
+        } else {
+            None
+        }
+    }
+
+    /// Reset FSM state. Called when window expires or sequence completes.
+    pub fn reset(&mut self) {
+        self.current_step = 0;
+        self.window_start_ms = 0;
+        self.partial_matches.clear();
+    }
+}
+
+/// Merges the value of a target record into the source record value
+/// as a nested JSON field named after the target stream.
+///
+/// Result shape:
+/// {
+///   "original_field": "value",
+///   "target_stream_name": {
+///     "target_field": "value"
+///   }
+/// }
+pub fn merge_record_values(source: &Record, target: &Record, target_stream: &str) -> DataValue {
+    let source_json = match &source.value {
+        DataValue::String(s) => serde_json::from_str::<serde_json::Value>(s)
+            .unwrap_or(serde_json::Value::String(s.clone())),
+        other => datavalue_to_json(other),
+    };
+
+    let target_json = match &target.value {
+        DataValue::String(s) => serde_json::from_str::<serde_json::Value>(s)
+            .unwrap_or(serde_json::Value::String(s.clone())),
+        other => datavalue_to_json(other),
+    };
+
+    let mut merged = match source_json {
+        serde_json::Value::Object(map) => map,
+        other => {
+            let mut map = serde_json::Map::new();
+            map.insert("value".to_string(), other);
+            map
+        }
+    };
+
+    merged.insert(target_stream.to_string(), target_json);
+    DataValue::String(serde_json::Value::Object(merged).to_string())
+}
+
+/// Extracts the limit count from a slice of pipeline stages, if present.
+fn get_limit_from_stages(stages: &[PipelineStage]) -> Option<usize> {
+    for stage in stages {
+        if let PipelineStage::Limit { count } = stage {
+            return Some(*count);
+        }
+    }
+    None
+}
+
 /// Dynamic field extraction from DataValue (supports JSON in DataValue::String and MessagePack in DataValue::Binary)
 pub fn extract_field(value: &DataValue, field: &str) -> Option<DataValue> {
     match value {
@@ -399,7 +516,11 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> Result<Vec<Record
             {
                 return Err(format!("Stream '{}' does not exist", stream_name));
             }
-            let mut records = engine.scan_historical()?;
+            let mut records = if let Some(limit) = get_limit_from_stages(stages) {
+                engine.scan_historical_limited(limit)?
+            } else {
+                engine.scan_historical()?
+            };
             apply_pipeline_stages_to_vec(&mut records, engine, stages);
             Ok(records)
         }
@@ -419,7 +540,11 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> Result<Vec<Record
             Ok(vec![record])
         }
         Query::InsertBatch { stream_name, batch } => {
-            // Verify none of the keys in the batch exist
+            // Acquire the write lock to atomically check all keys and queue appends.
+            // This prevents other concurrent InsertBatch operations from interleaving
+            // between the existence check and the ring buffer enqueue.
+            let _guard = engine.write_lock.lock().unwrap();
+
             for (key, _) in batch {
                 if engine.get(stream_name, key)?.is_some() {
                     return Err(format!(
@@ -743,7 +868,11 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> Result<Vec<Record
 
 /// Executes a pipeline query on static historical database records.
 pub fn execute_query_historical(engine: &StorageEngine, stages: &[PipelineStage]) -> Vec<Record> {
-    let mut records = engine.scan_historical().unwrap_or_default();
+    let mut records = if let Some(limit) = get_limit_from_stages(stages) {
+        engine.scan_historical_limited(limit).unwrap_or_default()
+    } else {
+        engine.scan_historical().unwrap_or_default()
+    };
     apply_pipeline_stages_to_vec(&mut records, engine, stages);
     records
 }
@@ -1085,6 +1214,137 @@ pub fn apply_pipeline_stages_to_vec(
                 }
 
                 *records = aggregated_records;
+            }
+            PipelineStage::Correlate {
+                source_stream,
+                join_key,
+                within_ms,
+            } => {
+                let all_records = engine.scan_historical().unwrap_or_default();
+                let mut results = Vec::new();
+                for record in records.iter() {
+                    if let Some(key_val) = evaluate_record_field(record, join_key) {
+                        let key_str = match &key_val {
+                            DataValue::String(s) => s.clone(),
+                            DataValue::Int(i) => i.to_string(),
+                            DataValue::UInt(u) => u.to_string(),
+                            _ => format!("{:?}", key_val),
+                        };
+                        let window_min = record.timestamp - *within_ms as i64;
+                        let window_max = record.timestamp + *within_ms as i64;
+
+                        let mut matched_count = 0u64;
+                        let mut merged_value = datavalue_to_json(&record.value);
+
+                        for other in &all_records {
+                            if other.stream_name != *source_stream {
+                                continue;
+                            }
+                            if other.timestamp < window_min || other.timestamp > window_max {
+                                continue;
+                            }
+                            if let Some(other_key_val) = evaluate_record_field(other, join_key) {
+                                let other_key_str = match &other_key_val {
+                                    DataValue::String(s) => s.clone(),
+                                    DataValue::Int(i) => i.to_string(),
+                                    DataValue::UInt(u) => u.to_string(),
+                                    _ => format!("{:?}", other_key_val),
+                                };
+                                if other_key_str == key_str {
+                                    matched_count += 1;
+                                    // Merge matched record fields into record value
+                                    if let serde_json::Value::Object(ref mut map) = merged_value {
+                                        let other_json = match &other.value {
+                                            DataValue::String(s) => {
+                                                serde_json::from_str::<serde_json::Value>(s)
+                                                    .unwrap_or(serde_json::Value::String(s.clone()))
+                                            }
+                                            other_val => datavalue_to_json(other_val),
+                                        };
+                                        map.insert(
+                                            format!("correlated_{}", matched_count),
+                                            other_json,
+                                        );
+                                    }
+                                }
+                            }
+                        }
+
+                        if matched_count > 0 {
+                            if let serde_json::Value::Object(ref mut map) = merged_value {
+                                map.insert(
+                                    "correlated_count".to_string(),
+                                    serde_json::Value::Number(matched_count.into()),
+                                );
+                            }
+                            let mut enriched = record.clone();
+                            enriched.value = DataValue::String(merged_value.to_string());
+                            results.push(enriched);
+                        }
+                    }
+                }
+                *records = results;
+            }
+            PipelineStage::Sequence { steps, within_ms } => {
+                let mut matcher = SequenceMatcher::new(steps.clone(), *within_ms);
+                let mut results = Vec::new();
+                // Records must be in timestamp order for correct FSM behavior
+                records.sort_by_key(|r| r.timestamp);
+                for record in records.iter() {
+                    if let Some(completed) = matcher.process(record) {
+                        results.push(completed);
+                    }
+                }
+                *records = results;
+            }
+            PipelineStage::Chain {
+                target_stream,
+                join_key,
+            } => {
+                for record in records.iter_mut() {
+                    if let Some(key_val) = evaluate_record_field(record, join_key) {
+                        let key_str = match &key_val {
+                            DataValue::String(s) => s.clone(),
+                            DataValue::Int(i) => i.to_string(),
+                            DataValue::UInt(u) => u.to_string(),
+                            _ => format!("{:?}", key_val),
+                        };
+                        if let Ok(Some(target_record)) = engine.get(target_stream, &key_str) {
+                            // Merge target fields into current record value
+                            record.value =
+                                merge_record_values(record, &target_record, target_stream);
+                        }
+                        // Chain is a left join: no match retains the record unchanged
+                    } else {
+                        // Join key not found at top level — search inside nested merge blocks
+                        // (data added by previous chain hops, e.g. "responses" -> {response_id: ...})
+                        if let DataValue::String(s) = &record.value
+                            && let Ok(json) = serde_json::from_str::<serde_json::Value>(s)
+                            && let Some(obj) = json.as_object()
+                        {
+                            'nested: for (_key, val) in obj {
+                                if let Some(nested) = val.as_object()
+                                    && let Some(field_val) = nested.get(join_key)
+                                {
+                                    let key_str = match field_val {
+                                        serde_json::Value::String(s) => s.clone(),
+                                        other => other.to_string(),
+                                    };
+                                    if let Ok(Some(target_record)) =
+                                        engine.get(target_stream, &key_str)
+                                    {
+                                        record.value = merge_record_values(
+                                            record,
+                                            &target_record,
+                                            target_stream,
+                                        );
+                                    }
+                                    break 'nested;
+                                }
+                            }
+                        }
+                    }
+                }
             }
             PipelineStage::Export { .. } => {
                 // Export is treated as formatting stage in the transport layer, so no op here.

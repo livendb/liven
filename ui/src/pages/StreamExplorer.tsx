@@ -873,7 +873,13 @@ export default function StreamExplorer({
                 </div>
 
                 {importError && (
-                  <div className="p-3 rounded bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs flex items-center gap-2 animate-fade-in">
+                  <div
+                    className={`flex items-start gap-3 p-4 border rounded-2xl text-xs mb-6 animate-shake ${
+                      resolvedTheme === "dark"
+                        ? "bg-red-950/30 border-red-500/20 text-red-200"
+                        : "bg-red-50 border-red-200 text-red-800"
+                    }`}
+                  >
                     <XCircle className="w-4 h-4 shrink-0" />
                     <span className="font-mono text-[11px] leading-normal">
                       {importError}
@@ -882,7 +888,13 @@ export default function StreamExplorer({
                 )}
 
                 {importSuccess && (
-                  <div className="p-3 rounded bg-accent/10 border border-accent/20 text-accent text-xs flex items-center gap-2 animate-fade-in">
+                  <div
+                    className={`flex items-start gap-3 p-4 border rounded-2xl text-xs mb-6 animate-shake ${
+                      resolvedTheme === "dark"
+                        ? "bg-emerald-950/30 border-emerald-500/20 text-emerald-200"
+                        : "bg-emerald-50 border-emerald-200 text-emerald-800"
+                    }`}
+                  >
                     <CheckCircle2 className="w-4 h-4 shrink-0" />
                     <span className="font-semibold text-[11px] leading-normal">
                       {importSuccess}

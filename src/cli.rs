@@ -1,10 +1,15 @@
-use liven::{server, storage, types::DataValue};
+#[cfg(feature = "server")]
+use liven::server;
+use liven::{storage, types::DataValue};
 use std::io::Write;
 use std::path::Path;
 use std::process::{Command, exit};
+#[cfg(feature = "server")]
 use std::sync::Arc;
 use std::{env, fs};
+#[cfg(feature = "server")]
 use tracing::info;
+#[cfg(feature = "server")]
 use tracing_subscriber::EnvFilter;
 
 fn get_data_dir() -> String {
@@ -90,6 +95,7 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     match args[1].as_str() {
+        #[cfg(feature = "server")]
         "reset-key" => {
             // Check if server is running
             let running_pid = if is_server_running() {
@@ -218,6 +224,14 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
+        #[cfg(not(feature = "server"))]
+        "reset-key" => {
+            println!(
+                "This command requires the 'server' feature.\nRecompile with: cargo build --features server"
+            );
+            exit(1);
+        }
+        #[cfg(feature = "server")]
         "start" => {
             // Check if already running
             if is_server_running()
@@ -269,6 +283,13 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
 
             // Start embedded Axum web servers
             server::run_server(engine, config, run_ui).await?;
+        }
+        #[cfg(not(feature = "server"))]
+        "start" => {
+            println!(
+                "This command requires the 'server' feature.\nRecompile with: cargo build --features server"
+            );
+            exit(1);
         }
         "stop" => {
             if !Path::new(&get_pid_file()).exists() {
@@ -534,6 +555,7 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                 exit(1);
             }
         }
+        #[cfg(feature = "tui")]
         "vibe" => {
             let mut auth_key: Option<String> = None;
             let mut idx = 2;
@@ -554,6 +576,13 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             crate::tui::run_shell(auth_key).await?;
+        }
+        #[cfg(not(feature = "tui"))]
+        "vibe" => {
+            println!(
+                "This command requires the 'tui' feature.\nRecompile with: cargo build --features tui"
+            );
+            exit(1);
         }
         "import" => {
             let mut stream_name: Option<String> = None;

@@ -1,11 +1,13 @@
 use liven::client::LivenClient;
 use liven::config::{AppConfig, LimitsConfig, SecurityConfig, ServerConfig, StorageConfig};
+#[cfg(feature = "server")]
 use liven::server::run_server;
 use liven::storage::StorageEngine;
 use std::fs;
 use std::sync::Arc;
 use std::time::Duration;
 
+#[cfg(feature = "server")]
 #[tokio::test]
 async fn test_client_protocol_prefixes() {
     let test_dir = format!(
@@ -84,6 +86,7 @@ async fn test_client_protocol_prefixes() {
     let _ = fs::remove_dir_all(&test_dir);
 }
 
+#[cfg(feature = "server")]
 #[tokio::test]
 async fn test_client_listen_stream() {
     use futures_util::StreamExt;

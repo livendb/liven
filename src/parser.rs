@@ -38,6 +38,14 @@ pub fn parse_pipeline(input: &str) -> Result<Vec<PipelineStage>, String> {
                         rem_trimmed, part_trimmed
                     ));
                 }
+                // Validate sequence step count limit
+                if let PipelineStage::Sequence { ref steps, .. } = stage
+                    && steps.len() > 10
+                {
+                    return Err(
+                        "Sequence pattern too complex: maximum 10 steps allowed".to_string()
+                    );
+                }
                 stages.push(stage);
             }
             Err(e) => return Err(format!("Parse error in stage '{}': {:?}", part_trimmed, e)),
@@ -59,6 +67,9 @@ fn parse_stage(input: &str) -> IResult<&str, PipelineStage> {
         parse_limit_stage,
         parse_export_stage,
         parse_enrich_stage,
+        parse_correlate_stage,
+        parse_sequence_stage,
+        parse_chain_stage,
         parse_get_stage,
         parse_count_stage,
         parse_sort_stage,
@@ -462,6 +473,134 @@ fn parse_enrich_stage(input: &str) -> IResult<&str, PipelineStage> {
         input,
         PipelineStage::Enrich {
             source_stream,
+            join_key,
+        },
+    ))
+}
+
+/// Parses `correlate("stream", "key", within: 60000)`
+fn parse_correlate_stage(input: &str) -> IResult<&str, PipelineStage> {
+    let (input, _) = tag("correlate")(input)?;
+    let (input, _) = char('(')(input)?;
+    let (input, source_stream) = ws(parse_string_or_ident)(input)?;
+    let (input, _) = ws(char(','))(input)?;
+    let (input, join_key) = ws(parse_string_or_ident)(input)?;
+    let (input, _) = ws(char(','))(input)?;
+    let (input, _) = ws(tag("within"))(input)?;
+    let (input, _) = ws(char(':'))(input)?;
+    let (input, within_str) = ws(parse_digits)(input)?;
+    let (input, _) = char(')')(input)?;
+
+    let within_ms = within_str.parse::<u64>().map_err(|_| {
+        nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Digit))
+    })?;
+
+    Ok((
+        input,
+        PipelineStage::Correlate {
+            source_stream,
+            join_key,
+            within_ms,
+        },
+    ))
+}
+
+/// Parses `sequence(filter_expr, then: filter_expr, ..., within: ms)`
+fn parse_sequence_stage(input: &str) -> IResult<&str, PipelineStage> {
+    let (input, _) = tag("sequence")(input)?;
+    let (input, contents) = delimited(char('('), ws(take_while(|c| c != ')')), char(')'))(input)?;
+
+    // Split contents by top-level commas (respecting parentheses nesting for filter expressions)
+    let mut parts = Vec::new();
+    let mut depth = 0;
+    let mut current = String::new();
+    for c in contents.chars() {
+        match c {
+            '(' | '[' | '{' => {
+                depth += 1;
+                current.push(c);
+            }
+            ')' | ']' | '}' => {
+                depth -= 1;
+                current.push(c);
+            }
+            ',' if depth == 0 => {
+                parts.push(current.trim().to_string());
+                current = String::new();
+            }
+            _ => {
+                current.push(c);
+            }
+        }
+    }
+    if !current.is_empty() {
+        parts.push(current.trim().to_string());
+    }
+
+    if parts.len() < 2 {
+        return Err(nom::Err::Error(nom::error::Error::new(
+            input,
+            nom::error::ErrorKind::Tag,
+        )));
+    }
+
+    // Last part must be `within: <digits>`
+    let within_part = parts.pop().unwrap();
+    let within_ms = if let Some(rest) = within_part.strip_prefix("within:") {
+        rest.trim().parse::<u64>().map_err(|_| {
+            nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Digit))
+        })?
+    } else {
+        return Err(nom::Err::Error(nom::error::Error::new(
+            input,
+            nom::error::ErrorKind::Tag,
+        )));
+    };
+
+    // First part is the initial filter expression
+    let mut steps = Vec::new();
+    let first_expr_str = parts.remove(0);
+    let (_, first_expr) = parse_filter_expr(&first_expr_str)
+        .map_err(|_| nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Tag)))?;
+    steps.push(first_expr);
+
+    // Subsequent parts start with "then:"
+    for part in parts {
+        let part = part.trim();
+        if let Some(rest) = part.strip_prefix("then:") {
+            let expr_str = rest.trim();
+            let (_, expr) = parse_filter_expr(expr_str).map_err(|_| {
+                nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Tag))
+            })?;
+            steps.push(expr);
+        } else {
+            return Err(nom::Err::Error(nom::error::Error::new(
+                input,
+                nom::error::ErrorKind::Tag,
+            )));
+        }
+    }
+
+    Ok((input, PipelineStage::Sequence { steps, within_ms }))
+}
+
+/// Parses `chain("target_stream", "join_key")` or `chain(target_stream, join_key)`
+fn parse_chain_stage(input: &str) -> IResult<&str, PipelineStage> {
+    let (input, _) = tag("chain")(input)?;
+    let (input, (target_stream, _, join_key)) = delimited(
+        char('('),
+        ws(tuple((
+            parse_string_or_ident,
+            ws(char(',')),
+            parse_string_or_ident,
+        ))),
+        char(')'),
+    )(input)?;
+
+    Ok((
+        input,
+        PipelineStage::Chain {
+            target_stream,
             join_key,
         },
     ))
