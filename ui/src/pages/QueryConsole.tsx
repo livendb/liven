@@ -433,6 +433,24 @@ function getQueryCompletions(streams: string[]) {
   };
 }
 
+// Extract the stream name and operation type from a listen/tail query
+function getStreamLabel(query: string): { label: string; stream: string } {
+  const trimmed = query.trim();
+  // tail("stream") or tail('stream')
+  const tailMatch = trimmed.match(/^tail\s*\(\s*["']([^"']+)["']\s*\)/);
+  if (tailMatch) {
+    return { label: "Tailing", stream: tailMatch[1] };
+  }
+  // from("stream") or from('stream')
+  const fromMatch = trimmed.match(/^from\s*\(\s*["']([^"']+)["']\s*\)/);
+  if (fromMatch) {
+    return { label: "Listening to", stream: fromMatch[1] };
+  }
+  // Fallback: show first recognizable word
+  const firstWord = trimmed.split(/\s|\||\(/)[0];
+  return { label: "Streaming", stream: firstWord || trimmed };
+}
+
 export default function QueryConsole({
   query,
   setQuery,
@@ -675,17 +693,7 @@ export default function QueryConsole({
         </div>
 
         <div className="flex items-center justify-between pt-1">
-          <div className="text-xs text-zinc-550 dark:text-zinc-400 flex items-center gap-2">
-            {activeStreamQuery && (
-              <span className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/25 text-emerald-600 dark:text-emerald-400 text-xs font-bold animate-pulse">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]" />
-                Streaming Live:{" "}
-                {activeStreamQuery.length > 30
-                  ? `${activeStreamQuery.substring(0, 27)}...`
-                  : activeStreamQuery}
-              </span>
-            )}
-          </div>
+          <div className="text-xs text-zinc-550 dark:text-zinc-400 flex items-center gap-2"></div>
           <div className="flex items-center gap-4">
             {activeStreamQuery && (
               <button
@@ -730,13 +738,18 @@ export default function QueryConsole({
           <h4 className="font-semibold text-zinc-900 dark:text-white text-sm flex items-center gap-2">
             <Terminal className="w-4 h-4  text-zinc-600 dark:text-zinc-400" />
             <span>Query Output</span>
-            {activeStreamQuery && (
-              <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-[10px] tracking-wide font-extrabold animate-pulse">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                TAILING LIVE STREAM
-              </span>
-            )}
+            {activeStreamQuery &&
+              (() => {
+                const { label, stream } = getStreamLabel(activeStreamQuery);
+                return (
+                  <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-[10px] tracking-wide font-extrabold animate-pulse ml-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                    {label.toUpperCase()} {stream.toUpperCase()}
+                  </span>
+                );
+              })()}
           </h4>
+
           {queryStats.count > 0 && (
             <div className="text-xs font-bold text-zinc-500 dark:text-zinc-400 flex items-center gap-4">
               <span>
