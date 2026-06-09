@@ -127,7 +127,7 @@ fi
 # Setup OS-specific launch service trackers
 if [ "$OS" = "Linux" ]; then
     # Check if systemd is running (PID 1)
-    if [ -d /run/systemd/system ] || [ -d /lib/systemd/system ] || command -v systemctl >/dev/null; then
+    if [ -d /run/systemd/system ] || ( command -v systemctl >/dev/null 2>&1 && systemctl is-system-running >/dev/null 2>&1 ); then
         echo "Systemd detected. Configuring systemd service unit..."
         cat << 'EOF' > /etc/systemd/system/liven.service
 [Unit]

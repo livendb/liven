@@ -156,7 +156,9 @@ jobs:
         run: |
           echo "==== Windows Installation Tests ===="
           # Run install.sh and assert that it gracefully outputs Windows instructions
-          ./install.sh | grep -q "Windows Deployment Instructions"
+          # Capture output first to avoid SIGPIPE when grep -q closes the pipe early
+          INSTALL_OUTPUT=$(./install.sh)
+          echo "$INSTALL_OUTPUT" | grep -q "Windows Deployment Instructions"
           echo "PASS: Windows instructions successfully returned"
 
       - name: Upload compiled executable
