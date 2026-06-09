@@ -188,6 +188,11 @@ pub enum Query {
     },
     ListStreams,
     Status,
+    /// Real-time subscription query: executes the pipeline historically
+    /// then streams matching live records. Used via .listen() suffix.
+    Listen {
+        pipeline: Vec<PipelineStage>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]

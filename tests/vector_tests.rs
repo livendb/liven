@@ -186,4 +186,7 @@ fn test_vector_filter_execution() {
     // Should retain only rec1
     assert_eq!(records.len(), 1);
     assert_eq!(records[0].key.as_str(), "rec1");
+
+    // Clean up
+    let _ = std::fs::remove_dir_all(&temp_dir);
 }

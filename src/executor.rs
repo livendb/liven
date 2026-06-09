@@ -863,6 +863,20 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> Result<Vec<Record
                 value: DataValue::String(value_str),
             }])
         }
+        Query::Listen { pipeline } => {
+            if let Some(PipelineStage::From { stream_name }) = pipeline.first()
+                && !engine.list_streams().contains(stream_name)
+            {
+                return Err(format!("Stream '{}' does not exist", stream_name));
+            }
+            let mut records = if let Some(limit) = get_limit_from_stages(pipeline) {
+                engine.scan_historical_limited(limit)?
+            } else {
+                engine.scan_historical()?
+            };
+            apply_pipeline_stages_to_vec(&mut records, engine, pipeline);
+            Ok(records)
+        }
     }
 }
 

@@ -4,60 +4,60 @@
 
 :root {
     /* 🧡 Primary: Vibrant Anthropic Coral — warm, elegant, striking */
-    --color-primary: #FF5C35;
-    --color-primary-hover: #E0451B;
-    --color-primary-light: #FFD3C4;
+    --color-primary: #ff5c35;
+    --color-primary-hover: #e0451b;
+    --color-primary-light: #ffd3c4;
     --color-primary-glow: rgba(255, 92, 53, 0.35);
 
     /* 💛 Secondary: Vibrant Sunlit Gold — energy and real-time spark */
-    --color-secondary: #FFB830;
-    --color-secondary-hover: #E09E1B;
-    --color-secondary-light: #FFF0D4;
+    --color-secondary: #ffb830;
+    --color-secondary-hover: #e09e1b;
+    --color-secondary-light: #fff0d4;
     --color-secondary-glow: rgba(255, 184, 48, 0.35);
 
     /* 💚 Accent: Vibrant Mint-Sage — balance and operations */
-    --color-accent: #10B981;
+    --color-accent: #10b981;
     --color-accent-hover: #059669;
-    --color-accent-light: #D1FAE5;
+    --color-accent-light: #d1fae5;
 
     /* Sidebar/Header specific background (Deep Anthropic Coral) */
-    --color-navbar-bg: #E0451B;
+    --color-navbar-bg: #e0451b;
 
     /* Page-wide settings (Signature Warm Off-White / Charcoal-Clay) */
-    --color-body-bg: #FDF6F0;
-    --color-panel-bg: #FFFFFF;
-    --color-border-subtle: #F0E2DA;
-    --color-text-main: #1E140F;
-    --color-text-muted: #7A6E67;
+    --color-body-bg: #f7f5f0;
+    --color-panel-bg: #ffffff;
+    --color-border-subtle: #f0e2da;
+    --color-text-main: #1e140f;
+    --color-text-muted: #7a6e67;
 }
 
 .dark {
     /* 🧡 Primary: Vibrant Anthropic Coral */
-    --color-primary: #FF5C35;
-    --color-primary-hover: #FF7B5E;
-    --color-primary-light: #FFD3C4;
+    --color-primary: #ff5c35;
+    --color-primary-hover: #ff7b5e;
+    --color-primary-light: #ffd3c4;
     --color-primary-glow: rgba(255, 92, 53, 0.35);
 
     /* 💛 Secondary: Vibrant Sunlit Gold */
-    --color-secondary: #FFB830;
-    --color-secondary-hover: #FFC75E;
-    --color-secondary-light: #FFF0D4;
+    --color-secondary: #ffb830;
+    --color-secondary-hover: #ffc75e;
+    --color-secondary-light: #fff0d4;
     --color-secondary-glow: rgba(255, 184, 48, 0.35);
 
     /* 💚 Accent: Vibrant Mint-Sage */
-    --color-accent: #10B981;
-    --color-accent-hover: #34D399;
-    --color-accent-light: #D1FAE5;
+    --color-accent: #10b981;
+    --color-accent-hover: #34d399;
+    --color-accent-light: #d1fae5;
 
     /* Deep Obsidian-Charcoal for Sidebar */
-    --color-navbar-bg: #130F0C;
+    --color-navbar-bg: #130f0c;
 
     /* Dark Mode Layout backgrounds */
-    --color-body-bg: #19130F;
-    --color-panel-bg: #291E1A;
-    --color-border-subtle: #3D2924;
-    --color-text-main: #F9F6F0;
-    --color-text-muted: #A3968F;
+    --color-body-bg: #131313;
+    --color-panel-bg: #291e1a;
+    --color-border-subtle: #3d2924;
+    --color-text-main: #f9f6f0;
+    --color-text-muted: #a3968f;
 }
 
 @layer base {

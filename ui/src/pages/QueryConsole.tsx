@@ -115,19 +115,22 @@ const livenLanguage = StreamLanguage.define({
     if (stream.match(/^\d+(?:\.\d+)?/)) return "number";
 
     // Dot-methods (e.g. .insert, .upsert) - className style
-    if (stream.match(/^\.(?:insert|upsert|update|delete|empty)\b/))
+    if (stream.match(/^\.(?:insert|upsert|update|delete|empty|listen)\b/))
       return "className";
 
     // Keywords
-    if (stream.match(/^(?:from|drop|streams)\b/)) return "keyword";
+    if (stream.match(/^(?:from|drop|streams|tail)\b/)) return "keyword";
 
     // Pipeline built-in functions
     if (
       stream.match(
-        /^(?:filter|limit|get|map|count|group|sort|page|enrich|window)\b/,
+        /^(?:filter|limit|get|map|count|group|sort|page|enrich|window|correlate|sequence|chain|vector_filter)\b/,
       )
     )
       return "keyword";
+
+    // Sequence step keywords
+    if (stream.match(/^(?:then:|within)\b/)) return "keyword";
 
     // Functions
     if (stream.match(/^(?:now|cursor)\b/)) return "keyword";
@@ -207,6 +210,12 @@ function getQueryCompletions(streams: string[]) {
             type: "function",
             detail: "Truncate stream",
           },
+          {
+            label: ".listen",
+            apply: ".listen()",
+            type: "function",
+            detail: "Subscribe to real-time updates",
+          },
         ],
       };
     }
@@ -276,6 +285,30 @@ function getQueryCompletions(streams: string[]) {
             apply: "| window(",
             type: "function",
             detail: "Sliding window agg",
+          },
+          {
+            label: "| correlate",
+            apply: '| correlate("',
+            type: "function",
+            detail: "Windowed join two streams",
+          },
+          {
+            label: "| sequence",
+            apply: "| sequence(",
+            type: "function",
+            detail: "Ordered event pattern FSM",
+          },
+          {
+            label: "| chain",
+            apply: '| chain("',
+            type: "function",
+            detail: "Causal chain traversal",
+          },
+          {
+            label: "| vector_filter",
+            apply: "| vector_filter(",
+            type: "function",
+            detail: "Cosine similarity filter",
           },
         ],
       };
@@ -353,6 +386,48 @@ function getQueryCompletions(streams: string[]) {
           type: "function",
           detail: "Range filter",
         },
+        {
+          label: "correlate",
+          apply: 'correlate("',
+          type: "keyword",
+          detail: 'correlate("stream", "key", within: ms)',
+        },
+        {
+          label: "sequence",
+          apply: "sequence(",
+          type: "keyword",
+          detail: "sequence(expr, then: expr, within: ms)",
+        },
+        {
+          label: "chain",
+          apply: 'chain("',
+          type: "keyword",
+          detail: 'chain("stream", "key")',
+        },
+        {
+          label: "within",
+          apply: "within: ",
+          type: "keyword",
+          detail: "Time window in milliseconds",
+        },
+        {
+          label: "vector_filter",
+          apply: "vector_filter(",
+          type: "keyword",
+          detail: "vector_filter(field, [vec], threshold)",
+        },
+        {
+          label: "tail",
+          apply: 'tail("',
+          type: "keyword",
+          detail: 'tail("stream") — real-time subscription',
+        },
+        {
+          label: "listen",
+          apply: ".listen()",
+          type: "function",
+          detail: 'from("stream").listen() — real-time subscription',
+        },
       ],
     };
   };
@@ -416,23 +491,22 @@ export default function QueryConsole({
     );
 
     const queryTrimmed = query.trim();
-    const isListenQuery = queryTrimmed.includes(".listen()") || queryTrimmed.startsWith("tail(");
+
+    const isListenQuery =
+      queryTrimmed.includes(".listen()") || queryTrimmed.startsWith("tail(");
 
     if (isListenQuery && wsRef.current && wsConnected) {
-      // Translate from("stream").listen() to tail("stream") before sending to websocket
-      let wsQuery = queryTrimmed;
-      if (wsQuery.includes(".listen()")) {
-        const match = wsQuery.match(/from\s*\(\s*(["'])([^"'\\]+)\1\s*\)\s*\.\s*listen\s*\(\s*\)/);
-        if (match) {
-          wsQuery = `tail("${match[2]}")`;
-        }
-      }
-      wsRef.current.send(JSON.stringify({ type: "query", query: wsQuery }));
+      // Send the query as-is over WebSocket. The server handles:
+      //   tail("stream") — raw stream subscription
+      //   from("stream") | filter(...) .listen() — filtered subscription via execute_query_stream
+      wsRef.current.send(
+        JSON.stringify({ type: "query", query: queryTrimmed }),
+      );
       setIsQueryRunning(false); // Keeps socket listening, UI handles streaming
       setHasExecuted(true);
       setActiveStreamQuery(queryTrimmed);
       addActivity(
-        `Subscribed to real-time stream subscription for query: "${wsQuery}"`,
+        `Subscribed to real-time stream subscription for query: "${queryTrimmed}"`,
         "query",
         "info",
       );
@@ -605,7 +679,10 @@ export default function QueryConsole({
             {activeStreamQuery && (
               <span className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/25 text-emerald-600 dark:text-emerald-400 text-xs font-bold animate-pulse">
                 <span className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]" />
-                Streaming Live: {activeStreamQuery.length > 30 ? `${activeStreamQuery.substring(0, 27)}...` : activeStreamQuery}
+                Streaming Live:{" "}
+                {activeStreamQuery.length > 30
+                  ? `${activeStreamQuery.substring(0, 27)}...`
+                  : activeStreamQuery}
               </span>
             )}
           </div>
@@ -616,7 +693,11 @@ export default function QueryConsole({
                   setActiveStreamQuery(null);
                   setQueryResults([]);
                   setQueryStats({ count: 0, timeMs: 0 });
-                  addActivity("Stopped real-time stream subscription", "query", "warn");
+                  addActivity(
+                    "Stopped real-time stream subscription",
+                    "query",
+                    "warn",
+                  );
                 }}
                 className="py-2 px-4 rounded border border-rose-200 dark:border-rose-800/60 hover:bg-rose-50 dark:hover:bg-rose-950/20 text-rose-500 text-xs font-bold transition-all active:scale-[0.98] cursor-pointer"
               >
@@ -671,9 +752,7 @@ export default function QueryConsole({
                 ) : operationType === "insert" || operationType === "upsert" ? (
                   <>
                     Records Written:{" "}
-                    <strong className="text-accent">
-                      {queryStats.count}
-                    </strong>
+                    <strong className="text-accent">{queryStats.count}</strong>
                   </>
                 ) : (
                   <>

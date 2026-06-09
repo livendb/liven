@@ -113,18 +113,7 @@ impl AppendTarget {
 
 #[test]
 fn test_generate_sample_data() {
-    let target_dir = std::env::var("LIVEN_DATA_DIR").unwrap_or_else(|_| {
-        std::env::temp_dir()
-            .join(format!(
-                "liven_sample_data_{}",
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_nanos()
-            ))
-            .to_string_lossy()
-            .to_string()
-    });
+    let target_dir = std::env::var("LIVEN_DATA_DIR").unwrap_or_else(|_| "./data".to_string());
 
     // Detect if the directory is locked by trying to obtain try_lock_shared on any existing .liven segments
     let is_locked = if let Ok(entries) = fs::read_dir(&target_dir) {
@@ -144,12 +133,6 @@ fn test_generate_sample_data() {
     } else {
         false
     };
-
-    // Clean any prior residues if any and if the directory is not locked
-    let is_env_set = std::env::var("LIVEN_DATA_DIR").is_ok();
-    if !is_locked && !is_env_set {
-        let _ = fs::remove_dir_all(&target_dir);
-    }
 
     let mut target = if is_locked {
         println!(
@@ -368,14 +351,4 @@ fn test_generate_sample_data() {
         "✨ Generated sample database segments successfully persisted at '{}'.",
         target_dir
     );
-
-    // If LIVEN_DATA_DIR/CONDUIT_DATA_DIR was not explicitly set, and directory is not locked, clean up the temporary folder after successful test
-    let is_env_set = std::env::var("LIVEN_DATA_DIR").is_ok();
-    if !is_locked && !is_env_set {
-        println!(
-            "Cleaning up temporary sample data directory: {}",
-            target_dir
-        );
-        // let _ = fs::remove_dir_all(&target_dir);
-    }
 }

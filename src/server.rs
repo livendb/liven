@@ -1,6 +1,6 @@
 // Rebuild trigger for embedded static UI assets
 use crate::codec::{LivenCodec, LivenFrame};
-use crate::executor::{execute_query, execute_query_stream};
+use crate::executor::{apply_pipeline_stages_to_vec, execute_query, execute_query_stream};
 use crate::parser::{parse_pipeline, parse_query};
 use crate::storage::StorageEngine;
 use crate::types::{DataValue, ExportFormat, PipelineStage, Query, Record};
@@ -667,6 +667,62 @@ pub async fn run_server(
                                     }
 
                                     let query_trimmed = query_str.trim();
+                                    let is_listen = query_trimmed.ends_with(").listen()")
+                                        || query_trimmed.ends_with("').listen()");
+
+                                    if is_listen {
+                                        // Strip .listen() suffix to get the pipeline query
+                                        let pipeline_str = if query_trimmed.ends_with(").listen()") {
+                                            &query_trimmed[..query_trimmed.len() - ").listen()".len()]
+                                        } else {
+                                            &query_trimmed[..query_trimmed.len() - "').listen()".len()]
+                                        };
+                                        let engine_listen = engine_client.clone();
+                                        let pipeline_stages = match parse_pipeline(pipeline_str) {
+                                            Ok(stages) => stages,
+                                            Err(e) => {
+                                                let _ = writer.send(crate::codec::LivenFrame::Err(format!("Listen query parse error: {}", e))).await;
+                                                break;
+                                            }
+                                        };
+                                        // Send historical snapshot first
+                                        if let Ok(records) = execute_query(&engine_client, &Query::Listen { pipeline: pipeline_stages.clone() }) {
+                                            let filtered: Vec<Record> = records.into_iter().filter(|rec| {
+                                                allowed_tags.is_empty() || allowed_tags.contains(&(rec.type_tag as u32))
+                                            }).collect();
+                                            if !filtered.is_empty() {
+                                                let _ = writer.send(crate::codec::LivenFrame::Records(filtered)).await;
+                                            }
+                                        }
+                                        // Subscribe to live records matching the pipeline
+                                        let mut rx = engine_client.subscribe();
+                                        loop {
+                                            tokio::select! {
+                                                rec_res = rx.recv() => {
+                                                    match rec_res {
+                                                        Ok(record) => {
+                                                            let mut vec = vec![record];
+                                                            apply_pipeline_stages_to_vec(&mut vec, &engine_listen, &pipeline_stages);
+                                                            if !vec.is_empty() {
+                                                                let is_tag_allowed = allowed_tags.is_empty() || allowed_tags.contains(&(vec[0].type_tag as u32));
+                                                                if is_tag_allowed
+                                                                    && writer.send(crate::codec::LivenFrame::Records(vec)).await.is_err() {
+                                                                        break;
+                                                                    }
+                                                            }
+                                                        }
+                                                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                                                        Err(_) => break,
+                                                    }
+                                                }
+                                                _ = &mut close_rx_fused => {
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                        break;
+                                    }
+
                                     let is_tail = (query_trimmed.starts_with("tail(\"") && query_trimmed.ends_with("\")"))
                                         || (query_trimmed.starts_with("tail('") && query_trimmed.ends_with("')"));
 
@@ -842,6 +898,7 @@ pub fn check_query_capabilities(query_str: &str, capabilities: u8) -> bool {
                     (capabilities & crate::security::CAP_READ) != 0
                 }
             }
+            crate::types::Query::Listen { .. } => (capabilities & crate::security::CAP_READ) != 0,
         },
         Err(_) => true,
     }
@@ -988,9 +1045,9 @@ async fn handle_socket(socket: WebSocket, state: Arc<ServerState>) {
                     }
                 }
             } else {
-                match parse_pipeline(&query_str) {
-                    Ok(stages) => {
-                        let stream = execute_query_stream(engine_query.clone(), stages);
+                match parse_query(&query_str) {
+                    Ok(Query::Listen { pipeline }) => {
+                        let stream = execute_query_stream(engine_query.clone(), pipeline);
                         let mut stream = Box::pin(stream);
                         while let Some(record) = stream.next().await {
                             let resp = WsResponse::QueryResult { data: record };
@@ -1002,6 +1059,28 @@ async fn handle_socket(socket: WebSocket, state: Arc<ServerState>) {
                             }
                         }
                     }
+                    Ok(_) => match parse_pipeline(&query_str) {
+                        Ok(stages) => {
+                            let stream = execute_query_stream(engine_query.clone(), stages);
+                            let mut stream = Box::pin(stream);
+                            while let Some(record) = stream.next().await {
+                                let resp = WsResponse::QueryResult { data: record };
+                                if let Ok(msg_str) = serde_json::to_string(&resp) {
+                                    let mut sender_guard = sender_for_query.lock().await;
+                                    if sender_guard.send(Message::Text(msg_str)).await.is_err() {
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            let resp = WsResponse::Error { message: e };
+                            if let Ok(msg_str) = serde_json::to_string(&resp) {
+                                let mut sender_guard = sender_for_query.lock().await;
+                                let _ = sender_guard.send(Message::Text(msg_str)).await;
+                            }
+                        }
+                    },
                     Err(e) => {
                         let resp = WsResponse::Error { message: e };
                         if let Ok(msg_str) = serde_json::to_string(&resp) {

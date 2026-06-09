@@ -13,12 +13,23 @@ impl Drop for ServerGuard {
     }
 }
 
+struct DirGuard(String);
+
+impl Drop for DirGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
 #[test]
 fn test_cli_import_export_csv_and_jsonl() {
     // 1. Prepare temp directory and test files
     let test_dir = "./data_test_import_export";
+    // Clean any leftover from prior runs, then create fresh directory
     let _ = fs::remove_dir_all(test_dir);
     fs::create_dir_all(test_dir).unwrap();
+    // Ensure cleanup on panic via RAII
+    let _dir_guard = DirGuard(test_dir.to_string());
 
     let csv_input_path = format!("{}/input.csv", test_dir);
     let csv_output_path = format!("{}/output.csv", test_dir);

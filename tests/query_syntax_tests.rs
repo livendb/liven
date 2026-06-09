@@ -182,5 +182,5 @@ fn test_execute_all_query_syntaxes() {
     }
 
     // Clean up temp directory
-    // let _ = fs::remove_dir_all(&temp_dir);
+    let _ = std::fs::remove_dir_all(&temp_dir);
 }

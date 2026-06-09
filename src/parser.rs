@@ -777,6 +777,7 @@ pub fn parse_query(input: &str) -> Result<Query, String> {
                             || rest.starts_with(".empty")
                             || rest.starts_with(".insert")
                             || rest.starts_with(".upsert")
+                            || rest.starts_with(".listen")
                         {
                             dot_index = Some(i);
                         }
@@ -791,6 +792,13 @@ pub fn parse_query(input: &str) -> Result<Query, String> {
     if let Some(idx) = dot_index {
         let pipeline_part = trimmed[..idx].trim();
         let action_part = trimmed[idx..].trim();
+
+        // .listen() is a subscription qualifier. Parse as Query::Listen.
+        // The remaining pipeline before .listen() is the subscription query.
+        if action_part.starts_with(".listen") {
+            let pipeline = parse_pipeline(pipeline_part)?;
+            return Ok(Query::Listen { pipeline });
+        }
 
         let pipeline = parse_pipeline(pipeline_part)?;
 
