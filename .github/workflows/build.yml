@@ -93,6 +93,9 @@ jobs:
           docker run --rm -v ${{ github.workspace }}:/workspace alpine:latest sh -c "
             cp /workspace/install.sh /install.sh &&
             chmod +x /install.sh &&
+            mkdir -p /target/release &&
+            cp /workspace/target/release/liven /target/release/liven &&
+            chmod +x /target/release/liven &&
             ./install.sh --env development &&
             test -f /usr/local/bin/liven &&
             test -f /usr/local/bin/liven-entrypoint &&

@@ -992,6 +992,7 @@ impl StorageEngine {
 
         let mut comp_file = OpenOptions::new()
             .create(true)
+            .read(true)
             .append(true)
             .open(&compacted_path)
             .map_err(|e| e.to_string())?;
