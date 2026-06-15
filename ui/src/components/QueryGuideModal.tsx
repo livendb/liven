@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { X, Check, Copy, Play } from "lucide-react";
-import hljs from "highlight.js";
 import {
   fetchSamples,
   insertSamples,
@@ -9,6 +8,7 @@ import {
   upsertSamples,
   relationshipSamples,
 } from "../constants/samples";
+import CodeBlock from "./CodeBlock";
 
 export interface QueryGuideModalProps {
   isOpen: boolean;
@@ -149,18 +149,7 @@ export default function QueryGuideModal({
 
                   {/* IDE-style Code Block */}
                   <div className="space-y-3.5">
-                    <div className="rounded-md border border-slate-200/80 dark:border-slate-800/80 overflow-hidden shadow-inner bg-body-bg dark:bg-body-bg transition-colors">
-                      <pre className="p-4 text-[13px] leading-relaxed font-mono overflow-x-auto whitespace-pre hljs select-text bg-transparent border-0">
-                        <code
-                          className="hljs"
-                          dangerouslySetInnerHTML={{
-                            __html: hljs.highlight(sample.code, {
-                              language: "javascript",
-                            }).value,
-                          }}
-                        />
-                      </pre>
-                    </div>
+                    <CodeBlock language="javascript" code={sample.code} />
 
                     {/* Actions bar */}
                     <div className="flex items-center justify-end gap-3 pt-1">

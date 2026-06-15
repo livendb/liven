@@ -2,7 +2,7 @@ import { useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { Record } from "../types";
 import { parseStringifiedJson } from "../utils/api";
-import hljs from "highlight.js";
+import CodeBlock from "./CodeBlock";
 
 export interface RowExpandProps {
   record: Record;
@@ -151,9 +151,7 @@ export default function RowExpand({ record }: RowExpandProps) {
               Raw Payload Document
             </span>
             <div className="relative">
-              <pre className="overflow-x-auto p-4 bg-body-bg dark:bg-zinc-900 rounded-xl border border-zinc-900/[0.04] dark:border-zinc-800/50 shadow-sm font-mono text-xs tabular-nums tracking-normal max-h-96 hljs">
-                <code dangerouslySetInnerHTML={{ __html: highlightedHtml }} />
-              </pre>
+              <CodeBlock language="typescript" code={highlightedHtml} />
             </div>
           </div>
         </div>

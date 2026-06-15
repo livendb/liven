@@ -38,11 +38,12 @@ fn test_vector_codec_encode_decode() {
 
     codec.encode(frame, &mut dst).unwrap();
 
-    // Header should be 4 bytes of length, and the first byte of payload should be 0x03
-    assert!(dst.len() > 5);
-    let len = u32::from_be_bytes([dst[0], dst[1], dst[2], dst[3]]) as usize;
-    assert_eq!(len, dst.len() - 4);
-    assert_eq!(dst[4], 0x03); // TCP discriminator prefix for raw quantized vector
+    // Header: [version: u8][length: u32][discriminator: u8][payload]
+    assert!(dst.len() > 6);
+    assert_eq!(dst[0], 0x01); // protocol version
+    let len = u32::from_be_bytes([dst[1], dst[2], dst[3], dst[4]]) as usize;
+    assert_eq!(len, dst.len() - 5);
+    assert_eq!(dst[5], 0x03); // TCP discriminator prefix for raw quantized vector
 
     // Decode back
     let decoded = codec.decode(&mut dst).unwrap().unwrap();

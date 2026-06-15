@@ -1,5 +1,3 @@
-// Client types for VivoDB SPA
-
 export interface Record {
   sequence_id: number;
   timestamp: number;

@@ -1,0 +1,74 @@
+LIVEN Commercial License Agreement
+====================================
+
+Copyright (c) 2026, LIVEN Maintainers <team@livendb.com>
+
+This Commercial License Agreement (the "Agreement") is a legal agreement
+between you (either an individual or a single entity) and LIVEN Maintainers
+for the LIVEN software (the "Software").
+
+PURPOSE
+
+This license grants you the right to integrate LIVEN into proprietary
+applications and closed-source products without being subject to the
+copyleft requirements of the GNU General Public License version 3 (GPLv3).
+
+GRANT OF LICENSE
+
+Subject to the terms of this Agreement, LIVEN Maintainers grants you a
+non-exclusive, non-transferable, worldwide, perpetual license to:
+
+1. Use, reproduce, and modify the Software for any purpose, including
+   commercial and proprietary use.
+
+2. Integrate the Software into your own products and applications.
+
+3. Distribute the Software as part of your products, including proprietary
+   and closed-source products, without disclosing your source code.
+
+4. Sub-license the Software to your end-users as an integrated part of
+   your products.
+
+RESTRICTIONS
+
+You may not:
+
+1. Distribute the Software on a standalone basis (i.e., as a competing
+   database product) without a separate distribution agreement.
+
+2. Remove or alter any copyright, trademark, or license notices contained
+   within the Software.
+
+3. Use the Software in any manner that violates applicable law.
+
+FEES AND PAYMENT
+
+A commercial license fee is required. Please contact team@livendb.com for
+pricing information based on your use case (number of developers,
+deployment scale, and support requirements).
+
+SUPPORT AND MAINTENANCE
+
+Commercial licenses include priority support and maintenance updates
+during the license term. Contact team@livendb.com for support terms.
+
+WARRANTY DISCLAIMER
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+
+LIMITATION OF LIABILITY
+
+IN NO EVENT SHALL LIVEN MAINTAINERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+OTHER LIABILITY, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE
+OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+GOVERNING LAW
+
+This Agreement shall be governed by the laws of the jurisdiction of
+LIVEN Maintainers.
+
+CONTACT
+
+For commercial licensing inquiries, contact: team@livendb.com

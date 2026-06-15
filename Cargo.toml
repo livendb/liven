@@ -2,6 +2,7 @@
 name = "liven"
 version = "0.0.1"
 edition = "2024"
+license = "SSPL-1.0 OR Commercial"
 
 [lib]
 name = "liven"
@@ -42,6 +43,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 rmp-serde = "1.3.0"
 crc32fast = "1.4.2"
+thiserror = "1"
 fs2 = "0.4.3"
 csv = "1.3.0"
 futures-util = { version = "0.3.30", features = ["sink"] }
@@ -51,6 +53,7 @@ tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 rand = "0.8.5"
 config = { version = "0.14.0", features = ["toml"] }
 blake3 = "1.5"
+base64 = "0.22.0"
 
 # Server only
 axum = { version = "0.7.5", features = ["ws"], optional = true }
@@ -78,15 +81,16 @@ strip = true              # Automatically strip out all symbol arrays and debug 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
 proptest = "1.5.0"
+tempfile = "3.10"
 
 [[bench]]
 name = "engine_bench"
 harness = false
 
 [package.metadata.deb]
-maintainer = "LIVEN Maintainers <team@liven.io>"
-copyright = "2026, LIVEN Maintainers <team@liven.io>"
-license = "MIT"
+maintainer = "LIVEN Maintainers <team@livendb.com>"
+copyright = "2026, LIVEN Maintainers <team@livendb.com>"
+license = "SSPL-1.0"
 section = "database"
 priority = "optional"
 assets = [
@@ -100,9 +104,9 @@ maintainer-scripts = "debian"
 [package.metadata.generate-rpm]
 summary = "LIVEN High-Performance Storage Engine"
 description = "High-performance storage engine with ZTNA and mTLS support"
-license = "MIT"
+license = "SSPL-1.0"
 release = "1"
-packager = "LIVEN Maintainers <team@liven.io>"
+packager = "LIVEN Maintainers <team@livendb.com>"
 doc-files = ["README.md"]
 assets = [
     { source = "target/release/liven", dest = "/usr/local/bin/liven", mode = "755" },

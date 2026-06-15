@@ -3,7 +3,7 @@
 # Automatically verifies code format, clippy lints, and test status before pushing.
 
 echo "======================================================"
-echo "⚡ Running LIVEN Pre-Push Verification Suite..."
+echo "Running LIVEN Pre-Push Verification Suite..."
 echo "======================================================"
 
 # 1. Verify Code Formatting

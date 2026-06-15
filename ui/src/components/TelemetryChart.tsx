@@ -32,7 +32,7 @@ function formatYLabel(val: number): string {
 function resolveThemeColors(_resolvedTheme: "light" | "dark") {
   return {
     reads: {
-      stroke: "#FF5C35", // 🧡 Vibrant Anthropic Coral
+      stroke: "#FF5C35", // 🧡 Vibrant Coral
       solidFill: "rgba(255, 92, 53, 0.03)",
     },
     writes: {

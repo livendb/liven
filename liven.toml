@@ -8,7 +8,6 @@ broadcast_capacity = 4096
 
 
 [security]
-master_key = "bcac3bd8e48be28c1d96029352f693ef9c8ae894cbb84b69d2b26c4fd2415efc"
 mode = "auth_key" # Options: "auth_key", "none"
 
 [security.auth_key]
@@ -20,21 +19,66 @@ allow_local_auto_generation = true
 data_directory = "./data"
 
 [limits]
+# Maximum concurrent streams. Each stream has its own timestamp index.
 max_concurrent_streams = 32
+
+# Open file descriptor cache for segment files.
+# Increase if you have many segments and frequent cold reads.
 max_open_file_descriptors = 64
-max_index_ram_mb = 16
+
+# Index RAM budget in megabytes.
+# If not explicitly set, LIVEN auto-allocates 25% of system RAM (max 4GB).
+# Formula: ~84 bytes per unique key.
+# Examples at different budgets:
+# - 16MB ≈ 190K keys (legacy default)
+# - 64MB ≈ 760K keys
+# - 256MB ≈ 3M keys
+# - 1GB ≈ 12M keys
+# - 4GB ≈ 48M keys (max auto-detected)
+# Uncomment to override auto-detection with a specific value:
+# max_index_ram_mb = 256
+
+# Maximum segment file size before a new segment is created.
 max_segment_size_mb = 16
 
-# For local hardware device
-# [limits]
-# max_concurrent_streams = 32
-# max_open_file_descriptors = 64
-# max_index_ram_mb = 16
-# max_segment_size_mb = 16
+# Maximum number of records returned from full scan operations
+max_scan_results = 100000
 
-# For edge
+# ============================================
+# RECOMMENDED CONFIGURATION PROFILES
+# ============================================
+# Uncomment and adjust the following profiles based on your deployment scenario.
+# These are NOT active TOML sections - they are examples only.
+
+# --- Edge/Embedded Profile ---
+# For resource-constrained devices (Raspberry Pi, IoT)
+# [limits]
+# max_concurrent_streams = 8
+# max_open_file_descriptors = 16
+# max_index_ram_mb = 32  # Override auto-detect for small devices
+# max_scan_results = 10000
+
+# --- Development Profile ---
+# For local development with auto-detection
+# [server]
+# environment = "development"
+# host = "127.0.0.1"
+# [security]
+# mode = "none"  # Auto-disabled for development
+
+# --- Production Profile ---
+# For server deployments
+# [server]
+# environment = "production"
+# host = "0.0.0.0"
+# [security]
+# mode = "auth_key"  # Auto-enabled for production
+# [security.auth_key]
+# allow_local_auto_generation = false
+
+# --- High-Volume Profile ---
+# For systems with many streams and high throughput
 # [limits]
 # max_concurrent_streams = 64
 # max_open_file_descriptors = 128
-# max_index_ram_mb = 64
-# max_segment_size_mb = 32
+# max_scan_results = 500000

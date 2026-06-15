@@ -19,6 +19,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use liven::codec::LivenFrame;
+use liven::error::LivenError;
 use liven::executor::execute_query;
 use liven::parser::parse_query;
 use liven::storage::StorageEngine;
@@ -35,14 +36,11 @@ enum DbConnection {
 }
 
 impl DbConnection {
-    async fn execute(&self, query_str: &str) -> Result<Vec<Record>, String> {
+    async fn execute(&self, query_str: &str) -> Result<Vec<Record>, LivenError> {
         match self {
             DbConnection::Online { client, .. } => {
                 let mut client_guard = client.lock().await;
-                client_guard
-                    .query(query_str)
-                    .await
-                    .map_err(|e| e.to_string())
+                client_guard.query(query_str).await.map_err(LivenError::Io)
             }
             DbConnection::Offline { engine } => {
                 let parsed = parse_query(query_str)?;
@@ -193,6 +191,7 @@ fn format_records_table(records: &[Record]) -> Vec<String> {
             DataValue::String(s) => s.clone(),
             DataValue::Binary(b) => format!("<Binary: {} bytes>", b.len()),
             DataValue::Array(arr) => format!("{:?}", arr),
+            DataValue::Object(obj) => format!("{:?}", obj),
             DataValue::Vector(v) => format!("{:?}", v),
         };
         row.push(val_str);
@@ -783,7 +782,7 @@ pub async fn run_shell(auth_key: Option<String>) -> Result<(), Box<dyn std::erro
                                                 };
 
                                             let _ = tx.send(ShellEvent::TailStatus(format!(
-                                                "⚡ Subscribing to live stream '{}'...",
+                                                "Subscribing to live stream '{}'...",
                                                 stream_name
                                             )));
 
@@ -890,7 +889,7 @@ pub async fn run_shell(auth_key: Option<String>) -> Result<(), Box<dyn std::erro
                                     Err(e) => {
                                         let _ = tx.send(ShellEvent::QueryError {
                                             query: query_str,
-                                            err: e,
+                                            err: e.to_string(),
                                         });
                                     }
                                 }
@@ -934,6 +933,7 @@ pub async fn run_shell(auth_key: Option<String>) -> Result<(), Box<dyn std::erro
                         DataValue::String(s) => s.clone(),
                         DataValue::Binary(b) => format!("<Binary: {} bytes>", b.len()),
                         DataValue::Array(arr) => format!("{:?}", arr),
+                        DataValue::Object(obj) => format!("{:?}", obj),
                         DataValue::Vector(v) => format!("{:?}", v),
                     };
                     logs.push(format!(
@@ -993,7 +993,7 @@ pub async fn run_shell(auth_key: Option<String>) -> Result<(), Box<dyn std::erro
             };
 
             let header_paragraph = Paragraph::new(Line::from(vec![
-                Span::raw(" ⚡ CONDUIT STREAM-FIRST DATABASE | Mode: "),
+                Span::raw(" LivenDB STREAM-FIRST DATABASE | Mode: "),
                 Span::styled(mode_text, status_style),
                 Span::raw(format!(" | Host: {} | Port: {}", host, port)),
             ]))

@@ -52,7 +52,7 @@ fn test_tombstone_compaction_lifecycle() {
     assert!(engine.get("test_stream", "k1").unwrap().is_none());
     assert!(!engine.skipmap.contains_key(&"test_stream:k1".to_string()));
 
-    // 6. Verify that scan_historical still contains both original and tombstone records
+    // 6. Verify that scan_historical contains only the original record (tombstone frames are skipped)
     let historical_1 = engine.scan_historical().unwrap();
     let k1_records: Vec<&Record> = historical_1
         .iter()
@@ -60,14 +60,13 @@ fn test_tombstone_compaction_lifecycle() {
         .collect();
     assert_eq!(
         k1_records.len(),
-        2,
-        "Both regular record and tombstone must exist in active segment"
+        1,
+        "scan_historical must exclude tombstone frames — only the active record should appear"
     );
-
-    let normal_record_exists = k1_records.iter().any(|r| r.flags == 0x01);
-    let tombstone_record_exists = k1_records.iter().any(|r| r.flags == 0x02);
-    assert!(normal_record_exists, "Expected original record missing");
-    assert!(tombstone_record_exists, "Expected tombstone marker missing");
+    assert_eq!(
+        k1_records[0].flags, 0x01,
+        "Remaining record must have active flag"
+    );
 
     // 7. Compacting while the segment is active should leave the tombstone on disk
     engine.compact().unwrap();
@@ -78,8 +77,8 @@ fn test_tombstone_compaction_lifecycle() {
         .collect();
     assert_eq!(
         k1_records_after_active_compaction.len(),
-        2,
-        "Active segment records must not be purged"
+        1,
+        "scan_historical excludes tombstone — only the original active record should appear"
     );
 
     // 8. Roll over the active segment by forcing a payload size overflow

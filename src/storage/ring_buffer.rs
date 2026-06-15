@@ -3,6 +3,10 @@ use crate::types::DataValue;
 use crate::types::Record;
 use std::sync::mpsc::SyncSender;
 
+/// Sentinel value to signal flusher thread shutdown.
+#[derive(Debug, Clone, Copy)]
+pub struct ShutdownSentinel;
+
 /// Represents write operations enqueued in the group-commit ring buffer.
 pub enum LogEntry {
     Single {
@@ -17,6 +21,8 @@ pub enum LogEntry {
         keys: Vec<StreamKey>,
         response_tx: SyncSender<Result<Vec<Record>, String>>,
     },
+    /// Shutdown signal for clean flusher thread termination.
+    Shutdown,
 }
 
 /// Thread-safe client interface to enqueue writes into the background flusher.
@@ -38,7 +44,7 @@ impl LogRingBuffer {
         key: StreamKey,
         value: DataValue,
         is_tombstone: bool,
-    ) -> Result<Record, String> {
+    ) -> crate::error::Result<Record> {
         let (response_tx, rx) = std::sync::mpsc::sync_channel(1);
         let entry = LogEntry::Single {
             stream_name: stream_name.to_string(),
@@ -48,18 +54,31 @@ impl LogRingBuffer {
             response_tx,
         };
 
-        self.tx.send(entry).map_err(|_| {
-            "Failed to enqueue transaction: LogRingBuffer flusher thread terminated".to_string()
-        })?;
+        self.tx
+            .send(entry)
+            .map_err(|_| crate::error::LivenError::FlusherTerminated)?;
 
         rx.recv()
-            .map_err(|e| format!("LogRingBuffer coordination error: {}", e))?
+            .map_err(|e| {
+                crate::error::LivenError::Internal(format!(
+                    "LogRingBuffer coordination error: {}",
+                    e
+                ))
+            })?
+            .map_err(Into::into)
     }
 
     /// Enqueues a transaction without waiting for response.
-    pub fn tx_send(&self, entry: LogEntry) -> Result<(), String> {
-        self.tx.send(entry).map_err(|_| {
-            "Failed to enqueue transaction: LogRingBuffer flusher thread terminated".to_string()
-        })
+    pub fn tx_send(&self, entry: LogEntry) -> crate::error::Result<()> {
+        self.tx
+            .send(entry)
+            .map_err(|_| crate::error::LivenError::FlusherTerminated)
+    }
+
+    /// Sends the shutdown sentinel to the flusher thread.
+    pub fn send_shutdown(&self) -> crate::error::Result<()> {
+        self.tx
+            .send(LogEntry::Shutdown)
+            .map_err(|_| crate::error::LivenError::FlusherTerminated)
     }
 }

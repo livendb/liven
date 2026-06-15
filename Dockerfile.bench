@@ -1,0 +1,51 @@
+# ── Reproducible LIVEN Benchmark Runner ──
+# Build:
+#   docker build --platform linux/amd64 -t liven-bench -f Dockerfile.bench .
+# Run:
+#   docker run --rm liven-bench
+#
+# Results are printed to stdout in a reproducible format.
+# CPU features are pinned to x86-64-v2 (circa 2010) to ensure
+# consistent results across different hardware.
+
+FROM rust:1.85-bookworm
+
+WORKDIR /app
+
+# Install build dependencies
+RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends \
+    libc6-dev linux-perf \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy entire project
+COPY Cargo.toml Cargo.lock ./
+COPY src ./src
+COPY benches ./benches
+COPY tests ./tests
+COPY build.rs ./
+
+# Disable CPU-specific optimizations for reproducibility.
+# -C target-cpu=x86-64 generates code compatible with any x86-64 CPU.
+# This ensures benchmarks produce similar results across machines.
+ENV RUSTFLAGS="-C target-cpu=x86-64 -C opt-level=3"
+ENV CARGO_PROFILE_RELEASE_LTO=fat
+ENV CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
+ENV CARGO_PROFILE_RELEASE_DEBUG=false
+ENV CARGO_PROFILE_RELEASE_STRIP=symbols
+
+# Build everything (release profile)
+RUN cargo build --release --locked 2>&1
+
+# Build benchmarks specifically (separate from main build)
+RUN cargo bench --no-run --locked 2>&1
+
+# Run benchmarks with criterion's machine-readable output
+# The --bench flag runs the engine_bench benchmark binary directly
+CMD ["sh", "-c", "echo '=== LIVEN Benchmark Results ===' && \
+    echo 'Rust version:' && rustc --version && \
+    echo 'Target CPU: x86-64 (generic)' && \
+    echo 'Date:' && date -u '+%Y-%m-%dT%H:%M:%SZ' && \
+    echo '' && \
+    cargo bench --locked 2>&1 && \
+    echo '' && \
+    echo '=== Benchmark Complete ==="]

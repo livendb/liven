@@ -67,10 +67,11 @@ impl LivenClient {
                 client_id.to_string()
             };
 
-            // 1. Send Connect frame containing the symmetric token
+            // 1. Send Connect frame containing the symmetric token and protocol version
             framed
                 .send(LivenFrame::Connect {
                     client_id: token_to_send,
+                    protocol_version: Some(1),
                 })
                 .await?;
 
@@ -152,6 +153,7 @@ impl LivenClient {
                                     format!("<Binary: {} bytes>", b.len())
                                 }
                                 crate::types::DataValue::Array(arr) => format!("{:?}", arr),
+                                crate::types::DataValue::Object(obj) => format!("{:?}", obj),
                                 crate::types::DataValue::Vector(vec) => format!("{:?}", vec),
                             };
                             println!(

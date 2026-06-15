@@ -1,349 +1,260 @@
-use liven::client::LivenClient;
+use liven::import_export::*;
 use liven::types::DataValue;
-use std::fs;
-use std::path::Path;
-use std::process::Command;
+use std::io::Write;
+use tempfile::NamedTempFile;
 
-struct ServerGuard(std::process::Child);
+#[tokio::test]
+async fn test_json_to_datavalue_with_base64() {
+    // Test all data types including base64
+    let test_cases = vec![
+        (serde_json::json!(null), DataValue::Null),
+        (serde_json::json!(true), DataValue::Bool(true)),
+        (serde_json::json!(42), DataValue::Int(42)),
+        (
+            serde_json::json!(18446744073709551615u64),
+            DataValue::UInt(18446744073709551615),
+        ),
+        (
+            serde_json::json!(19.99),
+            DataValue::Float(ordered_float::OrderedFloat(19.99)),
+        ),
+        (
+            serde_json::json!("hello"),
+            DataValue::String("hello".to_string()),
+        ),
+        (
+            serde_json::json!("base64:SGVsbG8="),
+            DataValue::Binary(b"Hello".to_vec()),
+        ),
+        (
+            serde_json::json!([1, 2, 3]),
+            DataValue::Array(vec![
+                DataValue::Int(1),
+                DataValue::Int(2),
+                DataValue::Int(3),
+            ]),
+        ),
+        (
+            serde_json::json!({"k": "v"}),
+            DataValue::Object({
+                let mut map = std::collections::BTreeMap::new();
+                map.insert("k".to_string(), DataValue::String("v".to_string()));
+                map
+            }),
+        ),
+    ];
 
-impl Drop for ServerGuard {
-    fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
+    for (json, expected) in test_cases {
+        let result = json_to_datavalue_with_base64(json).unwrap();
+        assert_eq!(result, expected);
     }
 }
 
-struct DirGuard(String);
+#[tokio::test]
+async fn test_datavalue_to_json() {
+    // Test all data types including base64
+    let test_cases = vec![
+        (DataValue::Null, serde_json::json!(null)),
+        (DataValue::Bool(true), serde_json::json!(true)),
+        (DataValue::Int(42), serde_json::json!(42)),
+        (DataValue::UInt(123), serde_json::json!(123)),
+        (
+            DataValue::Float(ordered_float::OrderedFloat(19.99)),
+            serde_json::json!(19.99),
+        ),
+        (
+            DataValue::String("hello".to_string()),
+            serde_json::json!("hello"),
+        ),
+        (
+            DataValue::Binary(b"Hello".to_vec()),
+            serde_json::json!("base64:SGVsbG8="),
+        ),
+        (
+            DataValue::Array(vec![DataValue::Int(1), DataValue::Int(2)]),
+            serde_json::json!([1, 2]),
+        ),
+        (
+            DataValue::Object({
+                let mut map = std::collections::BTreeMap::new();
+                map.insert("k".to_string(), DataValue::String("v".to_string()));
+                map
+            }),
+            serde_json::json!({"k": "v"}),
+        ),
+        (
+            DataValue::Vector(vec![1, 0, -1, 2]),
+            serde_json::json!([1, 0, -1, 2]),
+        ),
+    ];
 
-impl Drop for DirGuard {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
+    for (value, expected) in test_cases {
+        let result = datavalue_to_json(&value);
+        assert_eq!(result, expected);
     }
 }
 
-#[test]
-fn test_cli_import_export_csv_and_jsonl() {
-    // 1. Prepare temp directory and test files
-    let test_dir = "./data_test_import_export";
-    // Clean any leftover from prior runs, then create fresh directory
-    let _ = fs::remove_dir_all(test_dir);
-    fs::create_dir_all(test_dir).unwrap();
-    // Ensure cleanup on panic via RAII
-    let _dir_guard = DirGuard(test_dir.to_string());
+#[tokio::test]
+async fn test_jsonl_validation() {
+    // Create a temporary JSONL file with valid data
+    let mut temp_file = NamedTempFile::new().unwrap();
+    writeln!(
+        temp_file,
+        r#"{{"stream": "users", "key": "user1", "value": {{"name": "Alice", "age": 30}}}}"#
+    )
+    .unwrap();
+    writeln!(
+        temp_file,
+        r#"{{"stream": "users", "key": "user2", "value": {{"name": "Bob", "age": 25}}}}"#
+    )
+    .unwrap();
+    writeln!(
+        temp_file,
+        r#"{{"stream": "events", "key": "event1", "value": {{"type": "click"}}}}"#
+    )
+    .unwrap();
 
-    let csv_input_path = format!("{}/input.csv", test_dir);
-    let csv_output_path = format!("{}/output.csv", test_dir);
-    let jsonl_input_path = format!("{}/input.jsonl", test_dir);
-    let jsonl_output_path = format!("{}/output.jsonl", test_dir);
+    let path = temp_file.path();
+    let validation = validate_jsonl_file(path).unwrap();
 
-    // CSV input data with headers (including id)
-    let csv_data = "\
-id,name,age,active,details
-usr_1,Alice,30,true,\"{\"\"role\"\":\"\"admin\"\"}\"
-usr_2,Bob,25,false,\"{\"\"role\"\":\"\"user\"\"}\"
-";
-    fs::write(&csv_input_path, csv_data).unwrap();
+    assert_eq!(validation.record_count, 3);
+    assert_eq!(validation.streams.len(), 2);
+    assert!(validation.streams.contains(&"users".to_string()));
+    assert!(validation.streams.contains(&"events".to_string()));
+}
 
-    // JSONL input data (with key, value nested structures)
-    let jsonl_data = "\
-{\"key\":\"log_1\",\"value\":{\"event\":\"click\",\"metadata\":{\"x\":100,\"y\":200}}}
-{\"id\":\"log_2\",\"event\":\"hover\",\"metadata\":{\"x\":150,\"y\":250}}
-";
-    fs::write(&jsonl_input_path, jsonl_data).unwrap();
+#[tokio::test]
+async fn test_jsonl_validation_errors() {
+    // Create a temporary JSONL file with invalid data
+    let mut temp_file = NamedTempFile::new().unwrap();
+    writeln!(
+        temp_file,
+        r#"{{"stream": "users", "key": "user1", "value": {{"name": "Alice"}}}}"#
+    )
+    .unwrap();
+    writeln!(
+        temp_file,
+        r#"{{"key": "user2", "value": {{"name": "Bob"}}}}"#
+    )
+    .unwrap(); // Missing stream
+    writeln!(
+        temp_file,
+        r#"{{"stream": "users", "value": {{"name": "Charlie"}}}}"#
+    )
+    .unwrap(); // Missing key
 
-    // 2. Build the binary first to ensure cargo run doesn't print compilation output during test
-    let build_status = Command::new("cargo")
-        .args(["build", "--bin", "liven"])
-        .status()
-        .expect("Failed to build liven binary");
-    assert!(build_status.success());
+    let path = temp_file.path();
+    let result = validate_jsonl_file(path);
 
-    // Define a custom port and webui port to prevent collisions during tests
-    let test_port = "45165";
-    let test_webui_port = "45164";
+    assert!(result.is_err());
+    let error = result.unwrap_err();
+    assert!(error.contains("missing field `stream`"));
+    assert!(error.contains("missing field `key`"));
+}
 
-    // Spawn background LIVEN server process
-    let server_child = Command::new("cargo")
-        .env("LIVEN_DATA_DIR", test_dir)
-        .env("LIVENDB__STORAGE__DATA_DIRECTORY", test_dir)
-        .env("LIVENDB__SECURITY__MODE", "none")
-        .env("LIVENDB__SERVER__DB_PORT", test_port)
-        .env("LIVENDB__SERVER__WEBUI_PORT", test_webui_port)
-        .args(["run", "--bin", "liven", "--", "start", "--no-ui"])
-        .spawn()
-        .expect("Failed to start background LIVEN server");
+#[tokio::test]
+async fn test_jsonl_with_timestamps() {
+    // Create a temporary JSONL file with timestamps
+    let mut temp_file = NamedTempFile::new().unwrap();
+    let timestamp = 1700000000000i64;
+    writeln!(
+        temp_file,
+        r#"{{"stream": "users", "key": "user1", "timestamp": {}, "value": {{"name": "Alice"}}}}"#,
+        timestamp
+    )
+    .unwrap();
 
-    // Use the RAII ServerGuard to ensure cleanup even if the test panics
-    let _server_guard = ServerGuard(server_child);
+    let path = temp_file.path();
+    let validation = validate_jsonl_file(path).unwrap();
+    assert_eq!(validation.record_count, 1);
+}
 
-    // Wait a brief moment for the server to spin up and bind to the port
-    std::thread::sleep(std::time::Duration::from_millis(3000));
+#[tokio::test]
+async fn test_jsonl_with_base64() {
+    // Create a temporary JSONL file with base64 encoded binary data
+    let mut temp_file = NamedTempFile::new().unwrap();
+    writeln!(
+        temp_file,
+        r#"{{"stream": "data", "key": "bin1", "value": "base64:SGVsbG8gV29ybGQ="}}"#
+    )
+    .unwrap();
 
-    // 3. Run CSV import command sandboxed using LIVEN_DATA_DIR
-    let import_csv_status = Command::new("cargo")
-        .env("LIVEN_DATA_DIR", test_dir)
-        .env("LIVENDB__STORAGE__DATA_DIRECTORY", test_dir)
-        .env("LIVENDB__SECURITY__MODE", "none")
-        .env("LIVENDB__SERVER__DB_PORT", test_port)
-        .env("LIVENDB__SERVER__WEBUI_PORT", test_webui_port)
-        .args([
-            "run",
-            "--bin",
-            "liven",
-            "--",
-            "import",
-            "--stream",
-            "csv_stream",
-            "--format",
-            "csv",
-            "--path",
-            &csv_input_path,
-        ])
-        .status()
-        .expect("Failed to execute CSV import command");
-    assert!(import_csv_status.success());
+    let path = temp_file.path();
+    let validation = validate_jsonl_file(path).unwrap();
+    assert_eq!(validation.record_count, 1);
+}
 
-    // 4. Run JSONL import command sandboxed using LIVEN_DATA_DIR
-    let import_jsonl_status = Command::new("cargo")
-        .env("LIVEN_DATA_DIR", test_dir)
-        .env("LIVENDB__STORAGE__DATA_DIRECTORY", test_dir)
-        .env("LIVENDB__SECURITY__MODE", "none")
-        .env("LIVENDB__SERVER__DB_PORT", test_port)
-        .env("LIVENDB__SERVER__WEBUI_PORT", test_webui_port)
-        .args([
-            "run",
-            "--bin",
-            "liven",
-            "--",
-            "import",
-            "--stream",
-            "jsonl_stream",
-            "--format",
-            "jsonl",
-            "--path",
-            &jsonl_input_path,
-        ])
-        .status()
-        .expect("Failed to execute JSONL import command");
-    assert!(import_jsonl_status.success());
+#[tokio::test]
+async fn test_binary_round_trip() {
+    // Create some test records
+    let records = vec![
+        BinaryRecord {
+            stream: "users".to_string(),
+            key: "user1".to_string(),
+            value: DataValue::Object({
+                let mut map = std::collections::BTreeMap::new();
+                map.insert("name".to_string(), DataValue::String("Alice".to_string()));
+                map.insert("age".to_string(), DataValue::Int(30));
+                map
+            }),
+            timestamp: 1700000000000,
+            type_tag: 9, // Object
+            flags: 0,
+        },
+        BinaryRecord {
+            stream: "users".to_string(),
+            key: "user2".to_string(),
+            value: DataValue::String("Bob".to_string()),
+            timestamp: 1700000001000,
+            type_tag: 5, // String
+            flags: 1,
+        },
+    ];
 
-    // 5. Verify the server contains the imported data using LivenClient
-    {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(async {
-            let mut client = LivenClient::connect_with_auth_mode(
-                &format!("127.0.0.1:{}", test_port),
-                "test_client",
-                "none",
-            )
-            .await
-            .expect("Failed to connect to LIVEN server");
+    let export = BinaryExport {
+        version: 1,
+        created_at: 1700000000000,
+        records: records.clone(),
+    };
 
-            let streams_records = client.query("streams()").await.unwrap();
-            let streams: Vec<String> = streams_records
-                .into_iter()
-                .map(|r| match r.value {
-                    DataValue::String(s) => s,
-                    _ => r.key.to_string(),
-                })
-                .collect();
+    // Serialize to binary format
+    let mut data = Vec::new();
+    data.extend_from_slice(BINARY_MAGIC);
+    data.extend_from_slice(&[0u8; 4]); // Checksum placeholder
+    let serialized = rmp_serde::to_vec(&export).unwrap();
+    data.extend_from_slice(&serialized);
 
-            println!("{:?}", streams);
+    // Calculate and write checksum
+    let checksum = crc32fast::hash(&data[BINARY_MAGIC.len() + 4..]);
+    data[BINARY_MAGIC.len()..BINARY_MAGIC.len() + 4].copy_from_slice(&checksum.to_be_bytes());
 
-            assert!(streams.contains(&"csv_stream".to_string()));
-            assert!(streams.contains(&"jsonl_stream".to_string()));
+    // Write to temporary file
+    let mut temp_file = NamedTempFile::new().unwrap();
+    temp_file.write_all(&data).unwrap();
+    let path = temp_file.path();
 
-            // Check CSV stream records
-            let csv_records = client.query("from(\"csv_stream\")").await.unwrap();
-            assert_eq!(csv_records.len(), 2);
+    // Read back and verify
+    let file_data = std::fs::read(path).unwrap();
+    assert_eq!(file_data, data);
 
-            let first_csv = csv_records
-                .iter()
-                .find(|r| r.key.as_str() == "usr_1")
-                .unwrap();
-            if let DataValue::String(s) = &first_csv.value {
-                assert!(s.contains("Alice"));
-                assert!(s.contains("30"));
-                assert!(s.contains("true"));
-                assert!(s.contains("admin"));
-            } else {
-                panic!("Expected DataValue::String for csv payload");
-            }
+    // Verify magic bytes
+    assert_eq!(&file_data[..BINARY_MAGIC.len()], BINARY_MAGIC);
 
-            // Check JSONL stream records
-            let jsonl_records = client.query("from(\"jsonl_stream\")").await.unwrap();
-            assert_eq!(jsonl_records.len(), 2);
-
-            let first_jsonl = jsonl_records
-                .iter()
-                .find(|r| r.key.as_str() == "log_1")
-                .unwrap();
-            if let DataValue::String(s) = &first_jsonl.value {
-                assert!(s.contains("click"));
-                assert!(s.contains("100"));
-            } else {
-                panic!("Expected DataValue::String for jsonl payload");
-            }
-
-            let second_jsonl = jsonl_records
-                .iter()
-                .find(|r| r.key.as_str() == "log_2")
-                .unwrap();
-            if let DataValue::String(s) = &second_jsonl.value {
-                assert!(s.contains("hover"));
-                assert!(s.contains("250"));
-            } else {
-                panic!("Expected DataValue::String for jsonl payload");
-            }
-        });
-    }
-
-    // 6. Run CSV export command sandboxed using LIVEN_DATA_DIR
-    let export_csv_status = Command::new("cargo")
-        .env("LIVEN_DATA_DIR", test_dir)
-        .env("LIVENDB__STORAGE__DATA_DIRECTORY", test_dir)
-        .env("LIVENDB__SECURITY__MODE", "none")
-        .env("LIVENDB__SERVER__DB_PORT", test_port)
-        .env("LIVENDB__SERVER__WEBUI_PORT", test_webui_port)
-        .args([
-            "run",
-            "--bin",
-            "liven",
-            "--",
-            "export",
-            "--stream",
-            "csv_stream",
-            "--format",
-            "csv",
-            "--path",
-            &csv_output_path,
-        ])
-        .status()
-        .expect("Failed to execute CSV export command");
-    assert!(export_csv_status.success());
-
-    // 7. Run JSONL export command sandboxed using LIVEN_DATA_DIR
-    let export_jsonl_status = Command::new("cargo")
-        .env("LIVEN_DATA_DIR", test_dir)
-        .env("LIVENDB__STORAGE__DATA_DIRECTORY", test_dir)
-        .env("LIVENDB__SECURITY__MODE", "none")
-        .env("LIVENDB__SERVER__DB_PORT", test_port)
-        .env("LIVENDB__SERVER__WEBUI_PORT", test_webui_port)
-        .args([
-            "run",
-            "--bin",
-            "liven",
-            "--",
-            "export",
-            "--stream",
-            "jsonl_stream",
-            "--format",
-            "jsonl",
-            "--path",
-            &jsonl_output_path,
-        ])
-        .status()
-        .expect("Failed to execute JSONL export command");
-    assert!(export_jsonl_status.success());
-
-    // 8. Verify the exported file contents
-    assert!(Path::new(&csv_output_path).exists());
-    let csv_exported_content = fs::read_to_string(&csv_output_path).unwrap();
-    assert!(csv_exported_content.contains("sequence_id"));
-    assert!(csv_exported_content.contains("usr_1"));
-    assert!(csv_exported_content.contains("usr_2"));
-
-    assert!(Path::new(&jsonl_output_path).exists());
-    let jsonl_exported_content = fs::read_to_string(&jsonl_output_path).unwrap();
-    assert!(jsonl_exported_content.contains("log_1"));
-    assert!(jsonl_exported_content.contains("log_2"));
-    assert!(jsonl_exported_content.contains("click"));
-    assert!(jsonl_exported_content.contains("hover"));
-
-    // 8b. Run CSV export without --path and check for HOME/Downloads fallback
-    let export_no_path_status = Command::new("cargo")
-        .env("LIVEN_DATA_DIR", test_dir)
-        .env("LIVENDB__STORAGE__DATA_DIRECTORY", test_dir)
-        .env("LIVENDB__SECURITY__MODE", "none")
-        .env("LIVENDB__SERVER__DB_PORT", test_port)
-        .env("LIVENDB__SERVER__WEBUI_PORT", test_webui_port)
-        .env("HOME", test_dir) // Override HOME so it defaults to test_dir/Downloads
-        .args([
-            "run",
-            "--bin",
-            "liven",
-            "--",
-            "export",
-            "--stream",
-            "csv_stream",
-            "--format",
-            "csv",
-        ])
-        .status()
-        .expect("Failed to execute CSV export command with implicit path");
-    assert!(export_no_path_status.success());
-
-    // Verify it was written inside the mock downloads folder
-    let downloads_dir = format!("{}/Downloads", test_dir);
-    assert!(Path::new(&downloads_dir).exists());
-    let paths = fs::read_dir(&downloads_dir).unwrap();
-    let mut found_export = false;
-    for path_entry in paths {
-        let entry = path_entry.unwrap();
-        let name = entry.file_name().into_string().unwrap();
-        if name.starts_with("csv_stream_") && name.ends_with(".csv") {
-            found_export = true;
-            let file_content = fs::read_to_string(entry.path()).unwrap();
-            assert!(file_content.contains("usr_1"));
-            assert!(file_content.contains("usr_2"));
-        }
-    }
-    assert!(
-        found_export,
-        "Implicitly configured export was not found in Downloads!"
+    // Verify checksum
+    let checksum_pos = BINARY_MAGIC.len();
+    let expected_checksum = u32::from_be_bytes(
+        file_data[checksum_pos..checksum_pos + 4]
+            .try_into()
+            .unwrap(),
     );
+    let actual_checksum = crc32fast::hash(&file_data[checksum_pos + 4..]);
+    assert_eq!(expected_checksum, actual_checksum);
 
-    // 8c. Run export without --stream (all streams) and check for HOME/Downloads fallback
-    let export_all_status = Command::new("cargo")
-        .env("LIVEN_DATA_DIR", test_dir)
-        .env("LIVENDB__STORAGE__DATA_DIRECTORY", test_dir)
-        .env("LIVENDB__SECURITY__MODE", "none")
-        .env("LIVENDB__SERVER__DB_PORT", test_port)
-        .env("LIVENDB__SERVER__WEBUI_PORT", test_webui_port)
-        .env("HOME", test_dir) // Override HOME so it defaults to test_dir/Downloads
-        .args(["run", "--bin", "liven", "--", "export", "--format", "jsonl"])
-        .status()
-        .expect("Failed to execute export all streams command");
-    assert!(export_all_status.success());
-
-    // Verify both files were written inside the mock downloads folder
-    let paths_all = fs::read_dir(&downloads_dir).unwrap();
-    let mut found_csv_stream = false;
-    let mut found_jsonl_stream = false;
-    for path_entry in paths_all {
-        let entry = path_entry.unwrap();
-        let name = entry.file_name().into_string().unwrap();
-        if name.starts_with("csv_stream_") && name.ends_with(".jsonl") {
-            found_csv_stream = true;
-            let file_content = fs::read_to_string(entry.path()).unwrap();
-            assert!(file_content.contains("usr_1"));
-            assert!(file_content.contains("usr_2"));
-        } else if name.starts_with("jsonl_stream_") && name.ends_with(".jsonl") {
-            found_jsonl_stream = true;
-            let file_content = fs::read_to_string(entry.path()).unwrap();
-            assert!(file_content.contains("log_1"));
-            assert!(file_content.contains("log_2"));
-        }
-    }
-    assert!(
-        found_csv_stream,
-        "Default-configured csv_stream JSONL export was not found in Downloads!"
-    );
-    assert!(
-        found_jsonl_stream,
-        "Default-configured jsonl_stream JSONL export was not found in Downloads!"
-    );
-
-    // 9. Clean up
-    let _ = fs::remove_dir_all(test_dir);
+    // Deserialize and verify content
+    let deserialized: BinaryExport = rmp_serde::from_slice(&file_data[checksum_pos + 4..]).unwrap();
+    assert_eq!(deserialized.version, 1);
+    assert_eq!(deserialized.created_at, 1700000000000);
+    assert_eq!(deserialized.records.len(), 2);
+    assert_eq!(deserialized.records[0].stream, "users");
+    assert_eq!(deserialized.records[0].key, "user1");
 }

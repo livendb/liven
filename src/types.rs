@@ -1,5 +1,6 @@
 use ordered_float::OrderedFloat;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum DataValue {
@@ -11,7 +12,8 @@ pub enum DataValue {
     String(String),
     Binary(Vec<u8>),
     Array(Vec<DataValue>),
-    Vector(Vec<i8>), // Native quantized vector variant
+    Object(BTreeMap<String, DataValue>), // Native structured object variant
+    Vector(Vec<i8>),                     // Native quantized vector variant
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -36,6 +38,9 @@ pub enum FilterExpr {
     Or {
         left: Box<FilterExpr>,
         right: Box<FilterExpr>,
+    },
+    Not {
+        expr: Box<FilterExpr>,
     },
 }
 
@@ -115,6 +120,11 @@ pub enum PipelineStage {
         target_stream: String,
         join_key: String,
     },
+    /// Deduplicate records by a specific field value.
+    /// Retains only the first record for each unique value of the given field.
+    Distinct {
+        field: String,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -127,6 +137,9 @@ pub enum Op {
     LtEq,
     In,
     StartsWith,
+    Contains, // substring match on DataValue::String
+    EndsWith, // suffix match on DataValue::String
+    Between,  // inclusive range check, expects DataValue::Array([low, high])
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -193,6 +206,34 @@ pub enum Query {
     Listen {
         pipeline: Vec<PipelineStage>,
     },
+    /// Explain the execution plan of a query without running it.
+    /// Returns a Vec<Record> describing each pipeline stage and its estimated cost.
+    Explain {
+        inner_query: Box<Query>,
+    },
+}
+
+impl Query {
+    /// Returns a static string describing the variant for use in tracing spans.
+    pub fn variant_name(&self) -> &'static str {
+        match self {
+            Query::Pipeline(_) => "pipeline",
+            Query::Insert { .. } => "insert",
+            Query::InsertBatch { .. } => "insert_batch",
+            Query::Upsert { .. } => "upsert",
+            Query::UpsertBatch { .. } => "upsert_batch",
+            Query::Update { .. } => "update",
+            Query::DeleteKey { .. } => "delete_key",
+            Query::Empty { .. } => "empty",
+            Query::Drop { .. } => "drop",
+            Query::PipelineUpdate { .. } => "pipeline_update",
+            Query::PipelineDelete { .. } => "pipeline_delete",
+            Query::ListStreams => "list_streams",
+            Query::Status => "status",
+            Query::Listen { .. } => "listen",
+            Query::Explain { .. } => "explain",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -223,6 +264,7 @@ impl DataValue {
             DataValue::String(_) => 5,
             DataValue::Binary(_) => 6,
             DataValue::Array(_) => 7,
+            DataValue::Object(_) => 9, // Skip 8 for Vector
             DataValue::Vector(_) => 8,
         }
     }
@@ -248,7 +290,54 @@ impl std::fmt::Display for DataValue {
                 }
                 write!(f, "]")
             }
+            DataValue::Object(obj) => {
+                write!(f, "{{")?;
+                for (i, (key, val)) in obj.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}: {}", key, val)?;
+                }
+                write!(f, "}}")
+            }
             DataValue::Vector(v) => write!(f, "{:?}", v),
         }
+    }
+}
+
+/// Convert serde_json::Value to DataValue, recursively handling nested structures
+pub fn json_to_datavalue(json: serde_json::Value) -> DataValue {
+    match json {
+        serde_json::Value::Null => DataValue::Null,
+        serde_json::Value::Bool(b) => DataValue::Bool(b),
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                DataValue::Int(i)
+            } else if let Some(u) = n.as_u64() {
+                DataValue::UInt(u)
+            } else if let Some(f) = n.as_f64() {
+                DataValue::Float(OrderedFloat(f))
+            } else {
+                DataValue::Null
+            }
+        }
+        serde_json::Value::String(s) => DataValue::String(s),
+        serde_json::Value::Array(arr) => {
+            DataValue::Array(arr.into_iter().map(json_to_datavalue).collect())
+        }
+        serde_json::Value::Object(obj) => DataValue::Object(
+            obj.into_iter()
+                .map(|(k, v)| (k, json_to_datavalue(v)))
+                .collect(),
+        ),
+    }
+}
+
+/// Parse a JSON string into DataValue, handling both raw strings and nested JSON
+pub fn parse_json_to_datavalue(s: &str) -> DataValue {
+    if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(s) {
+        json_to_datavalue(json_value)
+    } else {
+        DataValue::String(s.to_string())
     }
 }

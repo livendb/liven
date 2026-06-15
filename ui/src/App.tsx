@@ -1,7 +1,5 @@
 import { Suspense, useState, useEffect, useRef } from "react";
-import lightTheme from "highlight.js/styles/atom-one-light.css?inline";
-import darkTheme from "highlight.js/styles/atom-one-dark.css?inline";
-import { WifiOff, RefreshCw } from "lucide-react";
+import { WifiOff, RefreshCw, Shield, Activity } from "lucide-react";
 import { Route, Switch, useLocation } from "wouter";
 
 // Components & Pages
@@ -23,6 +21,7 @@ export default function App() {
 
   const [securityMode, setSecurityMode] = useState<string>("none");
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [userRole, setUserRole] = useState<string | null>(null);
   const [authChecking, setAuthChecking] = useState<boolean>(true);
 
   // Register a global fetch interceptor inside useEffect to handle 401/403 redirections
@@ -171,7 +170,9 @@ export default function App() {
   const [queryResults, setQueryResults] = useState<Record[]>([]);
   const [isQueryRunning, setIsQueryRunning] = useState(false);
   const [queryStats, setQueryStats] = useState({ count: 0, timeMs: 0 });
-  const [activeStreamQuery, setActiveStreamQuery] = useState<string | null>(null);
+  const [activeStreamQuery, setActiveStreamQuery] = useState<string | null>(
+    null,
+  );
   const activeStreamQueryRef = useRef<string | null>(null);
   useEffect(() => {
     activeStreamQueryRef.current = activeStreamQuery;
@@ -204,8 +205,8 @@ export default function App() {
       const res = await fetch("/api/system/config");
       if (res.ok) {
         const data = await res.json();
-        const webui_port = data.server.webui_port.toString();
-        const db_port = data.server.db_port.toString();
+        const webui_port = data.webui_port.toString();
+        const db_port = data.db_port.toString();
         setDbPortVal(db_port);
         setWebuiPortVal(webui_port);
         setDbPort(webui_port);
@@ -236,8 +237,10 @@ export default function App() {
               const status = await fetchAuthStatus();
               if (status.authenticated) {
                 setIsAuthenticated(true);
+                setUserRole(status.role || null);
               } else {
                 setIsAuthenticated(false);
+                setUserRole(null);
                 addActivity(
                   "Administrative session requires security authentication. Challenge response pending.",
                   "server",
@@ -247,6 +250,7 @@ export default function App() {
             } catch (err) {
               console.error("Auth status check failed:", err);
               setIsAuthenticated(false);
+              setUserRole(null);
             }
           } else {
             setIsAuthenticated(true);
@@ -262,6 +266,13 @@ export default function App() {
     };
     initApp();
   }, []);
+
+  // Redirect from security page if user doesn't have admin role
+  useEffect(() => {
+    if (!authChecking && location === "/security" && userRole !== "admin") {
+      setLocation("/unauthorized");
+    }
+  }, [authChecking, location, userRole]);
 
   // Manage WebSocket connection and fetch initial streams when authenticated
   useEffect(() => {
@@ -476,52 +487,32 @@ export default function App() {
     }
   };
 
-  // Trigger Compaction
-  const handleCompaction = async () => {
-    addActivity(
-      "Triggering database log defragmentation & compaction...",
-      "storage",
-      "info",
-    );
+  const sendHeartbeat = async () => {
     try {
-      const res = await postData("/api/compact");
-      if (res) {
-        alert(
-          "Database log compaction completed successfully! Old un-compacted logs defragmented.",
-        );
-        addActivity(
-          "Defragmentation & compaction completed successfully. Redundant logs purged and active pointers rewritten.",
-          "storage",
-          "success",
-        );
-        fetchStreams();
-        if (selectedStream) loadStreamRecords();
-      } else {
-        addActivity(
-          "Compaction command rejected by server",
-          "storage",
-          "error",
-        );
+      const response = await fetch(getDbApiUrl("/api/heartbeat"), {
+        method: "GET",
+        credentials: "include",
+      });
+
+      if (!response.ok) {
+        console.warn("Heartbeat failed, session may have expired");
+        setIsAuthenticated(false);
       }
-    } catch (e: any) {
-      alert("Compaction failed");
-      addActivity(
-        `Compaction execution failed: ${e.message}`,
-        "storage",
-        "error",
-      );
+    } catch (error) {
+      console.error("Heartbeat error:", error);
     }
   };
 
-  const postData = async (url: string) => {
-    try {
-      const res = await fetch(getDbApiUrl(url), { method: "POST" });
-      if (res.ok) return true;
-    } catch (e) {
-      console.error(e);
+  // Set up heartbeat every 5 minutes (300000 ms) for authenticated users
+  useEffect(() => {
+    if (isAuthenticated) {
+      const heartbeatInterval = setInterval(() => {
+        sendHeartbeat();
+      }, 300000); // 5 minutes
+
+      return () => clearInterval(heartbeatInterval);
     }
-    return false;
-  };
+  }, [isAuthenticated]);
 
   if (authChecking) {
     return (
@@ -550,8 +541,6 @@ export default function App() {
   return (
     <>
       <div className="flex flex-col min-h-screen bg-body-bg text-text-main transition-colors duration-300">
-        <style>{resolvedTheme === "dark" ? darkTheme : lightTheme}</style>
-
         {hasAttemptedConnect && !wsConnected && (
           <div className="fixed inset-0 z-50 backdrop-blur-md flex items-center justify-center p-4 select-none animate-fade-in">
             <div className="bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200/60 dark:border-zinc-800/40 p-6 shadow-lg max-w-xs w-full text-center flex flex-col items-center space-y-4">
@@ -598,6 +587,7 @@ export default function App() {
           setTheme={setTheme}
           securityMode={securityMode}
           isAuthenticated={isAuthenticated}
+          userRole={userRole}
           onLogout={async () => {
             try {
               await submitSystemLogout();
@@ -640,7 +630,6 @@ export default function App() {
                     queryChart={queryChart}
                     activityFilter={activityFilter}
                     setActivityFilter={setActivityFilter}
-                    handleCompaction={handleCompaction}
                     dbPort={dbPortVal}
                     webuiPort={webuiPortVal}
                     resolvedTheme={resolvedTheme}
@@ -657,7 +646,6 @@ export default function App() {
                     queryChart={queryChart}
                     activityFilter={activityFilter}
                     setActivityFilter={setActivityFilter}
-                    handleCompaction={handleCompaction}
                     dbPort={dbPortVal}
                     webuiPort={webuiPortVal}
                     resolvedTheme={resolvedTheme}
@@ -707,11 +695,57 @@ export default function App() {
                     resolvedTheme={resolvedTheme}
                   />
                 </Route>
+                <Route path="/unauthorized">
+                  <div className="flex-1 flex items-center justify-center p-8">
+                    <div className="text-center bg-white dark:bg-zinc-900 p-8 rounded-lg border border-zinc-200 dark:border-zinc-800 shadow-lg max-w-md w-full">
+                      <div className="mb-6">
+                        <Shield className="w-12 h-12 text-rose-500 mx-auto mb-4" />
+                        <h2 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100 mb-2">
+                          Unauthorized Access
+                        </h2>
+                        <p className="text-zinc-600 dark:text-zinc-400 mb-1">
+                          You don't have permission to access this resource.
+                        </p>
+                        <p className="text-zinc-500 dark:text-zinc-500 text-sm">
+                          Please contact your administrator if you believe this
+                          is an error.
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => {
+                          setLocation("/");
+                          setActiveTab("dashboard");
+                        }}
+                        className="w-full px-4 py-2.5 bg-primary text-white rounded-lg hover:bg-primary-dark transition-all active:scale-[0.98] flex items-center justify-center gap-2 font-semibold"
+                      >
+                        <Activity className="w-4 h-4" />
+                        Return to Dashboard
+                      </button>
+                    </div>
+                  </div>
+                </Route>
                 <Route path="/security">
-                  <Security
-                    addActivity={addActivity}
-                    resolvedTheme={resolvedTheme}
-                  />
+                  {userRole === "admin" ? (
+                    <Security
+                      addActivity={addActivity}
+                      resolvedTheme={resolvedTheme}
+                    />
+                  ) : (
+                    <div className="p-8 text-center bg-white dark:bg-gray-500 rounded-md border border-slate-200 dark:border-slate-800">
+                      <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-2">
+                        Access Denied
+                      </h3>
+                      <p className="text-slate-600 dark:text-slate-300 mb-4">
+                        You don't have permission to access this page.
+                      </p>
+                      <button
+                        onClick={() => setActiveTab("dashboard")}
+                        className="px-4 py-2 bg-primary text-white rounded hover:bg-primary-dark transition-colors"
+                      >
+                        Return to Dashboard
+                      </button>
+                    </div>
+                  )}
                 </Route>
                 <Route>
                   <div className="p-8 text-center bg-white dark:bg-gray-500 rounded-md border border-slate-200 dark:border-slate-800">

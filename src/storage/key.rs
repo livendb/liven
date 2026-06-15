@@ -8,10 +8,13 @@ pub struct StreamKey {
 
 impl StreamKey {
     /// Create a new StreamKey from a string slice, validating it is <= 32 bytes.
-    pub fn from_str(s: &str) -> Result<Self, String> {
+    pub fn from_str(s: &str) -> crate::error::Result<Self> {
         let bytes = s.as_bytes();
         if bytes.len() > 32 {
-            return Err(format!("Key is too long: {} bytes (max 32)", bytes.len()));
+            return Err(crate::error::LivenError::KeyTooLong {
+                len: bytes.len(),
+                key: s.to_string(),
+            });
         }
         let mut arr = [0u8; 32];
         arr[..bytes.len()].copy_from_slice(bytes);
@@ -22,7 +25,7 @@ impl StreamKey {
     }
 
     /// Try to create a new StreamKey, returning a key too long error if length > 32 bytes.
-    pub fn try_new(s: &str) -> Result<Self, String> {
+    pub fn try_new(s: &str) -> crate::error::Result<Self> {
         Self::from_str(s)
     }
 

@@ -194,9 +194,11 @@ fn test_stream_limits() {
     // 3rd stream -> should fail
     let err = engine.append("s3", "k1", DataValue::Int(1), false);
     assert!(err.is_err());
-    assert_eq!(
-        err.unwrap_err(),
-        "Maximum concurrent streams limit exceeded"
+    let err_msg = err.unwrap_err().to_string();
+    assert!(
+        err_msg.starts_with("stream limit exceeded"),
+        "got: {}",
+        err_msg
     );
 
     // Clean up
@@ -227,7 +229,8 @@ fn test_index_ram_limits() {
     // 3rd key -> should fail due to Index RAM limit
     let err = engine.append("s1", "k3", DataValue::Int(1), false);
     assert!(err.is_err());
-    assert_eq!(err.unwrap_err(), "Index RAM limit exceeded");
+    let err_msg = err.unwrap_err().to_string();
+    assert!(err_msg.starts_with("Index RAM limit"), "got: {}", err_msg);
 
     // Tombstone of an existing key should succeed
     engine.append("s1", "k1", DataValue::Null, true).unwrap();
@@ -289,4 +292,177 @@ fn test_file_descriptor_limits() {
 
     // Clean up
     let _ = fs::remove_dir_all(&path);
+}
+
+#[test]
+fn test_scan_excludes_tombstone_frames() {
+    let path = std::env::temp_dir().join(format!(
+        "liven_tombstone_scan_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _ = std::fs::remove_dir_all(&path);
+    let engine = StorageEngine::new(&path, 1024 * 1024).unwrap();
+
+    // Insert 3 keys
+    engine
+        .append("orders", "k1", DataValue::Int(100), false)
+        .unwrap();
+    engine
+        .append("orders", "k2", DataValue::Int(200), false)
+        .unwrap();
+    engine
+        .append("orders", "k3", DataValue::Int(300), false)
+        .unwrap();
+
+    // Delete k2 via tombstone
+    engine
+        .append("orders", "k2", DataValue::Null, true)
+        .unwrap();
+
+    // scan_historical returns all active frames (k1, k2 original, k3).
+    // The k2 tombstone frame itself is skipped (Fix 1), but the original
+    // active k2 frame remains in the append log and is still returned.
+    let records = engine.scan_historical().unwrap();
+    let order_records: Vec<_> = records
+        .iter()
+        .filter(|r| r.stream_name == "orders")
+        .collect();
+
+    assert_eq!(
+        order_records.len(),
+        3,
+        "scan_historical returns active frames (k1, k2, k3); tombstone frame is skipped"
+    );
+    assert!(
+        order_records.iter().all(|r| r.flags & 0x02 == 0),
+        "No tombstone flags in scan results"
+    );
+    assert!(order_records.iter().any(|r| r.key.as_str() == "k1"));
+    assert!(
+        order_records.iter().any(|r| r.key.as_str() == "k2"),
+        "Original k2 active frame must still appear in scan"
+    );
+    assert!(order_records.iter().any(|r| r.key.as_str() == "k3"));
+
+    // count() via executor returns all active frames
+    let query = liven::parser::parse_query(r#"from("orders") | count()"#).unwrap();
+    let results = liven::executor::execute_query(&engine, &query).unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(
+        results[0].value,
+        DataValue::UInt(3),
+        "count() returns active frames (k1, k2, k3); tombstone is excluded from scan"
+    );
+
+    let _ = std::fs::remove_dir_all(&path);
+}
+
+#[test]
+fn test_recovery_excludes_fully_tombstoned_streams() {
+    let path = std::env::temp_dir().join(format!(
+        "liven_recovery_tombstone_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _ = std::fs::remove_dir_all(&path);
+
+    // First engine instance: write and then tombstone all keys in "dropped_stream",
+    // then force a rollover (small segment size) and compact so dropped_stream's active frames are gone.
+    {
+        let engine = StorageEngine::new(&path, 200).unwrap(); // small segment forces rollover
+        engine
+            .append("active_stream", "k1", DataValue::Int(1), false)
+            .unwrap();
+        engine
+            .append("dropped_stream", "k1", DataValue::Int(1), false)
+            .unwrap();
+        engine
+            .append("dropped_stream", "k2", DataValue::Int(2), false)
+            .unwrap();
+        // Tombstone all keys in dropped_stream
+        engine
+            .append("dropped_stream", "k1", DataValue::Null, true)
+            .unwrap();
+        engine
+            .append("dropped_stream", "k2", DataValue::Null, true)
+            .unwrap();
+        // Force segment rollover so active frames for tombstoned keys land in inactive segment
+        engine
+            .append(
+                "active_stream",
+                "padding",
+                DataValue::String("x".repeat(200)),
+                false,
+            )
+            .unwrap();
+        // Compact — active frames for keys no longer in SkipMap are not copied.
+        // After compaction, only active_stream remains in segment files.
+        engine.compact().unwrap();
+    }
+
+    // Second engine instance (simulates server restart)
+    {
+        let engine = StorageEngine::new(&path, 1024 * 1024).unwrap();
+        let streams = engine.list_streams();
+
+        assert!(
+            streams.contains(&"active_stream".to_string()),
+            "active_stream must survive restart"
+        );
+        assert!(
+            !streams.contains(&"dropped_stream".to_string()),
+            "dropped_stream has only tombstones — must not appear after restart"
+        );
+
+        // active_stream must still have its key
+        assert!(engine.get("active_stream", "k1").unwrap().is_some());
+        // dropped_stream keys must be absent
+        assert!(engine.get("dropped_stream", "k1").unwrap().is_none());
+        assert!(engine.get("dropped_stream", "k2").unwrap().is_none());
+    }
+
+    let _ = std::fs::remove_dir_all(&path);
+}
+
+#[test]
+fn test_recovery_stream_limit_excludes_tombstoned_streams() {
+    let path = std::env::temp_dir().join(format!(
+        "liven_recovery_limit_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _ = std::fs::remove_dir_all(&path);
+
+    // Write 3 streams, tombstone 2 of them, then compact so active frames are gone
+    {
+        let engine = StorageEngine::new(&path, 200).unwrap(); // small segment forces rollover
+        engine.append("s1", "k1", DataValue::Int(1), false).unwrap();
+        engine.append("s2", "k1", DataValue::Int(1), false).unwrap();
+        engine.append("s3", "k1", DataValue::Int(1), false).unwrap();
+        // Tombstone s2 and s3
+        engine.append("s2", "k1", DataValue::Null, true).unwrap();
+        engine.append("s3", "k1", DataValue::Null, true).unwrap();
+        // Force rollover and compact so active frames for s2 and s3 are gone
+        engine
+            .append("s1", "padding", DataValue::String("x".repeat(200)), false)
+            .unwrap();
+        engine.compact().unwrap();
+    }
+
+    // Restart — should only see s1 as active
+    {
+        let engine = StorageEngine::new(&path, 1024 * 1024).unwrap();
+        let streams = engine.list_streams();
+        assert!(!streams.contains(&"s2".to_string()));
+        assert!(!streams.contains(&"s3".to_string()));
+    }
+
+    let _ = std::fs::remove_dir_all(&path);
 }

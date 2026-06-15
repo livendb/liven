@@ -1,3 +1,4 @@
+use crate::error::LivenError;
 use crate::storage::StorageEngine;
 use crate::types::Query;
 use crate::types::{AggregateStrategy, DataValue, FilterExpr, Op, PipelineStage, Record};
@@ -5,6 +6,17 @@ use futures_util::stream::{self, Stream, StreamExt};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::SystemTime;
+
+/// Validates that a key does not exceed the 32-byte limit.
+fn validate_key_length(key: &str) -> crate::error::Result<()> {
+    if key.len() > 32 {
+        return Err(LivenError::KeyTooLong {
+            len: key.len(),
+            key: key.to_string(),
+        });
+    }
+    Ok(())
+}
 
 /// Finite state machine for ordered event pattern detection within a time window.
 /// Processes records sequentially and emits the record that completes each sequence.
@@ -207,6 +219,7 @@ pub fn evaluate_filter_expr(record: &Record, expr: &FilterExpr) -> bool {
         FilterExpr::Or { left, right } => {
             evaluate_filter_expr(record, left) || evaluate_filter_expr(record, right)
         }
+        FilterExpr::Not { expr } => !evaluate_filter_expr(record, expr),
     }
 }
 
@@ -237,6 +250,13 @@ pub fn datavalue_to_json(val: &DataValue) -> serde_json::Value {
         DataValue::Array(arr) => {
             serde_json::Value::Array(arr.iter().map(datavalue_to_json).collect())
         }
+        DataValue::Object(obj) => {
+            let mut obj_map = serde_json::Map::new();
+            for (k, v) in obj {
+                obj_map.insert(k.clone(), datavalue_to_json(v));
+            }
+            serde_json::Value::Object(obj_map)
+        }
         DataValue::Vector(vec) => serde_json::Value::Array(
             vec.iter()
                 .map(|&x| serde_json::Value::Number(x.into()))
@@ -264,6 +284,32 @@ pub fn compare_values(a: &DataValue, op: Op, b: &DataValue) -> bool {
         Op::StartsWith => {
             if let (DataValue::String(s_a), DataValue::String(s_b)) = (a, b) {
                 s_a.starts_with(s_b)
+            } else {
+                false
+            }
+        }
+        Op::Contains => {
+            if let (DataValue::String(s_a), DataValue::String(s_b)) = (a, b) {
+                s_a.contains(s_b.as_str())
+            } else {
+                false
+            }
+        }
+        Op::EndsWith => {
+            if let (DataValue::String(s_a), DataValue::String(s_b)) = (a, b) {
+                s_a.ends_with(s_b.as_str())
+            } else {
+                false
+            }
+        }
+        Op::Between => {
+            if let DataValue::Array(bounds) = b
+                && bounds.len() == 2
+                && let (Some(lo), Some(hi)) = (to_f64(&bounds[0]), to_f64(&bounds[1]))
+                && let Some(val) = to_f64(a)
+            {
+                let v = ordered_float::OrderedFloat(val);
+                v >= ordered_float::OrderedFloat(lo) && v <= ordered_float::OrderedFloat(hi)
             } else {
                 false
             }
@@ -477,6 +523,7 @@ fn extract_key_from_filter(expr: &FilterExpr) -> Option<String> {
         FilterExpr::And { left, right } => {
             extract_key_from_filter(left).or_else(|| extract_key_from_filter(right))
         }
+        FilterExpr::Not { expr } => extract_key_from_filter(expr),
         _ => None,
     }
 }
@@ -507,20 +554,658 @@ pub fn json_to_datavalue(val: serde_json::Value) -> DataValue {
     }
 }
 
+/// Analyses a parsed Query and returns a structured execution plan as Records.
+/// Does not access storage. Does not execute the query.
+pub fn execute_explain(engine: &StorageEngine, query: &Query) -> Vec<Record> {
+    use crate::storage::key::StreamKey;
+    use std::time::SystemTime;
+
+    let timestamp = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64;
+
+    let mut steps: Vec<serde_json::Value> = Vec::new();
+
+    let total_keys = engine.skipmap.len();
+
+    match query {
+        Query::Pipeline(stages) | Query::Listen { pipeline: stages } => {
+            let has_key_equality = stages
+                .iter()
+                .any(|s| matches!(s, PipelineStage::Get { .. }))
+                || stages.iter().any(|s| {
+                    if let PipelineStage::Filter { expr } = s {
+                        is_key_equality_filter(expr)
+                    } else {
+                        false
+                    }
+                });
+
+            let has_limit = stages
+                .iter()
+                .any(|s| matches!(s, PipelineStage::Limit { .. }));
+
+            let stream_name = stages.iter().find_map(|s| {
+                if let PipelineStage::From { stream_name } = s {
+                    Some(stream_name.as_str())
+                } else {
+                    None
+                }
+            });
+
+            let stream_keys = stream_name.map(|sn| {
+                let prefix = format!("{}:", sn);
+                engine
+                    .skipmap
+                    .iter()
+                    .filter(|e| e.key().starts_with(&prefix))
+                    .count()
+            });
+
+            if has_key_equality {
+                steps.push(make_step(
+                    0,
+                    "scan",
+                    "O(log n)",
+                    &format!(
+                        "Key equality detected — uses SkipMap point lookup. Total index keys: {}",
+                        total_keys
+                    ),
+                ));
+            } else if has_limit {
+                let limit_count = stages
+                    .iter()
+                    .find_map(|s| {
+                        if let PipelineStage::Limit { count } = s {
+                            Some(*count)
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or(0);
+                steps.push(make_step(
+                    0,
+                    "scan",
+                    "O(n) early-exit",
+                    &format!(
+                        "Full segment scan with early exit at {} records. Stream '{}' has ~{} indexed keys.",
+                        limit_count,
+                        stream_name.unwrap_or("unknown"),
+                        stream_keys.unwrap_or(total_keys)
+                    ),
+                ));
+            } else {
+                steps.push(make_step(
+                    0,
+                    "scan",
+                    "O(n)",
+                    &format!(
+                        "Full segment scan across all segments. Stream '{}' has ~{} indexed keys. Total index: {}.",
+                        stream_name.unwrap_or("unknown"),
+                        stream_keys.unwrap_or(0),
+                        total_keys
+                    ),
+                ));
+            }
+
+            let mut step_idx = 1usize;
+            for stage in stages {
+                let (stage_name, cost, note) = describe_stage(stage, engine);
+                steps.push(make_step(step_idx, &stage_name, &cost, &note));
+                step_idx += 1;
+            }
+        }
+
+        Query::Insert {
+            stream_name, key, ..
+        } => {
+            steps.push(make_step(
+                0,
+                "existence_check",
+                "O(log n)",
+                &format!(
+                    "SkipMap lookup for key '{}' in stream '{}'",
+                    key, stream_name
+                ),
+            ));
+            steps.push(make_step(
+                1,
+                "append",
+                "O(1)",
+                "Enqueue to ring buffer. Single sync_data call via group-commit flusher.",
+            ));
+            steps.push(make_step(
+                2,
+                "index_update",
+                "O(log n)",
+                "SkipMap insert after flusher confirms write.",
+            ));
+        }
+
+        Query::InsertBatch { stream_name, batch } => {
+            steps.push(make_step(
+                0,
+                "write_lock",
+                "O(1)",
+                "Acquires write_lock mutex to prevent concurrent insert races.",
+            ));
+            steps.push(make_step(
+                1,
+                "existence_check",
+                "O(k log n)",
+                &format!(
+                    "{} SkipMap lookups for stream '{}'",
+                    batch.len(),
+                    stream_name
+                ),
+            ));
+            steps.push(make_step(
+                2,
+                "batch_append",
+                "O(k)",
+                &format!(
+                    "{} records enqueued. Single write_all + sync_data via group-commit.",
+                    batch.len()
+                ),
+            ));
+            steps.push(make_step(
+                3,
+                "index_update",
+                "O(k log n)",
+                "SkipMap insert for each record after flusher confirms.",
+            ));
+        }
+
+        Query::Upsert {
+            stream_name, key, ..
+        }
+        | Query::Update {
+            stream_name, key, ..
+        } => {
+            steps.push(make_step(
+                0,
+                "append",
+                "O(1)",
+                &format!(
+                    "Enqueue write for key '{}' in stream '{}'. No existence check.",
+                    key, stream_name
+                ),
+            ));
+            steps.push(make_step(
+                1,
+                "index_update",
+                "O(log n)",
+                "SkipMap pointer updated to new segment offset.",
+            ));
+        }
+
+        Query::UpsertBatch { stream_name, batch } => {
+            steps.push(make_step(
+                0,
+                "batch_append",
+                "O(k)",
+                &format!(
+                    "{} records upserted in stream '{}'. Single write_all + sync_data via group-commit.",
+                    batch.len(), stream_name
+                ),
+            ));
+            steps.push(make_step(
+                1,
+                "index_update",
+                "O(k log n)",
+                "SkipMap upsert for each record after flusher confirms.",
+            ));
+        }
+
+        Query::DeleteKey { stream_name, key } => {
+            steps.push(make_step(
+                0,
+                "existence_check",
+                "O(log n)",
+                &format!("SkipMap lookup for '{}:{}'", stream_name, key),
+            ));
+            steps.push(make_step(
+                1,
+                "tombstone",
+                "O(1)",
+                "Append tombstone frame. SkipMap entry removed.",
+            ));
+        }
+
+        Query::Empty { stream_name } | Query::Drop { stream_name } => {
+            let prefix = format!("{}:", stream_name);
+            let key_count = engine
+                .skipmap
+                .iter()
+                .filter(|e| e.key().starts_with(&prefix))
+                .count();
+            steps.push(make_step(
+                0,
+                "list_keys",
+                "O(k)",
+                &format!("{} keys found in stream '{}'", key_count, stream_name),
+            ));
+            steps.push(make_step(
+                1,
+                "tombstone_batch",
+                "O(k)",
+                &format!(
+                    "Append {} tombstone frames in one ring buffer call. Single sync_data.",
+                    key_count
+                ),
+            ));
+        }
+
+        Query::PipelineDelete { pipeline } | Query::PipelineUpdate { pipeline, .. } => {
+            steps.push(make_step(
+                0,
+                "scan",
+                "O(n)",
+                "Full historical scan required to identify matching records.",
+            ));
+            steps.push(make_step(
+                1,
+                "pipeline_filter",
+                "O(n)",
+                "Apply pipeline stages in-memory to isolate targets.",
+            ));
+            steps.push(make_step(
+                2,
+                "tombstone_or_append",
+                "O(k)",
+                "Write tombstone or new value for each matched record.",
+            ));
+            let _ = pipeline;
+        }
+
+        Query::ListStreams => {
+            steps.push(make_step(
+                0,
+                "streams_set",
+                "O(s)",
+                "Reads from in-memory HashSet. No disk access.",
+            ));
+        }
+
+        Query::Status => {
+            steps.push(make_step(
+                0,
+                "status",
+                "O(1)",
+                "Reads atomic counters. No disk access.",
+            ));
+        }
+
+        Query::Explain { .. } => {
+            steps.push(make_step(
+                0,
+                "explain",
+                "O(1)",
+                "Cannot explain an explain query.",
+            ));
+        }
+    }
+
+    let has_secondary_scan = steps.iter().any(|s| {
+        s.get("note")
+            .and_then(|n| n.as_str())
+            .map(|n| n.contains("secondary scan"))
+            .unwrap_or(false)
+    });
+
+    let warnings: Vec<&str> = steps
+        .iter()
+        .filter_map(|s| {
+            s.get("note")
+                .and_then(|n| n.as_str())
+                .filter(|n| n.contains("WARNING"))
+        })
+        .collect();
+
+    let plan_json = serde_json::json!({
+        "total_steps": steps.len(),
+        "has_secondary_scan": has_secondary_scan,
+        "warnings": warnings,
+        "steps": steps,
+    });
+
+    vec![Record {
+        sequence_id: 0,
+        timestamp,
+        type_tag: 5,
+        flags: 0,
+        stream_name: "explain".to_string(),
+        key: StreamKey::from_str_truncated("plan"),
+        value: DataValue::String(plan_json.to_string()),
+    }]
+}
+
+fn make_step(step: usize, stage: &str, cost: &str, note: &str) -> serde_json::Value {
+    serde_json::json!({
+        "step": step,
+        "stage": stage,
+        "cost": cost,
+        "note": note,
+    })
+}
+
+fn describe_stage(stage: &PipelineStage, engine: &StorageEngine) -> (String, String, String) {
+    match stage {
+        PipelineStage::From { stream_name } => {
+            let prefix = format!("{}:", stream_name);
+            let count = engine
+                .skipmap
+                .iter()
+                .filter(|e| e.key().starts_with(&prefix))
+                .count();
+            (
+                "from".to_string(),
+                "O(n)".to_string(),
+                format!(
+                    "Retain records for stream '{}'. ~{} indexed keys.",
+                    stream_name, count
+                ),
+            )
+        }
+        PipelineStage::Filter { .. } => (
+            "filter".to_string(),
+            "O(n)".to_string(),
+            "Evaluate filter expression on each record in-memory.".to_string(),
+        ),
+        PipelineStage::Get { key } => (
+            "get".to_string(),
+            "O(n)".to_string(),
+            format!(
+                "Retain records where key == '{}'. Applied after scan — not index-assisted at this stage.",
+                key
+            ),
+        ),
+        PipelineStage::VectorFilter {
+            field,
+            query_vector,
+            threshold,
+        } => (
+            "vector_filter".to_string(),
+            "O(n * d)".to_string(),
+            format!(
+                "Cosine similarity on field '{}'. Query vector dim: {}. Threshold: {:.3}. No index — full scan comparison.",
+                field,
+                query_vector.len(),
+                threshold.into_inner()
+            ),
+        ),
+        PipelineStage::Correlate {
+            source_stream,
+            join_key,
+            within_ms,
+        } => (
+            "correlate".to_string(),
+            "O(n * m) WARNING".to_string(),
+            format!(
+                "WARNING: Secondary full scan triggered for stream '{}' on join key '{}' within {}ms. \
+                This is an O(n*m) nested loop. Place restrictive filters before correlate to reduce n. \
+                Avoid on large datasets until stream-scoped index is implemented.",
+                source_stream, join_key, within_ms
+            ),
+        ),
+        PipelineStage::Sequence { steps, within_ms } => (
+            "sequence".to_string(),
+            "O(n)".to_string(),
+            format!(
+                "FSM with {} steps over time window of {}ms. Records are sorted by timestamp before processing. \
+                Only the final completing record of each sequence is emitted.",
+                steps.len(),
+                within_ms
+            ),
+        ),
+        PipelineStage::Chain {
+            target_stream,
+            join_key,
+        } => (
+            "chain".to_string(),
+            "O(n log m)".to_string(),
+            format!(
+                "Left join to stream '{}' on key '{}'. Each record does one SkipMap lookup. No secondary scan.",
+                target_stream, join_key
+            ),
+        ),
+        PipelineStage::Enrich {
+            source_stream,
+            join_key,
+        } => (
+            "enrich".to_string(),
+            "O(n log m)".to_string(),
+            format!(
+                "Enrich from stream '{}' on key '{}'. One SkipMap point lookup per record. No secondary scan.",
+                source_stream, join_key
+            ),
+        ),
+        PipelineStage::Map { projections } => (
+            "map".to_string(),
+            "O(n)".to_string(),
+            format!(
+                "Project fields: {}. In-memory transformation.",
+                projections.join(", ")
+            ),
+        ),
+        PipelineStage::Sort { field, descending } => (
+            "sort".to_string(),
+            "O(n log n)".to_string(),
+            format!(
+                "Sort by '{}' {}. Requires all records in memory before returning results.",
+                field,
+                if *descending {
+                    "descending"
+                } else {
+                    "ascending"
+                }
+            ),
+        ),
+        PipelineStage::Limit { count } => (
+            "limit".to_string(),
+            "O(1)".to_string(),
+            format!("Truncate to {} records. Applied after prior stages.", count),
+        ),
+        PipelineStage::Window {
+            duration_ms,
+            strategy,
+        } => (
+            "window".to_string(),
+            "O(n)".to_string(),
+            format!(
+                "Group records into {}ms buckets. Strategy: {:?}. One output record per window.",
+                duration_ms, strategy
+            ),
+        ),
+        PipelineStage::Group {
+            field,
+            aggregations,
+        } => (
+            "group".to_string(),
+            "O(n)".to_string(),
+            format!(
+                "Group by '{}'. Aggregations: {}. Requires all records in memory.",
+                field,
+                aggregations.join(", ")
+            ),
+        ),
+        PipelineStage::Page {
+            page_number,
+            page_size,
+        } => (
+            "page".to_string(),
+            "O(n)".to_string(),
+            format!(
+                "Offset page {}. Skips {} records. Full scan still required to reach offset.",
+                page_number,
+                (page_number.saturating_sub(1)) * page_size
+            ),
+        ),
+        PipelineStage::PageCursor { cursor, page_size } => (
+            "page_cursor".to_string(),
+            "O(n)".to_string(),
+            format!(
+                "Cursor pagination after key '{}'. Page size {}. Avoids offset scan drift.",
+                cursor, page_size
+            ),
+        ),
+        PipelineStage::Count => (
+            "count".to_string(),
+            "O(n)".to_string(),
+            "Count records after prior stages. Full scan required — not metadata-based."
+                .to_string(),
+        ),
+        PipelineStage::Export { format } => (
+            "export".to_string(),
+            "O(n)".to_string(),
+            format!(
+                "Serialize results to {:?} format. Applied at transport layer.",
+                format
+            ),
+        ),
+        PipelineStage::Delete => (
+            "delete".to_string(),
+            "O(n)".to_string(),
+            "Retain only tombstoned records. Used in pipeline context.".to_string(),
+        ),
+        PipelineStage::Trash => (
+            "trash".to_string(),
+            "O(n)".to_string(),
+            "Retain only trashed records.".to_string(),
+        ),
+        PipelineStage::Distinct { field } => (
+            "distinct".to_string(),
+            "O(n)".to_string(),
+            format!(
+                "Deduplicate by field '{}'. Uses a HashSet internally.",
+                field
+            ),
+        ),
+    }
+}
+
+fn is_key_equality_filter(expr: &FilterExpr) -> bool {
+    match expr {
+        FilterExpr::Simple {
+            field, operator, ..
+        } => field == "key" && *operator == Op::Eq,
+        FilterExpr::And { left, right } => {
+            is_key_equality_filter(left) || is_key_equality_filter(right)
+        }
+        _ => false,
+    }
+}
+
+/// Check if a filter expression is a time-range comparison on the `timestamp` field.
+/// Returns Some((start_ms, end_ms)) if the filter is a simple time range.
+fn extract_time_range_filter(expr: &FilterExpr) -> Option<(i64, i64)> {
+    match expr {
+        FilterExpr::Simple {
+            field,
+            operator,
+            value,
+        } if field == "timestamp" => match operator {
+            Op::Gt => to_f64(value).map(|n| (n as i64 + 1, i64::MAX)),
+            Op::GtEq => to_f64(value).map(|n| (n as i64, i64::MAX)),
+            Op::Lt => to_f64(value).map(|n| (i64::MIN, n as i64 - 1)),
+            Op::LtEq => to_f64(value).map(|n| (i64::MIN, n as i64)),
+            Op::Eq => to_f64(value).map(|n| (n as i64, n as i64)),
+            Op::Between => {
+                if let DataValue::Array(bounds) = value
+                    && bounds.len() == 2
+                    && let Some(lo) = to_f64(&bounds[0])
+                    && let Some(hi) = to_f64(&bounds[1])
+                {
+                    Some((lo as i64, hi as i64))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        },
+        FilterExpr::And { left, right } => {
+            // Merge conjunctive time ranges
+            let left_range = extract_time_range_filter(left);
+            let right_range = extract_time_range_filter(right);
+            match (left_range, right_range) {
+                (Some((l1, r1)), Some((l2, r2))) => Some((l1.min(l2), r1.max(r2))),
+                (Some(r), None) | (None, Some(r)) => Some(r),
+                (None, None) => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Check if a pipeline has a leading time-range filter on the `timestamp` field.
+/// Returns Some((start_ms, end_ms)) if applicable.
+fn has_time_range_filter(stages: &[PipelineStage]) -> Option<(i64, i64)> {
+    for stage in stages {
+        if let PipelineStage::Filter { expr } = stage {
+            return extract_time_range_filter(expr);
+        }
+    }
+    None
+}
+
 /// Executes any full parsed Query on the StorageEngine, returning results or execution errors.
-pub fn execute_query(engine: &StorageEngine, query: &Query) -> Result<Vec<Record>, String> {
+#[tracing::instrument(skip(engine, query), fields(query_type = ?query.variant_name()))]
+pub fn execute_query(engine: &StorageEngine, query: &Query) -> crate::error::Result<Vec<Record>> {
     match query {
         Query::Pipeline(stages) => {
             if let Some(PipelineStage::From { stream_name }) = stages.first()
                 && !engine.list_streams().contains(stream_name)
             {
-                return Err(format!("Stream '{}' does not exist", stream_name));
+                return Err(LivenError::Query(format!(
+                    "Stream '{}' does not exist",
+                    stream_name
+                )));
             }
-            let mut records = if let Some(limit) = get_limit_from_stages(stages) {
-                engine.scan_historical_limited(limit)?
-            } else {
-                engine.scan_historical()?
-            };
+
+            // Fast path: if the pipeline resolves to a single key equality
+            // (e.g. from("s").get("k") or from("s") | filter(key == "k")),
+            // use the skipmap O(log N) point lookup instead of scanning all segments.
+            if let Some(key) = extract_unique_key_from_pipeline(stages) {
+                let stream_name =
+                    if let Some(PipelineStage::From { stream_name: sn }) = stages.first() {
+                        sn
+                    } else {
+                        return Err(LivenError::Query(
+                            "Pipeline must start with from()".to_string(),
+                        ));
+                    };
+                let mut records = match engine.get(stream_name, &key)? {
+                    Some(record) => vec![record],
+                    None => vec![],
+                };
+                // Skip the From and Get/key-filter stages since they are already satisfied.
+                // Apply only the remaining stages (Limit, Map, Sort, Count, etc.)
+                let remaining: Vec<&PipelineStage> = stages
+                    .iter()
+                    .filter(|s| {
+                        !matches!(s, PipelineStage::From { .. })
+                            && !matches!(s, PipelineStage::Get { .. })
+                            && !matches!(s, PipelineStage::Filter { expr } if is_key_equality_filter(expr))
+                    })
+                    .collect();
+                let remaining_refs: Vec<PipelineStage> = remaining.into_iter().cloned().collect();
+                apply_pipeline_stages_to_vec(&mut records, engine, &remaining_refs);
+                return Ok(records);
+            }
+
+            // Fast path: time-range filter on timestamp field.
+            // Use the per-stream timestamp index for O(log N + K) range scans.
+            if let Some((start_ms, end_ms)) = has_time_range_filter(stages)
+                && let Some(PipelineStage::From { stream_name }) = stages.first()
+            {
+                let mut records = engine.scan_by_time_range(stream_name, start_ms, end_ms)?;
+                apply_pipeline_stages_to_vec(&mut records, engine, stages);
+                return Ok(records);
+            }
+
+            // Fall through to the full historical scan for general queries.
+            let mut records = engine.scan_historical()?;
             apply_pipeline_stages_to_vec(&mut records, engine, stages);
             Ok(records)
         }
@@ -529,17 +1214,28 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> Result<Vec<Record
             key,
             value,
         } => {
+            // Validate key length at parse layer
+            validate_key_length(key)?;
+
+            // Acquire write_lock to prevent concurrent inserts for the same key
+            let _guard = engine.write_lock.lock().unwrap();
+
             if engine.get(stream_name, key)?.is_some() {
-                return Err(format!(
-                    "Key '{}' already exists in stream '{}'",
+                return Err(LivenError::Query(format!(
+                    "Key '{}' already exists in stream '{}'.\n   Use upsert to overwrite an existing key or\n   update to merge changes into an existing record.",
                     key, stream_name
-                ));
+                )));
             }
             let record =
                 engine.append(stream_name, key, json_to_datavalue(value.clone()), false)?;
             Ok(vec![record])
         }
         Query::InsertBatch { stream_name, batch } => {
+            // Validate all key lengths at parse layer
+            for (key, _) in batch {
+                validate_key_length(key)?;
+            }
+
             // Acquire the write lock to atomically check all keys and queue appends.
             // This prevents other concurrent InsertBatch operations from interleaving
             // between the existence check and the ring buffer enqueue.
@@ -547,10 +1243,10 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> Result<Vec<Record
 
             for (key, _) in batch {
                 if engine.get(stream_name, key)?.is_some() {
-                    return Err(format!(
+                    return Err(LivenError::Query(format!(
                         "Key '{}' already exists in stream '{}' (batch insertion aborted)",
                         key, stream_name
-                    ));
+                    )));
                 }
             }
             let mut inserted = Vec::new();
@@ -566,13 +1262,37 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> Result<Vec<Record
             key,
             value,
         } => {
+            // Validate key length at parse layer
+            validate_key_length(key)?;
+
+            // Acquire write_lock to prevent concurrent operations on the same key
+            let _guard = engine.write_lock.lock().unwrap();
+
+            // Check if key exists and tombstone it if it does
+            if engine.get(stream_name, key)?.is_some() {
+                let _ = engine.append(stream_name, key, DataValue::Null, true)?;
+            }
+
             let record =
                 engine.append(stream_name, key, json_to_datavalue(value.clone()), false)?;
             Ok(vec![record])
         }
         Query::UpsertBatch { stream_name, batch } => {
+            // Validate all key lengths at parse layer
+            for (key, _) in batch {
+                validate_key_length(key)?;
+            }
+
+            // Acquire write_lock to prevent concurrent operations on any keys in the batch
+            let _guard = engine.write_lock.lock().unwrap();
+
             let mut inserted = Vec::new();
             for (key, val) in batch {
+                // Check if key exists and tombstone it if it does
+                if engine.get(stream_name, key)?.is_some() {
+                    let _ = engine.append(stream_name, key, DataValue::Null, true)?;
+                }
+
                 let record =
                     engine.append(stream_name, key, json_to_datavalue(val.clone()), false)?;
                 inserted.push(record);
@@ -584,11 +1304,24 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> Result<Vec<Record
             key,
             value,
         } => {
+            // Validate key length at parse layer
+            validate_key_length(key)?;
+
             if !engine.list_streams().contains(stream_name) {
-                return Err(format!("Stream '{}' does not exist", stream_name));
+                return Err(LivenError::Query(format!(
+                    "Stream '{}' does not exist",
+                    stream_name
+                )));
             }
+
+            // Acquire write_lock to prevent concurrent operations on the same key
+            let _guard = engine.write_lock.lock().unwrap();
+
             let mut affected_rows = 0;
             if let Some(existing) = engine.get(stream_name, key)? {
+                // Tombstone the old record first
+                let _ = engine.append(stream_name, key, DataValue::Null, true)?;
+
                 let mut existing_val = match &existing.value {
                     DataValue::String(s) => serde_json::from_str::<serde_json::Value>(s)
                         .unwrap_or_else(|_| serde_json::Value::String(s.clone())),
@@ -626,11 +1359,23 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> Result<Vec<Record
             }])
         }
         Query::DeleteKey { stream_name, key } => {
+            // Validate key length at parse layer
+            validate_key_length(key)?;
+
             if !engine.list_streams().contains(stream_name) {
-                return Err(format!("Stream '{}' does not exist", stream_name));
+                return Err(LivenError::Query(format!(
+                    "Stream '{}' does not exist",
+                    stream_name
+                )));
             }
             let compound_key = format!("{}:{}", stream_name, key);
             let mut affected_rows = 0;
+
+            // Hold write_lock to prevent concurrent Insert/Upsert from racing with this delete.
+            // The same lock is used by InsertBatch. Individual Insert calls do not use it
+            // (last-writer-wins semantics are acceptable for single-record inserts).
+            let _guard = engine.write_lock.lock().unwrap();
+
             if engine.skipmap.contains_key(&compound_key) {
                 let _ = engine.append_tombstone_batch(stream_name, &[key.clone()])?;
                 affected_rows = 1;
@@ -654,7 +1399,10 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> Result<Vec<Record
         }
         Query::Empty { stream_name } => {
             if !engine.list_streams().contains(stream_name) {
-                return Err(format!("Stream '{}' does not exist", stream_name));
+                return Err(LivenError::Query(format!(
+                    "Stream '{}' does not exist",
+                    stream_name
+                )));
             }
             let keys = engine.list_keys(stream_name);
             let affected_rows = keys.len();
@@ -680,12 +1428,21 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> Result<Vec<Record
         }
         Query::Drop { stream_name } => {
             if !engine.list_streams().contains(stream_name) {
-                return Err(format!("Stream '{}' does not exist", stream_name));
+                return Err(LivenError::Query(format!(
+                    "Stream '{}' does not exist",
+                    stream_name
+                )));
             }
             let keys = engine.list_keys(stream_name);
             let affected_rows = keys.len();
             if !keys.is_empty() {
                 let _ = engine.append_tombstone_batch(stream_name, &keys)?;
+            }
+            // Remove the stream from streams_set so it no longer appears in listings
+            // and no longer counts against max_concurrent_streams.
+            {
+                let mut streams_guard = engine.streams_set.lock().unwrap();
+                streams_guard.remove(stream_name);
             }
             let timestamp = SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
@@ -711,11 +1468,19 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> Result<Vec<Record
             let stream_name = if let Some(PipelineStage::From { stream_name }) = pipeline.first() {
                 stream_name.clone()
             } else {
-                return Err("Pipeline query must start with a from() stage".to_string());
+                return Err(LivenError::Query(
+                    "Pipeline query must start with a from() stage".to_string(),
+                ));
             };
             if !engine.list_streams().contains(&stream_name) {
-                return Err(format!("Stream '{}' does not exist", stream_name));
+                return Err(LivenError::Query(format!(
+                    "Stream '{}' does not exist",
+                    stream_name
+                )));
             }
+            // Acquire write_lock to prevent concurrent inserts from racing between
+            // the historical scan and the append of updated records.
+            let _guard = engine.write_lock.lock().unwrap();
             let mut records = engine.scan_historical()?;
             apply_pipeline_stages_to_vec(&mut records, engine, pipeline);
             let affected_rows = records.len();
@@ -764,10 +1529,15 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> Result<Vec<Record
             let stream_name = if let Some(PipelineStage::From { stream_name }) = pipeline.first() {
                 stream_name.clone()
             } else {
-                return Err("Pipeline query must start with a from() stage".to_string());
+                return Err(LivenError::Query(
+                    "Pipeline query must start with a from() stage".to_string(),
+                ));
             };
             if !engine.list_streams().contains(&stream_name) {
-                return Err(format!("Stream '{}' does not exist", stream_name));
+                return Err(LivenError::Query(format!(
+                    "Stream '{}' does not exist",
+                    stream_name
+                )));
             }
 
             let mut affected_rows = 0;
@@ -783,6 +1553,9 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> Result<Vec<Record
                     }
                 }
             } else {
+                // Acquire write_lock to prevent concurrent inserts from racing between
+                // the historical scan and the tombstone batch.
+                let _guard = engine.write_lock.lock().unwrap();
                 let mut records = engine.scan_historical()?;
                 apply_pipeline_stages_to_vec(&mut records, engine, pipeline);
 
@@ -839,9 +1612,9 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> Result<Vec<Record
             Ok(records)
         }
         Query::Status => {
-            let max_connections = engine.max_connections;
-            let active_connections = max_connections - engine.conn_semaphore.available_permits();
-            let broadcast_capacity = engine.broadcast_capacity;
+            let active_connections =
+                engine.max_connections - engine.conn_semaphore.available_permits();
+            let broadcast_subscribers = engine.broadcast_subscriber_count();
 
             let timestamp = std::time::SystemTime::now()
                 .duration_since(std::time::SystemTime::UNIX_EPOCH)
@@ -849,8 +1622,8 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> Result<Vec<Record
                 .as_millis() as i64;
 
             let value_str = format!(
-                r#"{{"max_connections":{},"active_connections":{},"broadcast_capacity":{}}}"#,
-                max_connections, active_connections, broadcast_capacity
+                r#"{{"active_connections":{},"broadcast_subscribers":{}}}"#,
+                active_connections, broadcast_subscribers
             );
 
             Ok(vec![Record {
@@ -863,11 +1636,15 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> Result<Vec<Record
                 value: DataValue::String(value_str),
             }])
         }
+        Query::Explain { inner_query } => Ok(execute_explain(engine, inner_query)),
         Query::Listen { pipeline } => {
             if let Some(PipelineStage::From { stream_name }) = pipeline.first()
                 && !engine.list_streams().contains(stream_name)
             {
-                return Err(format!("Stream '{}' does not exist", stream_name));
+                return Err(LivenError::Query(format!(
+                    "Stream '{}' does not exist",
+                    stream_name
+                )));
             }
             let mut records = if let Some(limit) = get_limit_from_stages(pipeline) {
                 engine.scan_historical_limited(limit)?
@@ -882,11 +1659,7 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> Result<Vec<Record
 
 /// Executes a pipeline query on static historical database records.
 pub fn execute_query_historical(engine: &StorageEngine, stages: &[PipelineStage]) -> Vec<Record> {
-    let mut records = if let Some(limit) = get_limit_from_stages(stages) {
-        engine.scan_historical_limited(limit).unwrap_or_default()
-    } else {
-        engine.scan_historical().unwrap_or_default()
-    };
+    let mut records = engine.scan_historical().unwrap_or_default();
     apply_pipeline_stages_to_vec(&mut records, engine, stages);
     records
 }
@@ -903,9 +1676,10 @@ pub fn apply_pipeline_stages_to_vec(
                 records.retain(|r| r.stream_name == *stream_name);
             }
             PipelineStage::Delete => {
-                records.retain(|r| {
-                    (r.flags & 0x02 != 0 || r.value == DataValue::Null) && r.flags & 0x04 == 0
-                });
+                // With Fix 1, scan_historical no longer returns tombstone frames, so this stage
+                // primarily serves as a terminal parser target for PipelineDelete execution.
+                // The executor handles deletion separately via append_tombstone_batch.
+                records.retain(|r| r.flags & 0x02 != 0 && r.flags & 0x04 == 0);
             }
             PipelineStage::Trash => {
                 records.retain(|r| r.flags & 0x04 != 0 || r.key.as_str() == "*");
@@ -1234,7 +2008,33 @@ pub fn apply_pipeline_stages_to_vec(
                 join_key,
                 within_ms,
             } => {
-                let all_records = engine.scan_historical().unwrap_or_default();
+                // Pre-fetch all records from source_stream into a HashMap keyed by the join field value.
+                // This replaces the O(N × M) double scan with O(N + M) construction + O(K) lookups.
+                let all_source: Vec<Record> = engine
+                    .scan_historical()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|r| r.stream_name == *source_stream)
+                    .collect();
+
+                // Build a multi-map: join_key_value → Vec<(timestamp, Record)>
+                let mut source_map: std::collections::HashMap<String, Vec<(i64, Record)>> =
+                    std::collections::HashMap::new();
+                for other in all_source {
+                    if let Some(kv) = evaluate_record_field(&other, join_key) {
+                        let k = match &kv {
+                            DataValue::String(s) => s.clone(),
+                            DataValue::Int(i) => i.to_string(),
+                            DataValue::UInt(u) => u.to_string(),
+                            _ => format!("{:?}", kv),
+                        };
+                        source_map
+                            .entry(k)
+                            .or_default()
+                            .push((other.timestamp, other));
+                    }
+                }
+
                 let mut results = Vec::new();
                 for record in records.iter() {
                     if let Some(key_val) = evaluate_record_field(record, join_key) {
@@ -1250,36 +2050,22 @@ pub fn apply_pipeline_stages_to_vec(
                         let mut matched_count = 0u64;
                         let mut merged_value = datavalue_to_json(&record.value);
 
-                        for other in &all_records {
-                            if other.stream_name != *source_stream {
-                                continue;
-                            }
-                            if other.timestamp < window_min || other.timestamp > window_max {
-                                continue;
-                            }
-                            if let Some(other_key_val) = evaluate_record_field(other, join_key) {
-                                let other_key_str = match &other_key_val {
-                                    DataValue::String(s) => s.clone(),
-                                    DataValue::Int(i) => i.to_string(),
-                                    DataValue::UInt(u) => u.to_string(),
-                                    _ => format!("{:?}", other_key_val),
-                                };
-                                if other_key_str == key_str {
-                                    matched_count += 1;
-                                    // Merge matched record fields into record value
-                                    if let serde_json::Value::Object(ref mut map) = merged_value {
-                                        let other_json = match &other.value {
-                                            DataValue::String(s) => {
-                                                serde_json::from_str::<serde_json::Value>(s)
-                                                    .unwrap_or(serde_json::Value::String(s.clone()))
-                                            }
-                                            other_val => datavalue_to_json(other_val),
-                                        };
-                                        map.insert(
-                                            format!("correlated_{}", matched_count),
-                                            other_json,
-                                        );
-                                    }
+                        if let Some(candidates) = source_map.get(&key_str) {
+                            for (ts, other) in candidates {
+                                if *ts < window_min || *ts > window_max {
+                                    continue;
+                                }
+                                matched_count += 1;
+                                // Merge matched record fields into record value
+                                if let serde_json::Value::Object(ref mut map) = merged_value {
+                                    let other_json = match &other.value {
+                                        DataValue::String(s) => {
+                                            serde_json::from_str::<serde_json::Value>(s)
+                                                .unwrap_or(serde_json::Value::String(s.clone()))
+                                        }
+                                        other_val => datavalue_to_json(other_val),
+                                    };
+                                    map.insert(format!("correlated_{}", matched_count), other_json);
                                 }
                             }
                         }
@@ -1359,6 +2145,22 @@ pub fn apply_pipeline_stages_to_vec(
                         }
                     }
                 }
+            }
+            PipelineStage::Distinct { field } => {
+                let mut seen = std::collections::HashSet::new();
+                records.retain(|r| {
+                    let key_val = evaluate_record_field(r, field).unwrap_or(DataValue::Null);
+                    let dedup_key = match &key_val {
+                        DataValue::String(s) => s.clone(),
+                        DataValue::Int(i) => i.to_string(),
+                        DataValue::UInt(u) => u.to_string(),
+                        DataValue::Float(f) => f.to_string(),
+                        DataValue::Bool(b) => b.to_string(),
+                        DataValue::Null => String::new(),
+                        other => format!("{:?}", other),
+                    };
+                    seen.insert(dedup_key)
+                });
             }
             PipelineStage::Export { .. } => {
                 // Export is treated as formatting stage in the transport layer, so no op here.

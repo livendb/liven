@@ -1,10 +1,9 @@
 use rand::rngs::OsRng;
 
 pub const CAP_NONE: u8 = 0x00;
-pub const CAP_READ: u8 = 0x01; // historical scan, subscribes, list streams
-pub const CAP_WRITE: u8 = 0x02; // inserts, updates, upserts, emtying
-pub const CAP_ADMIN: u8 = 0x04; // drop streams, compactions
-pub const CAP_ROOT: u8 = 0xFF; // unrestricted/full
+pub const CAP_READ: u8 = 0x01; // historical scan, subscribes, list streams, status
+pub const CAP_WRITE: u8 = 0x03; // inserts, updates, upserts, plus all read operations
+pub const CAP_ROOT: u8 = 0xFF; // unrestricted/full - admin role
 
 pub fn generate_nonce() -> [u8; 32] {
     let mut nonce = [0u8; 32];

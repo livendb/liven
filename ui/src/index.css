@@ -3,27 +3,22 @@
 @tailwind utilities;
 
 :root {
-    /* 🧡 Primary: Vibrant Anthropic Coral — warm, elegant, striking */
     --color-primary: #ff5c35;
     --color-primary-hover: #e0451b;
     --color-primary-light: #ffd3c4;
     --color-primary-glow: rgba(255, 92, 53, 0.35);
 
-    /* 💛 Secondary: Vibrant Sunlit Gold — energy and real-time spark */
     --color-secondary: #ffb830;
     --color-secondary-hover: #e09e1b;
     --color-secondary-light: #fff0d4;
     --color-secondary-glow: rgba(255, 184, 48, 0.35);
 
-    /* 💚 Accent: Vibrant Mint-Sage — balance and operations */
     --color-accent: #10b981;
     --color-accent-hover: #059669;
     --color-accent-light: #d1fae5;
 
-    /* Sidebar/Header specific background (Deep Anthropic Coral) */
     --color-navbar-bg: #e0451b;
 
-    /* Page-wide settings (Signature Warm Off-White / Charcoal-Clay) */
     --color-body-bg: #f7f5f0;
     --color-panel-bg: #ffffff;
     --color-border-subtle: #f0e2da;
@@ -32,27 +27,22 @@
 }
 
 .dark {
-    /* 🧡 Primary: Vibrant Anthropic Coral */
     --color-primary: #ff5c35;
     --color-primary-hover: #ff7b5e;
     --color-primary-light: #ffd3c4;
     --color-primary-glow: rgba(255, 92, 53, 0.35);
 
-    /* 💛 Secondary: Vibrant Sunlit Gold */
     --color-secondary: #ffb830;
     --color-secondary-hover: #ffc75e;
     --color-secondary-light: #fff0d4;
     --color-secondary-glow: rgba(255, 184, 48, 0.35);
 
-    /* 💚 Accent: Vibrant Mint-Sage */
     --color-accent: #10b981;
     --color-accent-hover: #34d399;
     --color-accent-light: #d1fae5;
 
-    /* Deep Obsidian-Charcoal for Sidebar */
     --color-navbar-bg: #130f0c;
 
-    /* Dark Mode Layout backgrounds */
     --color-body-bg: #131313;
     --color-panel-bg: #291e1a;
     --color-border-subtle: #3d2924;
@@ -62,19 +52,15 @@
 
 @layer base {
     body {
-        font-family: "Inter", sans-serif;
+        font-family: "DM Sans", sans-serif;
     }
 
     code,
     pre {
-        font-family:
-            Fira Code,
-            "JetBrains Mono",
-            monospace;
+        font-family: "Source Code Pro", monospace;
     }
 }
 
-/* Custom gorgeous scrollbar for premium feeling */
 ::-webkit-scrollbar {
     width: 6px;
     height: 6px;
@@ -99,4 +85,13 @@
 
 .dark ::-webkit-scrollbar-thumb:hover {
     background: rgba(255, 255, 255, 0.2);
+}
+
+.force-graph-container canvas {
+    will-change: transform;
+    backface-visibility: hidden;
+}
+
+.force-graph-container {
+    transition: opacity 0.2s ease;
 }

@@ -794,8 +794,550 @@ fn test_chain_no_match_retains_record() {
     // No "responses" field should be present since there was no match
     assert!(
         parsed.get("responses").is_none(),
-        "Left join should not add nested field when no match exists"
+        "Left join should not add nested field when no match exists",
     );
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
+// ── Deletion Fix 2: Drop removes stream from set ──
+
+#[test]
+fn test_drop_removes_stream_from_set() {
+    use liven::executor::execute_query;
+    use liven::parser::parse_query;
+    use liven::storage::StorageEngine;
+    use liven::types::DataValue;
+
+    let path = std::env::temp_dir().join(format!(
+        "liven_drop_stream_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _ = std::fs::remove_dir_all(&path);
+    let engine = StorageEngine::new(&path, 1024 * 1024).unwrap();
+
+    engine
+        .append("logs", "k1", DataValue::String("hello".to_string()), false)
+        .unwrap();
+    engine
+        .append("logs", "k2", DataValue::String("world".to_string()), false)
+        .unwrap();
+
+    // Confirm stream exists
+    assert!(engine.list_streams().contains(&"logs".to_string()));
+
+    // Drop the stream
+    let q = parse_query(r#"drop("logs")"#).unwrap();
+    execute_query(&engine, &q).unwrap();
+
+    // Stream must no longer appear in streams()
+    assert!(
+        !engine.list_streams().contains(&"logs".to_string()),
+        "Dropped stream must not appear in list_streams"
+    );
+
+    // streams() query must not return it
+    let q2 = parse_query("streams()").unwrap();
+    let results = execute_query(&engine, &q2).unwrap();
+    assert!(
+        !results.iter().any(|r| r.key.as_str() == "logs"),
+        "streams() must not return dropped stream"
+    );
+
+    // empty() on the dropped stream must return an error
+    let q3 = parse_query(r#"from("logs").empty()"#).unwrap();
+    assert!(
+        execute_query(&engine, &q3).is_err(),
+        "empty() on dropped stream must fail"
+    );
+
+    // Re-inserting into the dropped stream must succeed and re-create it
+    let q4 = parse_query(r#"from("logs").insert("k3", {msg: "reborn"})"#).unwrap();
+    execute_query(&engine, &q4).unwrap();
+    assert!(
+        engine.list_streams().contains(&"logs".to_string()),
+        "Stream must reappear after re-insert"
+    );
+
+    let _ = std::fs::remove_dir_all(&path);
+}
+
+#[test]
+fn test_empty_retains_stream_in_set() {
+    use liven::executor::execute_query;
+    use liven::parser::parse_query;
+    use liven::storage::StorageEngine;
+    use liven::types::DataValue;
+
+    let path = std::env::temp_dir().join(format!(
+        "liven_empty_stream_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _ = std::fs::remove_dir_all(&path);
+    let engine = StorageEngine::new(&path, 1024 * 1024).unwrap();
+
+    engine
+        .append("events", "e1", DataValue::Int(1), false)
+        .unwrap();
+    engine
+        .append("events", "e2", DataValue::Int(2), false)
+        .unwrap();
+
+    let q = parse_query(r#"from("events").empty()"#).unwrap();
+    execute_query(&engine, &q).unwrap();
+
+    // Stream must still be in streams_set after empty()
+    assert!(
+        engine.list_streams().contains(&"events".to_string()),
+        "Empty must retain stream in list"
+    );
+
+    // Keys must be gone
+    assert!(
+        engine.list_keys("events").is_empty(),
+        "All keys must be removed after empty()"
+    );
+
+    let _ = std::fs::remove_dir_all(&path);
+}
+
+#[test]
+fn test_drop_frees_stream_slot() {
+    use liven::executor::execute_query;
+    use liven::parser::parse_query;
+    use liven::storage::StorageEngine;
+    use liven::types::DataValue;
+
+    let path = std::env::temp_dir().join(format!(
+        "liven_drop_slot_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _ = std::fs::remove_dir_all(&path);
+    let mut engine = StorageEngine::new(&path, 1024 * 1024).unwrap();
+    engine.set_max_streams(2);
+
+    // Fill stream slots
+    engine.append("s1", "k1", DataValue::Int(1), false).unwrap();
+    engine.append("s2", "k1", DataValue::Int(1), false).unwrap();
+
+    // Third stream must fail — at capacity
+    let err = engine.append("s3", "k1", DataValue::Int(1), false);
+    assert!(err.is_err(), "Should be at stream capacity");
+
+    // Drop s1
+    let q = parse_query(r#"drop("s1")"#).unwrap();
+    execute_query(&engine, &q).unwrap();
+
+    // Now s3 must succeed — slot was freed
+    engine
+        .append("s3", "k1", DataValue::Int(1), false)
+        .expect("Stream slot should be available after drop");
+
+    let _ = std::fs::remove_dir_all(&path);
+}
+
+// ── Deletion Fix 4: Null value record ──
+
+#[test]
+fn test_null_value_record_not_treated_as_tombstone() {
+    use liven::executor::execute_query;
+    use liven::parser::parse_query;
+    use liven::storage::StorageEngine;
+    use liven::types::DataValue;
+
+    let path = std::env::temp_dir().join(format!(
+        "liven_null_value_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _ = std::fs::remove_dir_all(&path);
+    let engine = StorageEngine::new(&path, 1024 * 1024).unwrap();
+
+    // Insert a record with an explicit null value (active record, not tombstone)
+    engine.append("data", "k1", DataValue::Null, false).unwrap();
+    engine
+        .append("data", "k2", DataValue::String("hello".to_string()), false)
+        .unwrap();
+
+    // Both records must be returned by a normal scan
+    let q = parse_query(r#"from("data")"#).unwrap();
+    let results = execute_query(&engine, &q).unwrap();
+    assert_eq!(
+        results.len(),
+        2,
+        "Null-value active record must appear in results"
+    );
+
+    // count() must return 2
+    let q2 = parse_query(r#"from("data") | count()"#).unwrap();
+    let results2 = execute_query(&engine, &q2).unwrap();
+    assert_eq!(results2[0].value, DataValue::UInt(2));
+
+    // Point lookup must find the null-value record
+    let found = engine.get("data", "k1").unwrap();
+    assert!(
+        found.is_some(),
+        "Null-value active record must be findable via get()"
+    );
+    assert_eq!(found.unwrap().value, DataValue::Null);
+
+    let _ = std::fs::remove_dir_all(&path);
+}
+
+// ── Deletion Fix 5: write_lock serialization ──
+
+#[test]
+fn test_delete_key_write_lock_serialization() {
+    use liven::executor::execute_query;
+    use liven::parser::parse_query;
+    use liven::storage::StorageEngine;
+    use liven::types::DataValue;
+    use std::sync::Arc;
+
+    let path = std::env::temp_dir().join(format!(
+        "liven_delete_race_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _ = std::fs::remove_dir_all(&path);
+    let engine = Arc::new(StorageEngine::new(&path, 1024 * 1024).unwrap());
+
+    // Insert initial record
+    engine
+        .append(
+            "test",
+            "k1",
+            DataValue::String("initial".to_string()),
+            false,
+        )
+        .unwrap();
+
+    // Spawn a thread that repeatedly upserts k1
+    let engine_write = engine.clone();
+    let write_handle = std::thread::spawn(move || {
+        for i in 0..100 {
+            let _ = engine_write.append(
+                "test",
+                "k1",
+                DataValue::String(format!("write_{}", i)),
+                false,
+            );
+            std::thread::yield_now();
+        }
+    });
+
+    // Concurrently delete k1 repeatedly
+    let engine_delete = engine.clone();
+    let delete_handle = std::thread::spawn(move || {
+        for _ in 0..100 {
+            let q = parse_query(r#"from("test").delete("k1")"#).unwrap();
+            let _ = execute_query(&engine_delete, &q);
+            std::thread::yield_now();
+        }
+    });
+
+    write_handle.join().unwrap();
+    delete_handle.join().unwrap();
+
+    // Database must be in a consistent state — no panic, no corruption
+    // The key may or may not exist depending on last operation
+    let final_state = engine.get("test", "k1").unwrap();
+    // Just verify no panic and the result is coherent
+    let in_skipmap = engine.skipmap.contains_key("test:k1");
+    match final_state {
+        Some(_) => assert!(in_skipmap, "If get() returns Some, key must be in SkipMap"),
+        None => assert!(
+            !in_skipmap,
+            "If get() returns None, key must not be in SkipMap"
+        ),
+    }
+
+    let _ = std::fs::remove_dir_all(&path);
+}
+
+// ── New filter operator tests ──
+
+#[test]
+fn test_contains_operator_execution() {
+    use liven::executor::compare_values;
+
+    let haystack = DataValue::String("authentication failed".to_string());
+    let needle = DataValue::String("failed".to_string());
+    assert!(compare_values(&haystack, Op::Contains, &needle));
+
+    let no_match = DataValue::String("success".to_string());
+    assert!(!compare_values(&haystack, Op::Contains, &no_match));
+
+    // non-string fallback
+    assert!(!compare_values(&DataValue::Int(42), Op::Contains, &needle));
+}
+
+#[test]
+fn test_endswith_operator_execution() {
+    use liven::executor::compare_values;
+
+    let val = DataValue::String("data.log".to_string());
+    let suffix = DataValue::String(".log".to_string());
+    assert!(compare_values(&val, Op::EndsWith, &suffix));
+
+    let no_match = DataValue::String(".txt".to_string());
+    assert!(!compare_values(&val, Op::EndsWith, &no_match));
+
+    // non-string fallback
+    assert!(!compare_values(
+        &DataValue::Bool(true),
+        Op::EndsWith,
+        &suffix
+    ));
+}
+
+#[test]
+fn test_between_operator_execution() {
+    use liven::executor::compare_values;
+
+    let val = DataValue::Int(250);
+    let bounds = DataValue::Array(vec![
+        DataValue::Int(100),
+        DataValue::Float(ordered_float::OrderedFloat(500.0)),
+    ]);
+    assert!(compare_values(&val, Op::Between, &bounds));
+
+    // below lower bound
+    let low_val = DataValue::Int(50);
+    assert!(!compare_values(&low_val, Op::Between, &bounds));
+
+    // above upper bound
+    let high_val = DataValue::UInt(600);
+    assert!(!compare_values(&high_val, Op::Between, &bounds));
+
+    // non-numeric value
+    let string_val = DataValue::String("hello".to_string());
+    assert!(!compare_values(&string_val, Op::Between, &bounds));
+
+    // bounds array not length 2
+    let bad_bounds = DataValue::Array(vec![DataValue::Int(1)]);
+    assert!(!compare_values(&val, Op::Between, &bad_bounds));
+}
+
+// ── Not filter expression ──
+
+#[test]
+fn test_not_filter_execution() {
+    let temp_dir = std::env::temp_dir().join(format!(
+        "liven_test_not_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let engine = StorageEngine::new(&temp_dir, 1024 * 1024).unwrap();
+
+    engine
+        .append(
+            "users",
+            "u1",
+            DataValue::String(r#"{"status": "active"}"#.to_string()),
+            false,
+        )
+        .unwrap();
+    engine
+        .append(
+            "users",
+            "u2",
+            DataValue::String(r#"{"status": "inactive"}"#.to_string()),
+            false,
+        )
+        .unwrap();
+    engine
+        .append(
+            "users",
+            "u3",
+            DataValue::String(r#"{"status": "active"}"#.to_string()),
+            false,
+        )
+        .unwrap();
+
+    // not status == "inactive" should return 2 records (u1, u3)
+    let results = execute_query(
+        &engine,
+        &parse_query(r#"from("users") | filter(not status == "inactive")"#).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(results.len(), 2);
+
+    // double negative: not not (status == "inactive") should return 1 record (u2)
+    let results = execute_query(
+        &engine,
+        &parse_query(r#"from("users") | filter(not not status == "inactive")"#).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(results.len(), 1);
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
+// ── Distinct stage ──
+
+#[test]
+fn test_distinct_execution() {
+    let temp_dir = std::env::temp_dir().join(format!(
+        "liven_test_distinct_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let engine = StorageEngine::new(&temp_dir, 1024 * 1024).unwrap();
+
+    engine
+        .append(
+            "events",
+            "e1",
+            DataValue::String(r#"{"type": "click", "user": "alice"}"#.to_string()),
+            false,
+        )
+        .unwrap();
+    engine
+        .append(
+            "events",
+            "e2",
+            DataValue::String(r#"{"type": "click", "user": "bob"}"#.to_string()),
+            false,
+        )
+        .unwrap();
+    engine
+        .append(
+            "events",
+            "e3",
+            DataValue::String(r#"{"type": "pageview", "user": "alice"}"#.to_string()),
+            false,
+        )
+        .unwrap();
+    engine
+        .append(
+            "events",
+            "e4",
+            DataValue::String(r#"{"type": "pageview", "user": "bob"}"#.to_string()),
+            false,
+        )
+        .unwrap();
+
+    // distinct(type) should return 2 records (first click, first pageview)
+    let results = execute_query(
+        &engine,
+        &parse_query(r#"from("events") | distinct(type)"#).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(results.len(), 2);
+
+    // distinct on a field that is the same for all records should return 1
+    let results = execute_query(
+        &engine,
+        &parse_query(r#"from("events") | filter(type == "click") | distinct(type)"#).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(results.len(), 1);
+
+    // distinct on stream name should deduplicate by stream (all from "events", so 1)
+    let results = execute_query(
+        &engine,
+        &parse_query(r#"from("events") | distinct(stream)"#).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(results.len(), 1);
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
+// ── Explain ──
+
+#[test]
+fn test_explain_execution() {
+    let temp_dir = std::env::temp_dir().join(format!(
+        "liven_test_explain_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let engine = StorageEngine::new(&temp_dir, 1024 * 1024).unwrap();
+
+    engine
+        .append(
+            "orders",
+            "k1",
+            DataValue::String(r#"{"amount": 100}"#.to_string()),
+            false,
+        )
+        .unwrap();
+    engine
+        .append(
+            "orders",
+            "k2",
+            DataValue::String(r#"{"amount": 200}"#.to_string()),
+            false,
+        )
+        .unwrap();
+
+    // explain a pipeline query (use bare identifiers to avoid escape issues in inner query)
+    let results = execute_query(
+        &engine,
+        &parse_query(r#"explain("from(orders) | filter(amount > 100)")"#).unwrap(),
+    )
+    .unwrap();
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].stream_name, "explain");
+
+    // Parse the JSON plan
+    if let DataValue::String(ref plan_str) = results[0].value {
+        let plan: serde_json::Value =
+            serde_json::from_str(plan_str).expect("Explain output should be valid JSON");
+        let steps = plan["steps"]
+            .as_array()
+            .expect("Plan should have steps array");
+        // step 0: scan, step 1: from, step 2: filter
+        assert!(steps.len() >= 3, "Should have scan + from + filter steps");
+        assert_eq!(steps[0]["stage"], "scan");
+        assert_eq!(steps[1]["stage"], "from");
+        assert_eq!(steps[2]["stage"], "filter");
+    } else {
+        panic!("Explain output should be DataValue::String");
+    }
+
+    // explain list streams
+    let results = execute_query(&engine, &parse_query(r#"explain("streams")"#).unwrap()).unwrap();
+    assert_eq!(results.len(), 1);
+    if let DataValue::String(ref plan_str) = results[0].value {
+        let plan: serde_json::Value = serde_json::from_str(plan_str).unwrap();
+        assert_eq!(plan["steps"][0]["stage"], "streams_set");
+    }
+
+    // explain an insert
+    let results = execute_query(
+        &engine,
+        &parse_query(r#"explain("from(orders).insert(k3, {amount: 300})")"#).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(results.len(), 1);
+    if let DataValue::String(ref plan_str) = results[0].value {
+        let plan: serde_json::Value = serde_json::from_str(plan_str).unwrap();
+        assert_eq!(plan["steps"][0]["stage"], "existence_check");
+        assert_eq!(plan["steps"][1]["stage"], "append");
+    }
 
     let _ = std::fs::remove_dir_all(&temp_dir);
 }

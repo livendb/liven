@@ -1,16 +1,13 @@
 #[cfg(feature = "server")]
 use liven::server;
 use liven::{storage, types::DataValue};
-use std::io::Write;
+
 use std::path::Path;
 use std::process::{Command, exit};
 #[cfg(feature = "server")]
 use std::sync::Arc;
 use std::{env, fs};
-#[cfg(feature = "server")]
-use tracing::info;
-#[cfg(feature = "server")]
-use tracing_subscriber::EnvFilter;
+use tracing::{info, warn};
 
 fn get_data_dir() -> String {
     if let Ok(config) = liven::config::AppConfig::load() {
@@ -45,13 +42,11 @@ fn print_usage() {
     println!("  liven vibe [--auth-key <value>] Start interactive TUI query shell");
     println!("  liven tail <stream>     Tail real-time records from a stream");
     println!("                         Options: [--format <text|json>] [--auth-key <value>]");
-    println!("  liven import            Import CSV or JSONL records into a stream");
+    println!("  liven import            Import JSONL or binary records");
+    println!("                         Options: --path <path> [--dry-run] [--auth-key <value>]");
+    println!("  liven export            Export stream records as JSONL or binary");
     println!(
-        "                         Options: --stream <name> --format <csv|jsonl> --path <path> [--auth-key <value>]"
-    );
-    println!("  liven export            Export stream records as CSV or JSONL");
-    println!(
-        "                         Options: [--stream <name>] --format <csv|jsonl> [--path <path>] [--auth-key <value>]"
+        "                         Options: [--stream <name> | --all] [--path <path>] [--auth-key <value>]"
     );
     println!(
         "  liven reset-key         Reset and remove all administrative credentials, generating a new root key"
@@ -89,7 +84,10 @@ pub fn is_server_running() -> bool {
 pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
 
+    info!("Starting Liven CLI with arguments: {:?}", args);
+
     if args.len() < 2 {
+        warn!("No command provided");
         print_usage();
         exit(1);
     }
@@ -246,14 +244,7 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
 
             let run_ui = !args.contains(&"--no-ui".to_string());
 
-            // Initialize tracing subscriber
-            tracing_subscriber::fmt()
-                .with_env_filter(
-                    EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
-                )
-                .init();
-
-            info!("⚡ Starting LIVEN Server...");
+            info!("Starting LIVEN Server...");
 
             let config = liven::config::AppConfig::load()
                 .map_err(|e| format!("Failed to load config: {}", e))?;
@@ -276,10 +267,15 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
 
             // Initialize StorageEngine with threshold from config
             let max_segment_size = config.storage.max_segment_size_mb * 1024 * 1024;
-            let engine = Arc::new(storage::StorageEngine::new(
-                data_directory,
-                max_segment_size as u64,
-            )?);
+            let mut engine = storage::StorageEngine::new(data_directory, max_segment_size as u64)?;
+
+            // Apply configuration limits
+            engine.set_max_streams(config.limits.max_concurrent_streams);
+            engine.set_max_index_ram_bytes(config.limits.max_index_ram_mb as u64 * 1024 * 1024);
+            engine.set_max_fds(config.limits.max_open_file_descriptors);
+            engine.set_max_scan_results(config.limits.max_scan_results);
+
+            let engine = Arc::new(engine);
 
             // Start embedded Axum web servers
             server::run_server(engine, config, run_ui).await?;
@@ -348,17 +344,6 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
         "status" => {
             if is_server_running() {
                 if let Ok(pid) = read_pid() {
-                    print!("\x1b[36m");
-                    println!(
-                        r#"
-                        _  __                 _        ____  ____
-                       | |/ /___  _ __   _ __| | __ _ |  _ \| __ )
-                       | ' // _ \| '_ \ / _` | |/ _` || | | |  _ \
-                       | . \ (_) | | | | (_| | | (_| || |_| | |_) |
-                       |_|\_\___/|_| |_|\__,_|_|\__,_||____/|____/
-"#
-                    );
-                    println!("\x1b[0m");
                     println!("\x1b[32m● LIVEN is running (PID: {})\x1b[0m", pid);
                     let (host, db_p, web_p) = match liven::config::AppConfig::load() {
                         Ok(cfg) => (cfg.server.host, cfg.server.db_port, cfg.server.webui_port),
@@ -367,6 +352,21 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                     println!("  Engine Host: {}", host);
                     println!("  Database Port: {}", db_p);
                     println!("  Web UI Port: {}", web_p);
+
+                    // Read and display status file if available
+                    let status_file = "liven.status";
+                    if let Ok(status_content) = fs::read_to_string(status_file) {
+                        for line in status_content.lines() {
+                            if let Some((key, value)) = line.split_once('=') {
+                                match key {
+                                    "connections" => println!("  Active Connections: {}", value),
+                                    "subscribers" => println!("  Broadcast Subscribers: {}", value),
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
+
                     if let Ok(meta) = fs::metadata(get_pid_file())
                         && let Ok(modified) = meta.modified()
                         && let Ok(duration) = modified.elapsed()
@@ -527,7 +527,7 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
             };
             let db_addr = format!("{}:{}", config.server.host, config.server.db_port);
             println!(
-                "⚡ Connecting to liven://{} and tailing stream '{}' in {} format...",
+                "Connecting to liven://{} and tailing stream '{}' in {} format...",
                 db_addr, stream_name, format
             );
             let client = if let Some(ref key) = auth_key {
@@ -585,34 +585,13 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
             exit(1);
         }
         "import" => {
-            let mut stream_name: Option<String> = None;
-            let mut format: Option<String> = None;
             let mut file_path: Option<String> = None;
+            let mut dry_run = false;
             let mut auth_key: Option<String> = None;
 
             let mut idx = 2;
             while idx < args.len() {
                 match args[idx].as_str() {
-                    "--stream" => {
-                        if idx + 1 < args.len() {
-                            stream_name = Some(args[idx + 1].clone());
-                            idx += 2;
-                        } else {
-                            println!("\x1b[31m❌ Error: --stream requires a stream name.\x1b[0m");
-                            exit(1);
-                        }
-                    }
-                    "--format" => {
-                        if idx + 1 < args.len() {
-                            format = Some(args[idx + 1].to_lowercase());
-                            idx += 2;
-                        } else {
-                            println!(
-                                "\x1b[31m❌ Error: --format requires 'csv' or 'jsonl'.\x1b[0m"
-                            );
-                            exit(1);
-                        }
-                    }
                     "--path" => {
                         if idx + 1 < args.len() {
                             file_path = Some(args[idx + 1].clone());
@@ -621,6 +600,10 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                             println!("\x1b[31m❌ Error: --path requires a file path.\x1b[0m");
                             exit(1);
                         }
+                    }
+                    "--dry-run" => {
+                        dry_run = true;
+                        idx += 1;
                     }
                     "--auth-key" | "-k" => {
                         if idx + 1 < args.len() {
@@ -637,27 +620,10 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
 
-            let stream_name = stream_name.unwrap_or_else(|| {
-                println!("\x1b[31m❌ Error: Missing required --stream <name> option.\x1b[0m");
-                exit(1);
-            });
-            let format = format.unwrap_or_else(|| {
-                println!("\x1b[31m❌ Error: Missing required --format <csv|jsonl> option.\x1b[0m");
-                exit(1);
-            });
-
             let file_path = file_path.unwrap_or_else(|| {
                 println!("\x1b[31m❌ Error: Missing required --path <path> option.\x1b[0m");
                 exit(1);
             });
-
-            if format != "csv" && format != "jsonl" {
-                println!(
-                    "\x1b[31m❌ Error: Invalid format '{}'. Choose 'csv' or 'jsonl'.\x1b[0m",
-                    format
-                );
-                exit(1);
-            }
 
             if !Path::new(&file_path).exists() {
                 println!(
@@ -666,11 +632,6 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                 );
                 exit(1);
             }
-
-            println!(
-                "Importing from '{}' into stream '{}' using format '{}'...",
-                file_path, stream_name, format
-            );
 
             let config = match liven::config::AppConfig::load() {
                 Ok(c) => c,
@@ -701,122 +662,133 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                 }
             };
 
-            let mut count = 0;
+            // Determine file format from extension
+            let path_obj = Path::new(&file_path);
+            let format = path_obj
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .map(|ext| ext.to_lowercase())
+                .unwrap_or_else(|| {
+                    println!("\x1b[31m❌ Error: Cannot determine format from file extension. Use .jsonl or .liven\x1b[0m");
+                    exit(1);
+                });
+
+            if format != "jsonl" && format != "liven" {
+                println!(
+                    "\x1b[31m❌ Error: Unsupported file format '{}'. Use .jsonl or .liven\x1b[0m",
+                    format
+                );
+                exit(1);
+            }
+
+            println!(
+                "Importing from '{}' (format: {}){}",
+                file_path,
+                format,
+                if dry_run { " — DRY RUN" } else { "" }
+            );
 
             if format == "jsonl" {
-                let file = fs::File::open(&file_path)?;
-                let reader = std::io::BufReader::new(file);
-                use std::io::BufRead;
-                let mut pairs: Vec<String> = vec![];
-
-                for line_res in reader.lines() {
-                    let line = line_res?;
-                    if line.trim().is_empty() {
-                        continue;
-                    }
-                    let parsed: serde_json::Value = serde_json::from_str(&line)?;
-
-                    let (key, payload) = if let serde_json::Value::Object(map) = &parsed {
-                        let k = if let Some(serde_json::Value::String(kv)) = map.get("key") {
-                            kv.clone()
-                        } else if let Some(serde_json::Value::String(id_v)) = map.get("id") {
-                            id_v.clone()
-                        } else if let Some(id_num) = map.get("id").and_then(|v| v.as_i64()) {
-                            id_num.to_string()
-                        } else {
-                            format!("import_{}", count + 1)
-                        };
-
-                        let v = if map.contains_key("value") {
-                            map.get("value").unwrap().clone()
-                        } else {
-                            parsed.clone()
-                        };
-                        (k, v)
-                    } else {
-                        (format!("import_{}", count + 1), parsed.clone())
+                // Validate the file first
+                let validation =
+                    match liven::import_export::validate_jsonl_file(Path::new(&file_path)) {
+                        Ok(report) => report,
+                        Err(e) => {
+                            println!("\x1b[31m❌ Validation failed: {}\x1b[0m", e);
+                            exit(1);
+                        }
                     };
 
-                    pairs.push(format!("[\"{}\", {}]", key, payload));
-                    count += 1;
-                }
-                let batch_str = pairs.join(",");
-                let query_str = format!("from(\"{}\").insert([{}])", stream_name, batch_str);
-                match client.query(&query_str).await {
-                    Ok(_) => {
+                println!("\nValidation results:");
+                println!("  Records found: {}", validation.record_count);
+                println!("  Streams referenced: {}", validation.streams.join(", "));
+
+                // Check for stream conflicts
+                let conflicts = match liven::import_export::check_stream_conflicts(
+                    &mut client,
+                    &validation.streams,
+                )
+                .await
+                {
+                    Ok(conflicts) => conflicts,
+                    Err(e) => {
+                        println!("\x1b[31m❌ Stream conflict check failed: {}\x1b[0m", e);
+                        exit(1);
+                    }
+                };
+
+                if !conflicts.is_empty() {
+                    println!("\n\x1b[31m❌ Stream conflicts detected:\x1b[0m");
+                    for stream in &conflicts {
+                        println!("  ✗ {}: EXISTS with data", stream);
+                    }
+                    println!("\nTo resolve conflicts:");
+                    for stream in &conflicts {
                         println!(
-                            "\x1b[32m✔ Successfully imported {} records into stream '{}'.\x1b[0m",
-                            count, stream_name
+                            "  - Drop stream '{}': liven query \"drop('{}')\"",
+                            stream, stream
+                        );
+                        println!(
+                            "  - Export existing: liven export --path {}_backup.jsonl --stream {}",
+                            stream, stream
                         );
                     }
+                    println!("  - Or remove records from file and retry");
+                    exit(1);
+                }
+
+                if dry_run {
+                    println!(
+                        "\n\x1b[32m✔ Dry run completed successfully. No data was written.\x1b[0m"
+                    );
+                    println!("\nTo perform the actual import, run:");
+                    println!("  liven import --path {}", file_path);
+                    exit(0);
+                }
+
+                // Perform the actual import
+                match liven::import_export::import_jsonl_file(&mut client, Path::new(&file_path))
+                    .await
+                {
+                    Ok(stats) => {
+                        println!(
+                            "\n\x1b[32m✔ Successfully imported {} records.\x1b[0m",
+                            stats.imported_count
+                        );
+                        if stats.skipped_count > 0 {
+                            println!("  Skipped: {}", stats.skipped_count);
+                        }
+                    }
                     Err(e) => {
-                        println!("\x1b[31m❌ Query failed: {}\x1b[0m", e);
+                        println!("\x1b[31m❌ Import failed: {}\x1b[0m", e);
                         exit(1);
                     }
                 }
             } else {
-                let mut rdr = csv::Reader::from_reader(fs::File::open(&file_path)?);
-                let headers = rdr.headers()?.clone();
-                let mut pairs: Vec<String> = vec![];
-
-                for result in rdr.records() {
-                    let record = result?;
-
-                    let mut key_idx = None;
-                    for (idx, h) in headers.iter().enumerate() {
-                        if h == "key" || h == "id" {
-                            key_idx = Some(idx);
-                            break;
-                        }
-                    }
-
-                    let key = if let Some(idx) = key_idx {
-                        record.get(idx).unwrap_or("").to_string()
-                    } else {
-                        format!("import_{}", count + 1)
-                    };
-
-                    let mut map = serde_json::Map::new();
-                    for (idx, h) in headers.iter().enumerate() {
-                        if Some(idx) == key_idx {
-                            continue;
-                        }
-                        let cell_val = record.get(idx).unwrap_or("");
-                        let json_val = if let Ok(n) = cell_val.parse::<i64>() {
-                            serde_json::Value::Number(n.into())
-                        } else if let Ok(f) = cell_val.parse::<f64>() {
-                            if let Some(num) = serde_json::Number::from_f64(f) {
-                                serde_json::Value::Number(num)
-                            } else {
-                                serde_json::Value::String(cell_val.to_string())
-                            }
-                        } else if let Ok(b) = cell_val.parse::<bool>() {
-                            serde_json::Value::Bool(b)
-                        } else if cell_val.starts_with('{') && cell_val.ends_with('}') {
-                            serde_json::from_str(cell_val)
-                                .unwrap_or(serde_json::Value::String(cell_val.to_string()))
-                        } else {
-                            serde_json::Value::String(cell_val.to_string())
-                        };
-
-                        map.insert(h.to_string(), json_val);
-                    }
-
-                    let payload = serde_json::Value::Object(map);
-                    pairs.push(format!("[\"{}\", {}]", key, payload));
-                    count += 1;
+                // binary format
+                if dry_run {
+                    println!(
+                        "\x1b[32m✔ Dry run completed successfully. No data was written.\x1b[0m"
+                    );
+                    println!("\nTo perform the actual import, run:");
+                    println!("  liven import --path {}", file_path);
+                    exit(0);
                 }
-                let batch_str = pairs.join(",");
-                let query_str = format!("from(\"{}\").insert([{}])", stream_name, batch_str);
-                match client.query(&query_str).await {
-                    Ok(_) => {
+
+                match liven::import_export::import_binary_file(&mut client, Path::new(&file_path))
+                    .await
+                {
+                    Ok(stats) => {
                         println!(
-                            "\x1b[32m✔ Successfully imported {} records into stream '{}'.\x1b[0m",
-                            count, stream_name
+                            "\n\x1b[32m✔ Successfully imported {} records.\x1b[0m",
+                            stats.imported_count
                         );
+                        if stats.skipped_count > 0 {
+                            println!("  Skipped: {}", stats.skipped_count);
+                        }
                     }
                     Err(e) => {
-                        println!("\x1b[31m❌ Query failed: {}\x1b[0m", e);
+                        println!("\x1b[31m❌ Import failed: {}\x1b[0m", e);
                         exit(1);
                     }
                 }
@@ -824,8 +796,8 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
         }
         "export" => {
             let mut stream_name: Option<String> = None;
-            let mut format: Option<String> = None;
             let mut file_path: Option<String> = None;
+            let mut all_streams = false;
             let mut auth_key: Option<String> = None;
 
             let mut idx = 2;
@@ -840,17 +812,6 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                             exit(1);
                         }
                     }
-                    "--format" => {
-                        if idx + 1 < args.len() {
-                            format = Some(args[idx + 1].to_lowercase());
-                            idx += 2;
-                        } else {
-                            println!(
-                                "\x1b[31m❌ Error: --format requires 'csv' or 'jsonl'.\x1b[0m"
-                            );
-                            exit(1);
-                        }
-                    }
                     "--path" => {
                         if idx + 1 < args.len() {
                             file_path = Some(args[idx + 1].clone());
@@ -859,6 +820,10 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                             println!("\x1b[31m❌ Error: --path requires a file path.\x1b[0m");
                             exit(1);
                         }
+                    }
+                    "--all" => {
+                        all_streams = true;
+                        idx += 1;
                     }
                     "--auth-key" | "-k" => {
                         if idx + 1 < args.len() {
@@ -875,16 +840,13 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
 
-            let format = format.unwrap_or_else(|| {
-                println!("\x1b[31m❌ Error: Missing required --format <csv|jsonl> option.\x1b[0m");
+            if stream_name.is_none() && !all_streams {
+                println!("\x1b[31m❌ Error: Must specify either --stream <name> or --all.\x1b[0m");
                 exit(1);
-            });
+            }
 
-            if format != "csv" && format != "jsonl" {
-                println!(
-                    "\x1b[31m❌ Error: Invalid format '{}'. Choose 'csv' or 'jsonl'.\x1b[0m",
-                    format
-                );
+            if stream_name.is_some() && all_streams {
+                println!("\x1b[31m❌ Error: Cannot specify both --stream and --all.\x1b[0m");
                 exit(1);
             }
 
@@ -976,7 +938,7 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                         let extension = path_obj
                             .extension()
                             .and_then(|e| e.to_str())
-                            .unwrap_or(&format);
+                            .unwrap_or("jsonl");
                         parent
                             .join(format!("{}_{}.{}", file_stem, target_stream, extension))
                             .to_string_lossy()
@@ -989,68 +951,70 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                         ".".to_string()
                     };
                     let _ = fs::create_dir_all(&download_dir);
-                    format!(
-                        "{}/{}_{}.{}",
-                        download_dir, target_stream, timestamp, format
-                    )
+                    format!("{}/{}_{}.jsonl", download_dir, target_stream, timestamp)
                 };
+
+                // Determine format from file extension
+                let path_obj = Path::new(&stream_file_path);
+                let format = path_obj
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .map(|ext| ext.to_lowercase())
+                    .unwrap_or_else(|| "jsonl".to_string());
+
+                if format != "jsonl" && format != "liven" {
+                    println!(
+                        "\x1b[31m❌ Error: Unsupported export format '{}'. Use .jsonl or .liven\x1b[0m",
+                        format
+                    );
+                    exit(1);
+                }
 
                 println!(
                     "Exporting stream '{}' data to '{}' in '{}' format...",
                     target_stream, stream_file_path, format
                 );
 
-                let query_str = format!("from(\"{}\")", target_stream);
-                let filtered_records = match client.query(&query_str).await {
-                    Ok(recs) => recs,
-                    Err(e) => {
-                        println!(
-                            "\x1b[31m❌ Failed to query stream '{}': {}\x1b[0m",
-                            target_stream, e
-                        );
-                        exit(1);
-                    }
-                };
-
                 if format == "jsonl" {
-                    let mut file = fs::File::create(&stream_file_path)?;
-                    for r in &filtered_records {
-                        let val_json = match &r.value {
-                            DataValue::String(s) => serde_json::from_str::<serde_json::Value>(s)
-                                .unwrap_or(serde_json::Value::String(s.clone())),
-                            other => serde_json::to_value(other).unwrap_or(serde_json::Value::Null),
-                        };
-                        let line_obj = serde_json::json!({
-                            "sequence_id": r.sequence_id,
-                            "timestamp": r.timestamp,
-                            "key": r.key,
-                            "value": val_json,
-                        });
-                        writeln!(file, "{}", line_obj)?;
+                    match liven::import_export::export_jsonl_file(
+                        &mut client,
+                        target_stream,
+                        Path::new(&stream_file_path),
+                    )
+                    .await
+                    {
+                        Ok(count) => {
+                            println!(
+                                "\x1b[32m✔ Successfully exported {} records to {}.\x1b[0m",
+                                count, stream_file_path
+                            );
+                        }
+                        Err(e) => {
+                            println!("\x1b[31m❌ Export failed: {}\x1b[0m", e);
+                            exit(1);
+                        }
                     }
                 } else {
-                    let mut writer = csv::Writer::from_writer(fs::File::create(&stream_file_path)?);
-                    writer.write_record(["sequence_id", "timestamp", "key", "value"])?;
-                    for r in &filtered_records {
-                        let val_str = match &r.value {
-                            DataValue::String(s) => s.clone(),
-                            other => other.to_string(),
-                        };
-                        writer.write_record([
-                            r.sequence_id.to_string(),
-                            r.timestamp.to_string(),
-                            r.key.to_string(),
-                            val_str,
-                        ])?;
+                    // binary format
+                    match liven::import_export::export_binary_file(
+                        &mut client,
+                        target_stream,
+                        Path::new(&stream_file_path),
+                    )
+                    .await
+                    {
+                        Ok(count) => {
+                            println!(
+                                "\x1b[32m✔ Successfully exported {} records to {}.\x1b[0m",
+                                count, stream_file_path
+                            );
+                        }
+                        Err(e) => {
+                            println!("\x1b[31m❌ Export failed: {}\x1b[0m", e);
+                            exit(1);
+                        }
                     }
-                    writer.flush()?;
                 }
-
-                println!(
-                    "\x1b[32m✔ Successfully exported {} records to {}.\x1b[0m",
-                    filtered_records.len(),
-                    stream_file_path
-                );
             }
         }
         _ => {

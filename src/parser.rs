@@ -14,15 +14,51 @@ use ordered_float::OrderedFloat;
 
 /// Parses a full query pipeline into a vector of stages.
 /// Example input: `from("logs") | filter(status == "error") | limit(10)`
+fn split_pipeline_stages(input: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut depth_paren: i32 = 0;
+    let mut depth_bracket: i32 = 0;
+    let mut depth_brace: i32 = 0;
+    let mut in_quotes = false;
+    let mut last = 0;
+    let bytes = input.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let c = bytes[i] as char;
+        if c == '"' && !in_quotes {
+            in_quotes = true;
+        } else if c == '"' && in_quotes {
+            in_quotes = false;
+        } else if !in_quotes {
+            match c {
+                '(' => depth_paren += 1,
+                ')' => depth_paren -= 1,
+                '[' => depth_bracket += 1,
+                ']' => depth_bracket -= 1,
+                '{' => depth_brace += 1,
+                '}' => depth_brace -= 1,
+                '|' if depth_paren == 0 && depth_bracket == 0 && depth_brace == 0 => {
+                    parts.push(input[last..i].trim());
+                    last = i + 1;
+                }
+                _ => {}
+            }
+        }
+        i += 1;
+    }
+    parts.push(input[last..].trim());
+    parts
+}
+
 pub fn parse_pipeline(input: &str) -> Result<Vec<PipelineStage>, String> {
     let trimmed = input.trim();
     if trimmed.is_empty() {
         return Ok(Vec::new());
     }
 
-    // Split by pipe '|' and parse each stage
+    // Split by pipe '|' (quote/bracket-aware) and parse each stage
     let mut stages = Vec::new();
-    let parts: Vec<&str> = trimmed.split('|').collect();
+    let parts = split_pipeline_stages(trimmed);
 
     for part in parts {
         let part_trimmed = part.trim();
@@ -70,6 +106,7 @@ fn parse_stage(input: &str) -> IResult<&str, PipelineStage> {
         parse_correlate_stage,
         parse_sequence_stage,
         parse_chain_stage,
+        parse_distinct_stage,
         parse_get_stage,
         parse_count_stage,
         parse_sort_stage,
@@ -198,9 +235,45 @@ fn parse_tag_and(input: &str) -> IResult<&str, &str> {
 
 fn parse_string_literal(input: &str) -> IResult<&str, String> {
     let (input, _) = char('"')(input)?;
-    let (input, content) = take_while(|c| c != '"')(input)?;
-    let (input, _) = char('"')(input)?;
-    Ok((input, content.to_string()))
+    let mut result = String::new();
+    let mut chars = input.char_indices().peekable();
+    let mut end_byte = 0;
+    let mut closed = false;
+
+    while let Some((i, c)) = chars.next() {
+        match c {
+            '\\' => {
+                if let Some((_, escaped)) = chars.next() {
+                    match escaped {
+                        '"' => result.push('"'),
+                        '\\' => result.push('\\'),
+                        'n' => result.push('\n'),
+                        't' => result.push('\t'),
+                        'r' => result.push('\r'),
+                        other => {
+                            result.push('\\');
+                            result.push(other);
+                        }
+                    }
+                }
+            }
+            '"' => {
+                end_byte = i;
+                closed = true;
+                break;
+            }
+            _ => result.push(c),
+        }
+    }
+
+    if !closed {
+        return Err(nom::Err::Error(nom::error::Error::new(
+            input,
+            nom::error::ErrorKind::Char,
+        )));
+    }
+
+    Ok((&input[end_byte + 1..], result))
 }
 
 fn parse_identifier(input: &str) -> IResult<&str, String> {
@@ -310,8 +383,21 @@ fn parse_and_expr(input: &str) -> IResult<&str, FilterExpr> {
     Ok((input, left))
 }
 
+fn parse_not_expr(input: &str) -> IResult<&str, FilterExpr> {
+    let (input, _) = tag("not")(input)?;
+    let (input, _) = multispace0(input)?;
+    let (input, expr) = parse_primary_expr(input)?;
+    Ok((
+        input,
+        FilterExpr::Not {
+            expr: Box::new(expr),
+        },
+    ))
+}
+
 fn parse_primary_expr(input: &str) -> IResult<&str, FilterExpr> {
     alt((
+        parse_not_expr,
         delimited(char('('), ws(parse_filter_expr), char(')')),
         parse_simple_filter_expr,
     ))(input)
@@ -340,6 +426,9 @@ fn parse_op(input: &str) -> IResult<&str, Op> {
         value(Op::Lt, tag("<")),
         value(Op::In, tag("in")),
         value(Op::StartsWith, tag("startsWith")),
+        value(Op::Contains, tag("contains")),
+        value(Op::EndsWith, tag("endsWith")),
+        value(Op::Between, tag("between")),
     ))(input)
 }
 
@@ -369,23 +458,37 @@ fn parse_number(input: &str) -> IResult<&str, DataValue> {
     let (input, decimal) = opt(preceded(char('.'), digit1))(input)?;
 
     let is_negative = sign.is_some();
+    let neg_str = if is_negative { "-" } else { "" };
 
     if let Some(dec) = decimal {
-        let val_str = format!("{}{}.{}", if is_negative { "-" } else { "" }, whole, dec);
-        let val: f64 = val_str.parse().unwrap();
+        let val_str = format!("{}{}.{}", neg_str, whole, dec);
+        let val = val_str.parse::<f64>().map_err(|_| {
+            nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Float))
+        })?;
         Ok((input, DataValue::Float(OrderedFloat(val))))
     } else {
-        let val_str = format!("{}{}", if is_negative { "-" } else { "" }, whole);
+        let val_str = format!("{}{}", neg_str, whole);
         if is_negative {
-            let val: i64 = val_str.parse().unwrap();
+            let val = val_str.parse::<i64>().map_err(|_| {
+                nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Digit))
+            })?;
             Ok((input, DataValue::Int(val)))
         } else if let Ok(val) = val_str.parse::<u64>() {
             Ok((input, DataValue::UInt(val)))
         } else {
-            let val: i64 = val_str.parse().unwrap();
+            let val = val_str.parse::<i64>().map_err(|_| {
+                nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Digit))
+            })?;
             Ok((input, DataValue::Int(val)))
         }
     }
+}
+
+/// Parses `distinct(field)` or `distinct("field")`
+fn parse_distinct_stage(input: &str) -> IResult<&str, PipelineStage> {
+    let (input, _) = tag("distinct")(input)?;
+    let (input, field) = delimited(char('('), ws(parse_string_or_ident), char(')'))(input)?;
+    Ok((input, PipelineStage::Distinct { field }))
 }
 
 // Parses `map(field1, field2, ...)`
@@ -505,10 +608,41 @@ fn parse_correlate_stage(input: &str) -> IResult<&str, PipelineStage> {
     ))
 }
 
+fn extract_balanced_parens(input: &str) -> IResult<&str, &str> {
+    // Start at depth 1 because the caller (parse_sequence_stage) has already consumed
+    // the opening '(' of the sequence(...) call. Returning (depth == -1) below finds
+    // the closing ')' that matches that outer opening paren.
+    let mut depth: i32 = 1;
+    let mut in_quotes = false;
+    for (i, c) in input.char_indices() {
+        if c == '"' {
+            in_quotes = !in_quotes;
+        } else if !in_quotes {
+            match c {
+                '(' => depth += 1,
+                ')' => {
+                    if depth == 1 {
+                        return Ok((&input[i..], &input[..i]));
+                    }
+                    depth -= 1;
+                }
+                _ => {}
+            }
+        }
+    }
+    Err(nom::Err::Error(nom::error::Error::new(
+        input,
+        nom::error::ErrorKind::TakeWhile1,
+    )))
+}
+
 /// Parses `sequence(filter_expr, then: filter_expr, ..., within: ms)`
 fn parse_sequence_stage(input: &str) -> IResult<&str, PipelineStage> {
     let (input, _) = tag("sequence")(input)?;
-    let (input, contents) = delimited(char('('), ws(take_while(|c| c != ')')), char(')'))(input)?;
+    let (input, _) = char('(')(input)?;
+    let (input, contents) = extract_balanced_parens(input)?;
+    let (input, _) = char(')')(input)?;
+    let contents = contents.trim();
 
     // Split contents by top-level commas (respecting parentheses nesting for filter expressions)
     let mut parts = Vec::new();
@@ -707,6 +841,23 @@ pub fn parse_query(input: &str) -> Result<Query, String> {
     let trimmed = input.trim();
     if trimmed.is_empty() {
         return Err("Empty query".to_string());
+    }
+
+    // explain("...") or explain('...')
+    if trimmed.starts_with("explain(") && trimmed.ends_with(')') {
+        let inner_str = trimmed["explain(".len()..trimmed.len() - 1].trim();
+        // Strip surrounding quotes if present
+        let query_str = if (inner_str.starts_with('"') && inner_str.ends_with('"'))
+            || (inner_str.starts_with('\'') && inner_str.ends_with('\''))
+        {
+            &inner_str[1..inner_str.len() - 1]
+        } else {
+            inner_str
+        };
+        let inner_query = parse_query(query_str)?;
+        return Ok(Query::Explain {
+            inner_query: Box::new(inner_query),
+        });
     }
 
     if trimmed == "streams"

@@ -6,7 +6,6 @@ import {
   Trash2,
   Zap,
   RefreshCw,
-  Sliders,
 } from "lucide-react";
 import { Metrics, ActivityLog } from "../types";
 import { formatBytes, dbPort as defaultDbPort } from "../utils/api";
@@ -24,7 +23,6 @@ export interface DashboardProps {
   setActivityFilter: (
     filter: "all" | "storage" | "query" | "stream" | "server",
   ) => void;
-  handleCompaction: () => Promise<void>;
   dbPort?: string;
   webuiPort?: string;
   resolvedTheme: "light" | "dark";
@@ -40,7 +38,6 @@ export default function Dashboard({
   queryChart,
   activityFilter,
   setActivityFilter,
-  handleCompaction,
   dbPort = defaultDbPort,
   webuiPort,
   resolvedTheme,
@@ -242,8 +239,7 @@ export default function Dashboard({
                 let levelText =
                   "text-zinc-500 dark:text-zinc-400 font-mono text-[10px]";
                 if (act.type === "success") {
-                  levelText =
-                    "text-accent font-mono text-[10px]";
+                  levelText = "text-accent font-mono text-[10px]";
                 } else if (act.type === "warn") {
                   levelText =
                     "text-amber-500 dark:text-amber-400 font-mono text-[10px]";
@@ -281,15 +277,14 @@ export default function Dashboard({
       </div>
 
       {/* LOG COMPACTION & SYSTEM SPECS */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* Defragmentation */}
-        <div className="bg-white dark:bg-zinc-900 p-6 rounded-md md:col-span-1 flex flex-col justify-between space-y-4">
+      <div className="grid grid-cols-1 md:grid-cols-1 gap-6">
+        {/* System specs */}
+        <div className="bg-white dark:bg-zinc-900 p-6 rounded-md md:col-span-2">
+          <h4 className="font-semibold text-zinc-900 dark:text-zinc-100 mb-4">
+            System Status
+          </h4>
           <div>
-            <h4 className="font-semibold text-zinc-900 dark:text-zinc-100 mb-2">
-              Defragmentation & Compaction
-            </h4>
-
-            <div className="grid grid-cols-3 gap-3 mb-4 bg-zinc-50/50 dark:bg-zinc-900/40 p-3 rounded border border-zinc-500/5 text-xs font-mono">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4 bg-zinc-50/50 dark:bg-zinc-900/40 p-3 rounded border border-zinc-500/5 text-xs font-mono">
               <div>
                 <span className="block text-[10px] text-zinc-400 font-medium  tracking-wider">
                   Segments
@@ -319,23 +314,22 @@ export default function Dashboard({
                     : "0"}
                 </span>
               </div>
+              <div>
+                <span className="block text-[10px] text-zinc-400 font-medium  tracking-wider">
+                  Compaction
+                </span>
+                <div className="flex items-center gap-1.5 text-xs font-mono font-medium text-zinc-650 dark:text-zinc-350  px-2 py-0.5 rounded w-fit">
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full ${wsConnected ? "bg-accent animate-pulse" : "bg-rose-500"}`}
+                  />
+                  <span>
+                    {wsConnected ? "Auto Compaction: ACTIVE" : "Offline"}
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
-          <button
-            onClick={handleCompaction}
-            className="w-full py-2.5 px-4 rounded bg-orange-700 text-white text-sm font-bold transition-all active:scale-[0.98] flex items-center justify-center gap-2 "
-          >
-            <Sliders className="w-4 h-4" />
-            Defragment & Compact Logs
-          </button>
-        </div>
-
-        {/* System specs */}
-        <div className="bg-white dark:bg-zinc-900 p-6 rounded-md md:col-span-2">
-          <h4 className="font-semibold text-zinc-900 dark:text-zinc-100 mb-4">
-            System Status
-          </h4>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
             {/* Card 1: Concurrency */}
             <div className="p-4 rounded bg-zinc-50/30 dark:bg-[#121214]/30 border border-zinc-500/5 flex flex-col justify-between space-y-3">
               <div className="flex items-start gap-3">
@@ -371,7 +365,7 @@ export default function Dashboard({
                     Integrity Checking
                   </span>
                   <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-0.5">
-                    CRC32 Engine: Active & Verifying
+                    Checksum status: Active & Verifying
                   </p>
                 </div>
               </div>

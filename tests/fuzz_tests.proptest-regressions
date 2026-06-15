@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc e8d2f103779469b1fce95267d5e0f62c0bf47e739b260223af8af68f0ee82122 # shrinks to stream = "a", key = "a", value = Vector([])

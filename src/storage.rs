@@ -1,3 +1,4 @@
+use crate::error::LivenError;
 use crate::types::{DataValue, LogPointer, Record};
 use crossbeam_skiplist::SkipMap;
 use fs2::FileExt;
@@ -11,8 +12,18 @@ use std::time::SystemTime;
 use tokio::sync::broadcast;
 use tracing::{error, info, warn};
 
+#[allow(unsafe_code)]
 pub mod key;
 pub mod ring_buffer;
+pub mod timestamp_index;
+
+/// # Safety
+/// This module contains unsafe blocks for pointer reinterpretation when handling
+/// vector data types. The unsafe operations are sound because:
+/// - i8 and u8 have identical size, alignment, and bit layout
+/// - Unsafe slices are immediately copied into owned allocations and do not escape
+/// - All pointer arithmetic is bounds-checked against the original buffer length
+/// - The resulting DataValue variants do not borrow from the original payload
 
 pub trait PositionalReader {
     fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> std::io::Result<()>;
@@ -70,7 +81,17 @@ pub struct StorageEngine {
     pub broadcast_capacity: usize,
     pub conn_semaphore: Arc<tokio::sync::Semaphore>,
     compaction_counter: Arc<AtomicU64>,
+    pub compaction_threshold_segments: usize,
+    pub compaction_threshold_bytes: u64,
+    /// Serialises operations that do a read-check-then-write.
+    /// Held by: InsertBatch, DeleteKey, PipelineDelete (full scan path),
+    /// PipelineUpdate. NOT held by single Insert or Upsert (last-writer-wins).
     pub write_lock: Arc<Mutex<()>>,
+    pub timestamp_indexes: Arc<Mutex<HashMap<String, Arc<timestamp_index::TimestampIndex>>>>,
+    /// Handle to the background flusher thread for clean shutdown coordination.
+    flusher_handle: Option<std::thread::JoinHandle<()>>,
+    /// Maximum number of records to return from a full scan operation.
+    max_scan_results: usize,
 }
 
 use std::cell::RefCell;
@@ -78,12 +99,13 @@ use std::cell::RefCell;
 thread_local! {
     static SERIALIZATION_BUFFER: RefCell<Vec<u8>> = RefCell::new(Vec::with_capacity(4096));
     static READ_STAGING_BUFFER: RefCell<Vec<u8>> = RefCell::new(Vec::with_capacity(4096));
+    static FRAME_BUFFER: RefCell<Vec<u8>> = RefCell::new(Vec::with_capacity(256 * 1024));
 }
 
 impl StorageEngine {
-    pub fn new<P: AsRef<Path>>(data_dir: P, max_segment_size: u64) -> Result<Self, String> {
+    pub fn new<P: AsRef<Path>>(data_dir: P, max_segment_size: u64) -> crate::error::Result<Self> {
         let path = data_dir.as_ref().to_path_buf();
-        fs::create_dir_all(&path).map_err(|e| e.to_string())?;
+        fs::create_dir_all(&path).map_err(LivenError::Io)?;
 
         // Standalone defaults — no file system read from liven.toml.
         // The server binary calls set_max_streams, set_max_index_ram_bytes,
@@ -96,6 +118,7 @@ impl StorageEngine {
         let max_streams: usize = 32;
         let max_fds: usize = 64;
         let max_index_ram_bytes: u64 = 16 * 1024 * 1024;
+        let max_scan_results: usize = 100_000;
 
         let conn_semaphore = Arc::new(tokio::sync::Semaphore::new(max_connections));
         let (broadcast_tx, _) = broadcast::channel(broadcast_capacity);
@@ -115,8 +138,13 @@ impl StorageEngine {
         let streams_set = Arc::new(Mutex::new(HashSet::new()));
         let compaction_counter = Arc::new(AtomicU64::new(u64::MAX / 2));
         let write_lock = Arc::new(Mutex::new(()));
+        // Auto-compaction defaults: trigger after 4 inactive segments or 64 MB of inactive data
+        // These can be overridden via config or LivenConfig before the engine is used.
+        let compaction_threshold_segments = 4;
+        let compaction_threshold_bytes = 64 * 1024 * 1024;
+        let timestamp_indexes = Arc::new(Mutex::new(HashMap::new()));
 
-        let engine = Self {
+        let mut engine = Self {
             data_dir: path,
             max_segment_size,
             current_sequence_id: current_sequence_id.clone(),
@@ -139,7 +167,12 @@ impl StorageEngine {
             broadcast_capacity,
             conn_semaphore,
             compaction_counter: compaction_counter.clone(),
+            compaction_threshold_segments,
+            compaction_threshold_bytes,
             write_lock: write_lock.clone(),
+            timestamp_indexes: timestamp_indexes.clone(),
+            flusher_handle: None,
+            max_scan_results,
         };
 
         engine.recover()?;
@@ -156,8 +189,9 @@ impl StorageEngine {
         let flusher_sync_mode = sync_mode.clone();
         let flusher_running = is_running.clone();
         let flusher_index_ram_bytes = index_ram_bytes.clone();
+        let flusher_timestamp_indexes = engine.timestamp_indexes.clone();
 
-        std::thread::spawn(move || {
+        let flusher_handle = std::thread::spawn(move || {
             run_flusher_loop(
                 rx,
                 flusher_data_dir,
@@ -172,8 +206,11 @@ impl StorageEngine {
                 flusher_sync_mode,
                 flusher_running,
                 flusher_index_ram_bytes,
+                flusher_timestamp_indexes,
             );
         });
+
+        engine.flusher_handle = Some(flusher_handle);
 
         if sync_mode == "periodic" {
             let active_file_clone = active_file;
@@ -200,6 +237,11 @@ impl StorageEngine {
         self.broadcast_tx.subscribe()
     }
 
+    /// Get the number of active broadcast subscribers
+    pub fn broadcast_subscriber_count(&self) -> usize {
+        self.broadcast_tx.receiver_count()
+    }
+
     pub fn with_broadcast_capacity(mut self, capacity: usize) -> Self {
         self.broadcast_capacity = capacity;
         self
@@ -221,7 +263,7 @@ impl StorageEngine {
         self.data_dir.join(format!("{:020}.liven", segment_id))
     }
 
-    fn get_or_load_file_handle(&self, segment_id: u64) -> Result<Arc<File>, String> {
+    fn get_or_load_file_handle(&self, segment_id: u64) -> crate::error::Result<Arc<File>> {
         let mut handles_guard = self.file_handles.lock().unwrap();
         if let Some(file_ref) = handles_guard.get(&segment_id) {
             return Ok(file_ref.clone());
@@ -237,7 +279,7 @@ impl StorageEngine {
         }
 
         let path = self.segment_path(segment_id);
-        let file = File::open(&path).map_err(|e| format!("Failed to open segment file: {}", e))?;
+        let file = File::open(&path).map_err(LivenError::Io)?;
         let file_ref = Arc::new(file);
 
         handles_guard.insert(segment_id, file_ref.clone());
@@ -245,11 +287,11 @@ impl StorageEngine {
     }
 
     /// Scans the directory and rebuilds the concurrent SkipMap index
-    fn recover(&self) -> Result<(), String> {
+    fn recover(&self) -> crate::error::Result<()> {
         let mut segments = Vec::new();
 
-        for entry in fs::read_dir(&self.data_dir).map_err(|e| e.to_string())? {
-            let entry = entry.map_err(|e| e.to_string())?;
+        for entry in fs::read_dir(&self.data_dir).map_err(LivenError::Io)? {
+            let entry = entry.map_err(LivenError::Io)?;
             let path = entry.path();
             if path.is_file()
                 && path.extension().and_then(|s| s.to_str()) == Some("liven")
@@ -267,20 +309,17 @@ impl StorageEngine {
 
         for (segment_id, path) in &segments {
             active_id = *segment_id;
-            let mut file =
-                File::open(path).map_err(|e| format!("Failed to open segment: {}", e))?;
+            let mut file = File::open(path).map_err(LivenError::Io)?;
             // Coop locking
-            file.lock_shared()
-                .map_err(|e| format!("Failed to lock segment: {}", e))?;
+            file.lock_shared().map_err(LivenError::Io)?;
 
-            let file_len = file.metadata().map_err(|e| e.to_string())?.len();
+            let file_len = file.metadata().map_err(LivenError::Io)?.len();
             let mut offset = 0;
 
             let mut header_buf = [0u8; 26];
 
             while offset + 26 <= file_len {
-                file.seek(SeekFrom::Start(offset))
-                    .map_err(|e| e.to_string())?;
+                file.seek(SeekFrom::Start(offset)).map_err(LivenError::Io)?;
                 if file.read_exact(&mut header_buf).is_err() {
                     break;
                 }
@@ -305,7 +344,7 @@ impl StorageEngine {
                     header_buf[14],
                     header_buf[15],
                 ]);
-                let _type_tag = header_buf[16];
+                let type_tag = header_buf[16];
                 let flags = header_buf[17];
                 let payload_len = u32::from_be_bytes([
                     header_buf[18],
@@ -329,8 +368,7 @@ impl StorageEngine {
                 }
 
                 let mut payload_buf = vec![0u8; payload_len as usize];
-                file.read_exact(&mut payload_buf)
-                    .map_err(|e| e.to_string())?;
+                file.read_exact(&mut payload_buf).map_err(LivenError::Io)?;
 
                 // Verify integrity
                 let actual_crc = crc32fast::hash(&payload_buf);
@@ -339,61 +377,79 @@ impl StorageEngine {
                         "CRC32 checksum mismatch in segment {} at offset {}. Data corruption!",
                         segment_id, offset
                     );
-                    return Err(format!(
-                        "Data corruption in segment {} at offset {}",
-                        segment_id, offset
-                    ));
+                    return Err(LivenError::CrcMismatch {
+                        segment_id: *segment_id,
+                        offset,
+                    });
                 }
 
                 // Decode payload to extract stream name and key
-                match deserialize_payload(&payload_buf) {
+                // Use actual type_tag from header, not hardcoded 0x02,
+                // so vector records (type_tag = 8) are parsed correctly.
+                match deserialize_payload_borrowed(&payload_buf, type_tag) {
                     Ok((stream_name, key, _value)) => {
                         let compound_key = format!("{}:{}", stream_name, key);
                         if seq_id > highest_seq {
                             highest_seq = seq_id;
                         }
 
-                        {
-                            let mut streams_guard = self.streams_set.lock().unwrap();
-                            streams_guard.insert(stream_name.clone());
-                            if streams_guard.len() > self.max_streams {
-                                return Err(format!(
-                                    "Stream limit exceeded during recovery: unique streams count {} exceeds max_concurrent_streams {}",
-                                    streams_guard.len(),
-                                    self.max_streams
-                                ));
-                            }
-                        }
+                        let _timestamp = i64::from_be_bytes([
+                            header_buf[8],
+                            header_buf[9],
+                            header_buf[10],
+                            header_buf[11],
+                            header_buf[12],
+                            header_buf[13],
+                            header_buf[14],
+                            header_buf[15],
+                        ]);
 
                         let node_overhead = compound_key.len() as u64 + 64;
                         if flags & 0x02 != 0 {
-                            // Tombstone
+                            // Tombstone — remove from skipmap only; do not add stream to streams_set
                             if self.skipmap.remove(&compound_key).is_some() {
                                 self.index_ram_bytes
                                     .fetch_sub(node_overhead, Ordering::SeqCst);
                             }
                         } else if flags & 0x01 != 0 {
-                            // Active
+                            // Active — register the stream in streams_set and check limit
+                            {
+                                let mut streams_guard = self.streams_set.lock().unwrap();
+                                streams_guard.insert(stream_name.to_string());
+                                if streams_guard.len() > self.max_streams {
+                                    return Err(LivenError::StreamLimitExceeded {
+                                        max: self.max_streams,
+                                    });
+                                }
+                            }
+                            let pointer = LogPointer {
+                                segment_id: *segment_id,
+                                file_offset: offset,
+                            };
                             let existed = self.skipmap.contains_key(&compound_key);
-                            self.skipmap.insert(
-                                compound_key,
-                                LogPointer {
-                                    segment_id: *segment_id,
-                                    file_offset: offset,
-                                },
-                            );
+                            self.skipmap.insert(compound_key, pointer);
                             if !existed {
                                 let current_ram = self
                                     .index_ram_bytes
                                     .fetch_add(node_overhead, Ordering::SeqCst)
                                     + node_overhead;
                                 if current_ram > self.max_index_ram_bytes {
-                                    return Err(format!(
-                                        "Index RAM limit exceeded during recovery: {} bytes exceeds max_index_ram_mb {}",
-                                        current_ram, self.max_index_ram_bytes
+                                    return Err(create_index_ram_limit_error(
+                                        self.max_index_ram_bytes,
+                                        current_ram,
                                     ));
                                 }
                             }
+
+                            // Populate timestamp index
+                            let mut ts_idx = self.timestamp_indexes.lock().unwrap();
+                            let entry =
+                                ts_idx.entry(stream_name.to_string()).or_insert_with(|| {
+                                    Arc::new(timestamp_index::TimestampIndex::new())
+                                });
+                            Arc::get_mut(entry)
+                                .unwrap()
+                                .insert(_timestamp, seq_id, pointer);
                         }
                     }
                     Err(e) => {
@@ -408,7 +464,7 @@ impl StorageEngine {
                 offset += 26 + payload_len;
             }
 
-            file.unlock().map_err(|e| e.to_string())?;
+            file.unlock().map_err(LivenError::Io)?;
         }
 
         self.current_sequence_id
@@ -422,9 +478,9 @@ impl StorageEngine {
             .read(true)
             .append(true)
             .open(&active_path)
-            .map_err(|e| e.to_string())?;
+            .map_err(LivenError::Io)?;
 
-        let active_len = file.metadata().map_err(|e| e.to_string())?.len();
+        let active_len = file.metadata().map_err(LivenError::Io)?.len();
 
         let mut active_file_guard = self.active_file.lock().unwrap();
         let mut active_size_guard = self.active_size.lock().unwrap();
@@ -449,7 +505,7 @@ impl StorageEngine {
         key: &str,
         value: DataValue,
         is_tombstone: bool,
-    ) -> Result<Record, String> {
+    ) -> crate::error::Result<Record> {
         let compound_key = format!("{}:{}", stream_name, key);
 
         // 1. Stream Limit Check
@@ -457,7 +513,9 @@ impl StorageEngine {
             let mut streams_guard = self.streams_set.lock().unwrap();
             if !streams_guard.contains(stream_name) {
                 if streams_guard.len() >= self.max_streams {
-                    return Err("Maximum concurrent streams limit exceeded".to_string());
+                    return Err(LivenError::StreamLimitExceeded {
+                        max: self.max_streams,
+                    });
                 }
                 streams_guard.insert(stream_name.to_string());
             }
@@ -470,7 +528,10 @@ impl StorageEngine {
                 let size = compound_key.len() as u64 + 64;
                 let current_ram = self.index_ram_bytes.load(Ordering::SeqCst);
                 if current_ram + size > self.max_index_ram_bytes {
-                    return Err("Index RAM limit exceeded".to_string());
+                    return Err(create_index_ram_limit_error(
+                        self.max_index_ram_bytes,
+                        current_ram + size,
+                    ));
                 }
             }
         }
@@ -484,7 +545,7 @@ impl StorageEngine {
     pub fn append_batch(
         &self,
         batch: Vec<(String, String, DataValue)>,
-    ) -> Result<Vec<Record>, String> {
+    ) -> crate::error::Result<Vec<Record>> {
         // Pre-validate streams count and index RAM limits transactionally
         let mut new_streams = HashSet::new();
         let mut new_keys_size = 0u64;
@@ -503,13 +564,18 @@ impl StorageEngine {
             }
 
             if streams_guard.len() + new_streams.len() > self.max_streams {
-                return Err("Maximum concurrent streams limit exceeded".to_string());
+                return Err(LivenError::StreamLimitExceeded {
+                    max: self.max_streams,
+                });
             }
         }
 
         let current_ram = self.index_ram_bytes.load(Ordering::SeqCst);
         if current_ram + new_keys_size > self.max_index_ram_bytes {
-            return Err("Index RAM limit exceeded".to_string());
+            return Err(create_index_ram_limit_error(
+                self.max_index_ram_bytes,
+                current_ram + new_keys_size,
+            ));
         }
 
         // Apply stream registration
@@ -538,9 +604,9 @@ impl StorageEngine {
 
         let mut results = Vec::with_capacity(rx_channels.len());
         for rx in rx_channels {
-            let record = rx
-                .recv()
-                .map_err(|e| format!("LogRingBuffer coordination error: {}", e))??;
+            let record = rx.recv().map_err(|e| {
+                LivenError::Internal(format!("LogRingBuffer coordination error: {}", e))
+            })??;
             results.push(record);
         }
 
@@ -552,13 +618,15 @@ impl StorageEngine {
         &self,
         stream_name: &str,
         keys: &[String],
-    ) -> Result<Vec<Record>, String> {
+    ) -> crate::error::Result<Vec<Record>> {
         // Stream Limit Check
         {
             let mut streams_guard = self.streams_set.lock().unwrap();
             if !streams_guard.contains(stream_name) {
                 if streams_guard.len() >= self.max_streams {
-                    return Err("Maximum concurrent streams limit exceeded".to_string());
+                    return Err(LivenError::StreamLimitExceeded {
+                        max: self.max_streams,
+                    });
                 }
                 streams_guard.insert(stream_name.to_string());
             }
@@ -575,25 +643,28 @@ impl StorageEngine {
             response_tx,
         };
         self.ring_buffer.tx_send(entry)?;
-        let records = rx
-            .recv()
-            .map_err(|e| format!("LogRingBuffer coordination error: {}", e))??;
+        let records = rx.recv().map_err(|e| {
+            LivenError::Internal(format!("LogRingBuffer coordination error: {}", e))
+        })??;
         Ok(records)
     }
 
     /// Reads a record from disk via its LogPointer using safe positional reads
-    pub fn read_record(&self, pointer: LogPointer) -> Result<Record, String> {
+    pub fn read_record(&self, pointer: LogPointer) -> crate::error::Result<Record> {
         let file = self.get_or_load_file_handle(pointer.segment_id)?;
-        let file_len = file.metadata().map_err(|e| e.to_string())?.len();
+        let file_len = file.metadata().map_err(LivenError::Io)?.len();
         let offset = pointer.file_offset;
 
         if offset + 26 > file_len {
-            return Err("Pointer offset out of bounds".to_string());
+            return Err(LivenError::PointerOutOfBounds {
+                segment_id: pointer.segment_id,
+                offset,
+            });
         }
 
         let mut header_buf = [0u8; 26];
         file.read_exact_at(&mut header_buf, offset)
-            .map_err(|e| format!("Failed to read header positionally: {}", e))?;
+            .map_err(LivenError::Io)?;
 
         let seq_id = u64::from_be_bytes([
             header_buf[0],
@@ -631,7 +702,10 @@ impl StorageEngine {
         ]);
 
         if offset + 26 + (payload_len as u64) > file_len {
-            return Err("Payload out of bounds".to_string());
+            return Err(LivenError::PayloadOutOfBounds {
+                segment_id: pointer.segment_id,
+                offset,
+            });
         }
 
         let record = READ_STAGING_BUFFER.with(|buf_cell| {
@@ -642,11 +716,14 @@ impl StorageEngine {
             let target_slice = &mut local_buf[..payload_len];
 
             file.read_exact_at(target_slice, offset + 26)
-                .map_err(|e| format!("Failed to read payload positionally: {}", e))?;
+                .map_err(LivenError::Io)?;
 
             let actual_crc = crc32fast::hash(target_slice);
             if actual_crc != crc32 {
-                return Err("CRC32 integrity check failed during positional read".to_string());
+                return Err(LivenError::CrcMismatch {
+                    segment_id: pointer.segment_id,
+                    offset,
+                });
             }
 
             let (stream_name, key, value) = deserialize_payload_borrowed(target_slice, type_tag)?;
@@ -667,7 +744,7 @@ impl StorageEngine {
     }
 
     /// Performs complete point-in-time lookup for a stream key with zero stack/heap string allocations
-    pub fn get(&self, stream_name: &str, key: &str) -> Result<Option<Record>, String> {
+    pub fn get(&self, stream_name: &str, key: &str) -> crate::error::Result<Option<Record>> {
         let mut key_buf = [0u8; 512];
         let combined_len = stream_name.len() + 1 + key.len();
         let lookup_key = if combined_len <= 512 {
@@ -706,130 +783,27 @@ impl StorageEngine {
         keys
     }
 
-    /// Scans all historical records from all active/read segments sequentially using safe positional reads
-    pub fn scan_historical(&self) -> Result<Vec<Record>, String> {
-        let mut segments = Vec::new();
-
-        for entry in fs::read_dir(&self.data_dir).map_err(|e| e.to_string())? {
-            let entry = entry.map_err(|e| e.to_string())?;
-            let path = entry.path();
-            if path.is_file()
-                && path.extension().and_then(|s| s.to_str()) == Some("liven")
-                && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
-                && let Ok(segment_id) = stem.parse::<u64>()
-            {
-                segments.push((segment_id, path));
-            }
-        }
-
-        segments.sort_by_key(|a| a.0);
-
-        let mut records = Vec::new();
-
-        for (segment_id, _path) in &segments {
-            let file = match self.get_or_load_file_handle(*segment_id) {
-                Ok(f) => f,
-                Err(e) => {
-                    if e.contains("Cannot mmap 0-byte file") || e.contains("is empty") {
-                        continue;
-                    }
-                    return Err(e);
-                }
-            };
-            let file_len = file.metadata().map_err(|e| e.to_string())?.len();
-            let mut offset = 0;
-
-            while offset + 26 <= file_len {
-                let mut header_buf = [0u8; 26];
-                if file.read_exact_at(&mut header_buf, offset).is_err() {
-                    break;
-                }
-
-                let seq_id = u64::from_be_bytes([
-                    header_buf[0],
-                    header_buf[1],
-                    header_buf[2],
-                    header_buf[3],
-                    header_buf[4],
-                    header_buf[5],
-                    header_buf[6],
-                    header_buf[7],
-                ]);
-                let timestamp = i64::from_be_bytes([
-                    header_buf[8],
-                    header_buf[9],
-                    header_buf[10],
-                    header_buf[11],
-                    header_buf[12],
-                    header_buf[13],
-                    header_buf[14],
-                    header_buf[15],
-                ]);
-                let type_tag = header_buf[16];
-                let flags = header_buf[17];
-                let payload_len = u32::from_be_bytes([
-                    header_buf[18],
-                    header_buf[19],
-                    header_buf[20],
-                    header_buf[21],
-                ]) as usize;
-                let crc32 = u32::from_be_bytes([
-                    header_buf[22],
-                    header_buf[23],
-                    header_buf[24],
-                    header_buf[25],
-                ]);
-
-                if offset + 26 + (payload_len as u64) > file_len {
-                    break;
-                }
-
-                let payload_record = READ_STAGING_BUFFER.with(|buf_cell| {
-                    let mut local_buf = buf_cell.borrow_mut();
-                    if local_buf.len() < payload_len {
-                        local_buf.resize(payload_len, 0);
-                    }
-                    let target_slice = &mut local_buf[..payload_len];
-                    file.read_exact_at(target_slice, offset + 26)
-                        .map_err(|e| e.to_string())?;
-
-                    let actual_crc = crc32fast::hash(target_slice);
-                    if actual_crc == crc32
-                        && let Ok((stream_name, key, value)) =
-                            deserialize_payload_borrowed(target_slice, type_tag)
-                        && let Ok(stream_key) = crate::storage::key::StreamKey::from_str(key)
-                    {
-                        return Ok(Some(Record {
-                            sequence_id: seq_id,
-                            timestamp,
-                            type_tag,
-                            flags,
-                            stream_name: stream_name.to_string(),
-                            key: stream_key,
-                            value,
-                        }));
-                    }
-                    Ok::<Option<Record>, String>(None)
-                })?;
-
-                if let Some(rec) = payload_record {
-                    records.push(rec);
-                }
-
-                offset += 26 + (payload_len as u64);
-            }
-        }
-
-        Ok(records)
+    /// Scans all historical records from all active/read segments sequentially using safe positional reads.
+    #[tracing::instrument(skip(self))]
+    pub fn scan_historical(&self) -> crate::error::Result<Vec<Record>> {
+        self.scan_historical_inner(usize::MAX)
     }
 
     /// Scans historical records but stops early once `max_records` have been collected.
     /// This allows early-termination optimizations for queries with a LIMIT clause.
-    pub fn scan_historical_limited(&self, max_records: usize) -> Result<Vec<Record>, String> {
+    pub fn scan_historical_limited(&self, max_records: usize) -> crate::error::Result<Vec<Record>> {
+        self.scan_historical_inner(max_records)
+    }
+
+    /// Single shared implementation for both unlimited and limited historical scans.
+    fn scan_historical_inner(&self, max_records: usize) -> crate::error::Result<Vec<Record>> {
+        // Apply the global max_scan_results limit if it's lower than the requested max_records
+        let effective_limit = std::cmp::min(max_records, self.max_scan_results);
+
         let mut segments = Vec::new();
 
-        for entry in fs::read_dir(&self.data_dir).map_err(|e| e.to_string())? {
-            let entry = entry.map_err(|e| e.to_string())?;
+        for entry in fs::read_dir(&self.data_dir).map_err(LivenError::Io)? {
+            let entry = entry.map_err(LivenError::Io)?;
             let path = entry.path();
             if path.is_file()
                 && path.extension().and_then(|s| s.to_str()) == Some("liven")
@@ -845,23 +819,24 @@ impl StorageEngine {
         let mut records = Vec::new();
 
         for (segment_id, _path) in &segments {
-            if records.len() >= max_records {
+            if records.len() >= effective_limit {
                 break;
             }
 
             let file = match self.get_or_load_file_handle(*segment_id) {
                 Ok(f) => f,
                 Err(e) => {
-                    if e.contains("Cannot mmap 0-byte file") || e.contains("is empty") {
+                    let err_str = e.to_string();
+                    if err_str.contains("Cannot mmap 0-byte file") || err_str.contains("is empty") {
                         continue;
                     }
                     return Err(e);
                 }
             };
-            let file_len = file.metadata().map_err(|e| e.to_string())?.len();
+            let file_len = file.metadata().map_err(LivenError::Io)?.len();
             let mut offset = 0;
 
-            while offset + 26 <= file_len && records.len() < max_records {
+            while offset + 26 <= file_len && records.len() < effective_limit {
                 let mut header_buf = [0u8; 26];
                 if file.read_exact_at(&mut header_buf, offset).is_err() {
                     break;
@@ -902,6 +877,12 @@ impl StorageEngine {
                     header_buf[25],
                 ]);
 
+                // Skip tombstone frames — do not read payload, do not include in results
+                if flags & 0x02 != 0 {
+                    offset += 26 + (payload_len as u64);
+                    continue;
+                }
+
                 if offset + 26 + (payload_len as u64) > file_len {
                     break;
                 }
@@ -913,7 +894,7 @@ impl StorageEngine {
                     }
                     let target_slice = &mut local_buf[..payload_len];
                     file.read_exact_at(target_slice, offset + 26)
-                        .map_err(|e| e.to_string())?;
+                        .map_err(LivenError::Io)?;
 
                     let actual_crc = crc32fast::hash(target_slice);
                     if actual_crc == crc32
@@ -931,7 +912,7 @@ impl StorageEngine {
                             value,
                         }));
                     }
-                    Ok::<Option<Record>, String>(None)
+                    Ok::<Option<Record>, LivenError>(None)
                 })?;
 
                 if let Some(rec) = payload_record {
@@ -942,18 +923,26 @@ impl StorageEngine {
             }
         }
 
+        // Check if we hit the global scan limit
+        if records.len() >= self.max_scan_results && max_records > self.max_scan_results {
+            return Err(LivenError::Query(format!(
+                "Scan result limit reached ({} records).\n   Refine your query with filter(), limit(), or a key-based lookup.\n   Override with max_scan_results in liven.toml.",
+                self.max_scan_results
+            )));
+        }
+
         Ok(records)
     }
 
     /// Performs background compaction of historical files
-    pub fn compact(&self) -> Result<(), String> {
+    pub fn compact(&self) -> crate::error::Result<()> {
         info!("Starting log compaction...");
         let active_id = self.active_segment_id.load(Ordering::SeqCst);
 
         // Gather all inactive segments on disk
         let mut inactive_segments = Vec::new();
-        for entry in fs::read_dir(&self.data_dir).map_err(|e| e.to_string())? {
-            let entry = entry.map_err(|e| e.to_string())?;
+        for entry in fs::read_dir(&self.data_dir).map_err(LivenError::Io)? {
+            let entry = entry.map_err(LivenError::Io)?;
             let path = entry.path();
             if path.is_file()
                 && path.extension().and_then(|s| s.to_str()) == Some("liven")
@@ -995,9 +984,9 @@ impl StorageEngine {
             .read(true)
             .append(true)
             .open(&compacted_path)
-            .map_err(|e| e.to_string())?;
+            .map_err(LivenError::Io)?;
 
-        comp_file.lock_exclusive().map_err(|e| e.to_string())?;
+        comp_file.lock_exclusive().map_err(LivenError::Io)?;
 
         let mut offset = 0u64;
 
@@ -1036,7 +1025,7 @@ impl StorageEngine {
                 frame_buf.extend_from_slice(&crc32.to_be_bytes());
                 frame_buf.extend_from_slice(&local_buf);
 
-                comp_file.write_all(&frame_buf).map_err(|e| e.to_string())?;
+                comp_file.write_all(&frame_buf).map_err(LivenError::Io)?;
 
                 new_pointers.insert(
                     compound_key,
@@ -1047,12 +1036,12 @@ impl StorageEngine {
                 );
 
                 offset += frame_buf.len() as u64;
-                Ok::<(), String>(())
+                Ok::<(), LivenError>(())
             })?;
         }
 
-        comp_file.sync_data().map_err(|e| e.to_string())?;
-        comp_file.unlock().map_err(|e| e.to_string())?;
+        comp_file.sync_data().map_err(LivenError::Io)?;
+        comp_file.unlock().map_err(LivenError::Io)?;
 
         // Update SkipMap pointers
         for (compound_key, new_ptr) in new_pointers {
@@ -1088,6 +1077,15 @@ impl StorageEngine {
         Ok(())
     }
 }
+
+/// Helper function to create IndexRamLimitExceeded errors
+fn create_index_ram_limit_error(max_bytes: u64, current_bytes: u64) -> LivenError {
+    LivenError::IndexRamLimitExceeded {
+        max_bytes,
+        current_bytes,
+    }
+}
+
 fn get_process_memory() -> u64 {
     #[cfg(target_os = "macos")]
     {
@@ -1117,8 +1115,37 @@ fn get_process_memory() -> u64 {
 }
 
 impl StorageEngine {
+    /// Returns true if the number of inactive segments or their total size exceeds thresholds.
+    pub fn should_compact(&self) -> bool {
+        let active_id = self
+            .active_segment_id
+            .load(std::sync::atomic::Ordering::SeqCst);
+        let mut inactive_count = 0usize;
+        let mut inactive_bytes = 0u64;
+
+        if let Ok(entries) = std::fs::read_dir(&self.data_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file()
+                    && path.extension().and_then(|s| s.to_str()) == Some("liven")
+                    && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
+                    && let Ok(segment_id) = stem.parse::<u64>()
+                    && segment_id < active_id
+                {
+                    inactive_count += 1;
+                    if let Ok(meta) = path.metadata() {
+                        inactive_bytes += meta.len();
+                    }
+                }
+            }
+        }
+
+        inactive_count >= self.compaction_threshold_segments
+            || inactive_bytes >= self.compaction_threshold_bytes
+    }
+
     /// Gets database disk size and record metrics
-    pub fn metrics(&self) -> Result<(u64, u64, u64, usize), String> {
+    pub fn metrics(&self) -> crate::error::Result<(u64, u64, u64, usize)> {
         let mut ram_usage = get_process_memory();
         if ram_usage == 0 {
             ram_usage = self.index_ram_bytes.load(Ordering::SeqCst);
@@ -1126,11 +1153,11 @@ impl StorageEngine {
         let mut total_size = 0u64;
         let mut segment_count = 0u64;
 
-        for entry in fs::read_dir(&self.data_dir).map_err(|e| e.to_string())? {
-            let entry = entry.map_err(|e| e.to_string())?;
+        for entry in fs::read_dir(&self.data_dir).map_err(LivenError::Io)? {
+            let entry = entry.map_err(LivenError::Io)?;
             let path = entry.path();
             if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("liven") {
-                total_size += path.metadata().map_err(|e| e.to_string())?.len();
+                total_size += path.metadata().map_err(LivenError::Io)?.len();
                 segment_count += 1;
             }
         }
@@ -1138,6 +1165,43 @@ impl StorageEngine {
         let total_streams = self.streams_set.lock().unwrap().len();
 
         Ok((ram_usage, total_size, segment_count, total_streams))
+    }
+
+    /// Scan historical records within a time range using the timestamp index.
+    /// Returns records with timestamps in [start_ms, end_ms] inclusive.
+    pub fn scan_by_time_range(
+        &self,
+        stream_name: &str,
+        start_ms: i64,
+        end_ms: i64,
+    ) -> crate::error::Result<Vec<Record>> {
+        let ts_idx_guard = self.timestamp_indexes.lock().unwrap();
+        let pointers = match ts_idx_guard.get(stream_name) {
+            Some(idx) => idx.range(start_ms, end_ms),
+            None => return Ok(vec![]),
+        };
+        drop(ts_idx_guard);
+
+        let mut records = Vec::with_capacity(pointers.len());
+        for ptr in pointers {
+            match self.read_record(ptr) {
+                Ok(rec) => {
+                    if rec.stream_name == stream_name
+                        && rec.timestamp >= start_ms
+                        && rec.timestamp <= end_ms
+                    {
+                        records.push(rec);
+                    }
+                }
+                Err(e) => {
+                    warn!(
+                        "scan_by_time_range: failed to read record at {:?}: {}",
+                        ptr, e
+                    );
+                }
+            }
+        }
+        Ok(records)
     }
 }
 
@@ -1155,6 +1219,7 @@ fn run_flusher_loop(
     sync_mode: String,
     is_running: Arc<std::sync::atomic::AtomicBool>,
     index_ram_bytes: Arc<AtomicU64>,
+    timestamp_indexes: Arc<Mutex<HashMap<String, Arc<timestamp_index::TimestampIndex>>>>,
 ) {
     let mut batch = Vec::with_capacity(2048);
     while is_running.load(Ordering::Relaxed) {
@@ -1164,6 +1229,11 @@ fn run_flusher_loop(
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
         };
+
+        // Handle shutdown sentinel
+        if matches!(first_entry, ring_buffer::LogEntry::Shutdown) {
+            break;
+        }
         batch.push(first_entry);
 
         // Pull as many entries as possible without blocking (up to 2048 or until empty)
@@ -1200,15 +1270,20 @@ fn run_flusher_loop(
             &file_handles,
             &sync_mode,
             &index_ram_bytes,
+            &timestamp_indexes,
         ) {
             // Notify all waiting entries of the failure
             for entry in batch.drain(..) {
+                let err_str = e.to_string();
                 match entry {
                     ring_buffer::LogEntry::Single { response_tx, .. } => {
-                        let _ = response_tx.send(Err(e.clone()));
+                        let _ = response_tx.send(Err(err_str.clone()));
                     }
                     ring_buffer::LogEntry::TombstoneBatch { response_tx, .. } => {
-                        let _ = response_tx.send(Err(e.clone()));
+                        let _ = response_tx.send(Err(err_str.clone()));
+                    }
+                    ring_buffer::LogEntry::Shutdown => {
+                        // Shutdown sentinel, no response needed
                     }
                 }
             }
@@ -1230,7 +1305,8 @@ fn execute_batch_append(
     file_handles: &Arc<Mutex<HashMap<u64, Arc<File>>>>,
     sync_mode: &str,
     index_ram_bytes: &Arc<AtomicU64>,
-) -> Result<(), String> {
+    timestamp_indexes: &Arc<Mutex<HashMap<String, Arc<timestamp_index::TimestampIndex>>>>,
+) -> crate::error::Result<()> {
     let mut active_file_guard = active_file.lock().unwrap();
     let mut active_size_guard = active_size.lock().unwrap();
 
@@ -1248,7 +1324,13 @@ fn execute_batch_append(
 
     let mut pending_completes = Vec::with_capacity(batch.len());
     let mut batch_records_to_add = Vec::new();
-    let mut frame_buf = Vec::new();
+
+    // Use the pre-allocated thread-local frame buffer to avoid heap reallocations per batch.
+    let mut frame_buf = FRAME_BUFFER.with(|fb| {
+        let mut buf = fb.borrow_mut();
+        buf.clear();
+        std::mem::take(&mut *buf)
+    });
 
     SERIALIZATION_BUFFER.with(|buf_cell| {
         let mut local_buf = buf_cell.borrow_mut();
@@ -1266,7 +1348,7 @@ fn execute_batch_append(
 
                     let timestamp = SystemTime::now()
                         .duration_since(SystemTime::UNIX_EPOCH)
-                        .map_err(|e| e.to_string())?
+                        .map_err(|e| LivenError::Internal(e.to_string()))?
                         .as_millis() as i64;
 
                     let flags = if *is_tombstone { 0x02 } else { 0x01 };
@@ -1316,7 +1398,7 @@ fn execute_batch_append(
 
                         let timestamp = SystemTime::now()
                             .duration_since(SystemTime::UNIX_EPOCH)
-                            .map_err(|e| e.to_string())?
+                            .map_err(|e| LivenError::Internal(e.to_string()))?
                             .as_millis() as i64;
 
                         let flags = 0x02; // Tombstone
@@ -1362,9 +1444,13 @@ fn execute_batch_append(
                         count,
                     });
                 }
+                ring_buffer::LogEntry::Shutdown => {
+                    // Shutdown sentinel, break out of processing
+                    return Ok(());
+                }
             }
         }
-        Ok::<(), String>(())
+        Ok::<(), LivenError>(())
     })?;
 
     if *active_size_guard + (frame_buf.len() as u64) > max_segment_size {
@@ -1381,7 +1467,7 @@ fn execute_batch_append(
             .read(true)
             .append(true)
             .open(&new_path)
-            .map_err(|e| e.to_string())?;
+            .map_err(LivenError::Io)?;
 
         *active_file_guard = Some(file);
         *active_size_guard = 0;
@@ -1390,20 +1476,20 @@ fn execute_batch_append(
 
     let file = active_file_guard
         .as_mut()
-        .ok_or("No active file handle found")?;
+        .ok_or_else(|| LivenError::Internal("No active file handle found".to_string()))?;
     let current_offset = *active_size_guard;
 
     file.write_all(&frame_buf).map_err(|e| {
         if e.kind() == std::io::ErrorKind::StorageFull || e.kind() == std::io::ErrorKind::WriteZero
         {
-            "Disk full: unable to append to segment. Free disk space and retry.".to_string()
+            LivenError::DiskFull
         } else {
-            e.to_string()
+            LivenError::Io(e)
         }
     })?;
 
     if sync_mode == "always" {
-        file.sync_data().map_err(|e| e.to_string())?;
+        file.sync_data().map_err(LivenError::Io)?;
     }
 
     let segment_id = active_segment_id.load(Ordering::SeqCst);
@@ -1423,17 +1509,22 @@ fn execute_batch_append(
                             index_ram_bytes.fetch_sub(node_overhead, Ordering::SeqCst);
                         }
                     } else {
+                        let pointer = LogPointer {
+                            segment_id,
+                            file_offset: offset_acc,
+                        };
                         let existed = skipmap.contains_key(&compound_key);
-                        skipmap.insert(
-                            compound_key,
-                            LogPointer {
-                                segment_id,
-                                file_offset: offset_acc,
-                            },
-                        );
+                        skipmap.insert(compound_key, pointer);
                         if !existed {
                             index_ram_bytes.fetch_add(node_overhead, Ordering::SeqCst);
                         }
+
+                        // Maintain timestamp index
+                        let mut ts_idx_guard = timestamp_indexes.lock().unwrap();
+                        let entry = ts_idx_guard
+                            .entry(record.stream_name.clone())
+                            .or_insert_with(|| Arc::new(timestamp_index::TimestampIndex::new()));
+                        entry.insert(record.timestamp, record.sequence_id, pointer);
                     }
 
                     let _ = broadcast_tx.send(record.clone());
@@ -1455,17 +1546,24 @@ fn execute_batch_append(
                                 index_ram_bytes.fetch_sub(node_overhead, Ordering::SeqCst);
                             }
                         } else {
+                            let pointer = LogPointer {
+                                segment_id,
+                                file_offset: offset_acc,
+                            };
                             let existed = skipmap.contains_key(&compound_key);
-                            skipmap.insert(
-                                compound_key,
-                                LogPointer {
-                                    segment_id,
-                                    file_offset: offset_acc,
-                                },
-                            );
+                            skipmap.insert(compound_key, pointer);
                             if !existed {
                                 index_ram_bytes.fetch_add(node_overhead, Ordering::SeqCst);
                             }
+
+                            // Maintain timestamp index
+                            let mut ts_idx_guard = timestamp_indexes.lock().unwrap();
+                            let entry = ts_idx_guard
+                                .entry(record.stream_name.clone())
+                                .or_insert_with(
+                                    || Arc::new(timestamp_index::TimestampIndex::new()),
+                                );
+                            entry.insert(record.timestamp, record.sequence_id, pointer);
                         }
 
                         let _ = broadcast_tx.send(record.clone());
@@ -1484,6 +1582,11 @@ fn execute_batch_append(
 
     let mut handles_guard = file_handles.lock().unwrap();
     handles_guard.remove(&segment_id);
+
+    // Return the pre-allocated frame buffer to the thread-local for reuse
+    FRAME_BUFFER.with(|fb| {
+        *fb.borrow_mut() = frame_buf;
+    });
 
     Ok(())
 }
@@ -1520,26 +1623,28 @@ pub fn serialize_payload_into(stream_name: &str, key: &str, value: &DataValue, b
 fn deserialize_payload_borrowed(
     payload: &[u8],
     type_tag: u8,
-) -> Result<(&str, &str, DataValue), String> {
+) -> crate::error::Result<(&str, &str, DataValue)> {
     if payload.len() < 4 {
-        return Err("Payload too short".to_string());
+        return Err(LivenError::PayloadTooShort { kind: "payload" });
     }
     let stream_len = u16::from_be_bytes([payload[0], payload[1]]) as usize;
     if payload.len() < 4 + stream_len {
-        return Err("Payload too short for stream name".to_string());
+        return Err(LivenError::PayloadTooShort {
+            kind: "stream name",
+        });
     }
-    let stream_name =
-        std::str::from_utf8(&payload[2..2 + stream_len]).map_err(|e| e.to_string())?;
+    let stream_name = std::str::from_utf8(&payload[2..2 + stream_len])
+        .map_err(|e| LivenError::Serialization(e.to_string()))?;
 
     let key_len_offset = 2 + stream_len;
     let key_len =
         u16::from_be_bytes([payload[key_len_offset], payload[key_len_offset + 1]]) as usize;
     if payload.len() < 4 + stream_len + key_len {
-        return Err("Payload too short for key".to_string());
+        return Err(LivenError::PayloadTooShort { kind: "key" });
     }
     let key_offset = key_len_offset + 2;
     let key = std::str::from_utf8(&payload[key_offset..key_offset + key_len])
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| LivenError::Serialization(e.to_string()))?;
 
     let val_offset = key_offset + key_len;
     let value = if type_tag == 8 {
@@ -1556,13 +1661,14 @@ fn deserialize_payload_borrowed(
         let vec_i8 = unsafe { std::slice::from_raw_parts(ptr, count) }.to_vec();
         DataValue::Vector(vec_i8)
     } else {
-        rmp_serde::from_slice(&payload[val_offset..]).map_err(|e| e.to_string())?
+        rmp_serde::from_slice(&payload[val_offset..])
+            .map_err(|e| LivenError::Serialization(e.to_string()))?
     };
 
     Ok((stream_name, key, value))
 }
 
-pub fn deserialize_payload(payload: &[u8]) -> Result<(String, String, DataValue), String> {
+pub fn deserialize_payload(payload: &[u8]) -> crate::error::Result<(String, String, DataValue)> {
     let (stream_name, key, value) = deserialize_payload_borrowed(payload, 0x02)?;
     Ok((stream_name.to_string(), key.to_string(), value))
 }
@@ -1624,7 +1730,9 @@ impl<'a> FrameReader<'a> {
     }
 }
 
-pub fn deserialize_payload_fuzz(payload: &[u8]) -> Result<(String, String, DataValue), String> {
+pub fn deserialize_payload_fuzz(
+    payload: &[u8],
+) -> crate::error::Result<(String, String, DataValue)> {
     deserialize_payload(payload)
 }
 
@@ -1638,6 +1746,11 @@ impl StorageEngine {
     pub fn set_max_fds(&mut self, val: usize) {
         self.max_fds = val;
     }
+
+    pub fn set_max_scan_results(&mut self, val: usize) {
+        self.max_scan_results = val;
+    }
+
     pub fn active_handles_count(&self) -> usize {
         self.file_handles.lock().unwrap().len()
     }
@@ -1645,7 +1758,16 @@ impl StorageEngine {
 
 impl Drop for StorageEngine {
     fn drop(&mut self) {
+        // Signal shutdown to flusher thread
         self.is_running.store(false, Ordering::Relaxed);
+        let _ = self.ring_buffer.send_shutdown();
+
+        // Wait for flusher thread to complete
+        if let Some(handle) = self.flusher_handle.take() {
+            let _ = handle.join();
+        }
+
+        // Clean up active file
         if let Ok(mut active_file_guard) = self.active_file.lock()
             && let Some(file) = active_file_guard.take()
         {

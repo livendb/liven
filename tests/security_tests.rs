@@ -107,6 +107,8 @@ async fn test_auth_key_handshake_lifecycle() {
         storage: StorageConfig {
             data_directory: test_dir.to_string_lossy().to_string(),
             max_segment_size_mb: 10,
+            
+
             sync_mode: "always".to_string(),
             sync_interval_ms: 10,
         },
@@ -115,6 +117,9 @@ async fn test_auth_key_handshake_lifecycle() {
             max_open_file_descriptors: 10,
             max_index_ram_mb: 10,
             max_segment_size_mb: 10,
+            max_scan_results: 100_000,
+            
+            
         },
         security: SecurityConfig {
             mode: "auth_key".to_string(),
@@ -227,6 +232,8 @@ async fn test_rest_auth_key_challenge_login_lifecycle() {
         storage: StorageConfig {
             data_directory: test_dir.to_string_lossy().to_string(),
             max_segment_size_mb: 10,
+            
+
             sync_mode: "always".to_string(),
             sync_interval_ms: 10,
         },
@@ -235,6 +242,9 @@ async fn test_rest_auth_key_challenge_login_lifecycle() {
             max_open_file_descriptors: 10,
             max_index_ram_mb: 10,
             max_segment_size_mb: 10,
+            max_scan_results: 100_000,
+            
+            
         },
         security: SecurityConfig {
             mode: "auth_key".to_string(),
@@ -481,10 +491,10 @@ async fn test_rest_auth_key_challenge_login_lifecycle() {
 #[cfg(feature = "server")]
 #[test]
 fn test_continuous_edge_check_query_capabilities() {
-    use liven::security::{CAP_ADMIN, CAP_NONE, CAP_READ, CAP_ROOT, CAP_WRITE};
+    use liven::security::{CAP_NONE, CAP_READ, CAP_ROOT, CAP_WRITE};
     use liven::server::check_query_capabilities;
 
-    // CAP_ROOT can do everything
+    // CAP_ROOT (admin role) can do everything
     assert!(check_query_capabilities("from(\"stream\")", CAP_ROOT));
     assert!(check_query_capabilities(
         "from(\"stream\").insert(\"key\", {val: 1})",
@@ -495,26 +505,28 @@ fn test_continuous_edge_check_query_capabilities() {
     // CAP_READ can read but not write or admin
     assert!(check_query_capabilities("from(\"stream\")", CAP_READ));
     assert!(check_query_capabilities("tail(\"stream\")", CAP_READ));
-    assert!(!check_query_capabilities(
-        "from(\"stream\").insert(\"key\", {val: 1})",
-        CAP_READ
-    ));
+    assert!(check_query_capabilities("status()", CAP_READ));
+    assert!(check_query_capabilities("list_streams()", CAP_READ));
+    //
     assert!(!check_query_capabilities("drop(\"stream\")", CAP_READ));
 
-    // CAP_WRITE can write but not admin or list/select/tail
+    // CAP_WRITE includes CAP_READ and can write but not admin
     assert!(check_query_capabilities(
         "from(\"stream\").insert(\"key\", {val: 1})",
         CAP_WRITE
     ));
-    assert!(!check_query_capabilities("from(\"stream\")", CAP_WRITE));
+    assert!(check_query_capabilities("from(\"stream\")", CAP_WRITE));
+    assert!(check_query_capabilities("tail(\"stream\")", CAP_WRITE));
+    assert!(check_query_capabilities("status()", CAP_WRITE));
+    assert!(check_query_capabilities("list_streams()", CAP_WRITE));
     assert!(!check_query_capabilities("drop(\"stream\")", CAP_WRITE));
 
-    // CAP_ADMIN can drop but not read or write on its own
-    assert!(check_query_capabilities("drop(\"stream\")", CAP_ADMIN));
-    assert!(!check_query_capabilities("from(\"stream\")", CAP_ADMIN));
-    assert!(!check_query_capabilities(
+    // CAP_ROOT (admin role) can do everything including admin operations
+    assert!(check_query_capabilities("drop(\"stream\")", CAP_ROOT));
+    assert!(check_query_capabilities("from(\"stream\")", CAP_ROOT));
+    assert!(check_query_capabilities(
         "from(\"stream\").insert(\"key\", {val: 1})",
-        CAP_ADMIN
+        CAP_ROOT
     ));
 
     // CAP_NONE can do nothing

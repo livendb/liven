@@ -7,8 +7,6 @@ Type=simple
 User=root
 ExecStart=/usr/local/bin/liven start --config /etc/liven/liven.toml
 Restart=on-failure
-StandardOutput=append:/var/log/liven/access.log
-StandardError=append:/var/log/liven/error.log
 
 [Install]
 WantedBy=multi-user.target

@@ -157,6 +157,15 @@ fn test_execute_all_query_syntaxes() {
         "from(\"users\").insert(\"user_200\", { name: \"Dave\", email: \"dave@example.com\" })",
         "from(\"users\").insert([[\"user_203\", { name: \"Bob\" }], [\"user_204\", { name: \"Charlie\" }]])",
         "from(\"events\").insert(\"click:cta_btn:1717068000\", { userId: \"user_102\", duration_ms: 12 })",
+        // NEW FILTER OPERATORS
+        "from(\"users\") | filter(name contains \"Ali\")",
+        "from(\"users\") | filter(name endsWith \"ce\")",
+        "from(\"orders\") | filter(amount between [40, 200])",
+        "from(\"users\") | filter(not status == \"inactive\")",
+        "from(\"users\") | filter(not (status == \"inactive\" or status == \"deleted\"))",
+        // DISTINCT STAGE
+        "from(\"users\") | distinct(status)",
+        "from(\"events\") | distinct(type)",
         // UPSERT OPERATIONS
         "from(\"users\").upsert(\"user_102\", { name: \"Alice\", status: \"active\", updated: true })",
         "from(\"inventory\").upsert([[\"SKU-001\", { qty: 150 }], [\"SKU-002\", { qty: 85 }]])",

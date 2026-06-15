@@ -41,6 +41,8 @@ async fn test_client_protocol_prefixes() {
         storage: StorageConfig {
             data_directory: test_dir.to_string(),
             max_segment_size_mb: 10,
+            
+            
             sync_mode: "always".to_string(),
             sync_interval_ms: 10,
         },
@@ -49,6 +51,10 @@ async fn test_client_protocol_prefixes() {
             max_open_file_descriptors: 10,
             max_index_ram_mb: 10,
             max_segment_size_mb: 10,
+            max_scan_results: 100_000,
+            
+            
+            
         },
         security: SecurityConfig {
             mode: "none".to_string(),
@@ -121,6 +127,8 @@ async fn test_client_listen_stream() {
         storage: StorageConfig {
             data_directory: test_dir.to_string(),
             max_segment_size_mb: 10,
+            
+            
             sync_mode: "always".to_string(),
             sync_interval_ms: 10,
         },
@@ -129,6 +137,10 @@ async fn test_client_listen_stream() {
             max_open_file_descriptors: 10,
             max_index_ram_mb: 10,
             max_segment_size_mb: 10,
+            max_scan_results: 100_000,
+            
+            
+            
         },
         security: SecurityConfig {
             mode: "none".to_string(),

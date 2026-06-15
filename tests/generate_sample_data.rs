@@ -1,7 +1,7 @@
 #[allow(unused_imports)]
 use fs2::FileExt;
 use liven::storage::StorageEngine;
-use liven::types::DataValue;
+use liven::types::{DataValue, parse_json_to_datavalue};
 use std::fs;
 
 fn post_http_json(addr: &str, path: &str, json_payload: &str) -> Result<(), String> {
@@ -55,7 +55,12 @@ enum AppendTarget {
 }
 
 impl AppendTarget {
-    fn append(&mut self, stream: &str, key: &str, value: DataValue) -> Result<(), String> {
+    fn append(
+        &mut self,
+        stream: &str,
+        key: &str,
+        value: DataValue,
+    ) -> Result<(), liven::error::LivenError> {
         match self {
             AppendTarget::Engine(engine) => engine.append(stream, key, value, false).map(|_| ()),
             AppendTarget::Http { batch, .. } => {
@@ -76,6 +81,43 @@ impl AppendTarget {
                     }
                     DataValue::Binary(b) => serde_json::Value::String(format!("{:?}", b)),
                     DataValue::Array(_) => serde_json::Value::Array(vec![]),
+                    DataValue::Object(obj) => {
+                        let mut obj_map = serde_json::Map::new();
+                        for (k, v) in obj {
+                            // Recursively convert nested DataValue to JSON
+                            let json_val = match v {
+                                DataValue::Null => serde_json::Value::Null,
+                                DataValue::Bool(b) => serde_json::Value::Bool(b),
+                                DataValue::Int(i) => {
+                                    serde_json::Value::Number(serde_json::Number::from(i))
+                                }
+                                DataValue::UInt(u) => {
+                                    serde_json::Value::Number(serde_json::Number::from(u))
+                                }
+                                DataValue::Float(f) => serde_json::Value::Number(
+                                    serde_json::Number::from_f64(*f)
+                                        .unwrap_or(serde_json::Number::from(0)),
+                                ),
+                                DataValue::String(s) => serde_json::Value::String(s.clone()),
+                                DataValue::Binary(b) => {
+                                    serde_json::Value::String(format!("{:?}", b))
+                                }
+                                DataValue::Array(_) => serde_json::Value::Array(vec![]),
+                                DataValue::Object(_) => {
+                                    serde_json::Value::Object(serde_json::Map::new())
+                                }
+                                DataValue::Vector(v) => serde_json::Value::Array(
+                                    v.iter()
+                                        .map(|x| {
+                                            serde_json::Value::Number(serde_json::Number::from(*x))
+                                        })
+                                        .collect(),
+                                ),
+                            };
+                            obj_map.insert(k.clone(), json_val);
+                        }
+                        serde_json::Value::Object(obj_map)
+                    }
                     DataValue::Vector(v) => serde_json::Value::Array(
                         v.into_iter()
                             .map(|x| serde_json::Value::Number(serde_json::Number::from(x)))
@@ -92,21 +134,26 @@ impl AppendTarget {
         }
     }
 
-    fn flush(&mut self) -> Result<(), String> {
+    fn flush(&mut self) -> Result<(), liven::error::LivenError> {
         if let AppendTarget::Http { addr, batch } = self
             && !batch.is_empty()
         {
             let json_str = serde_json::to_string(batch).map_err(|e| e.to_string())?;
-            post_http_json(addr, "/api/ingest", &json_str)?;
+            post_http_json(addr, "/api/ingest", &json_str)
+                .map_err(liven::error::LivenError::Storage)?;
             batch.clear();
         }
         Ok(())
     }
 
-    fn compact(&mut self) -> Result<(), String> {
+    fn compact(&mut self) -> Result<(), liven::error::LivenError> {
         match self {
             AppendTarget::Engine(engine) => engine.compact().map(|_| ()),
-            AppendTarget::Http { addr, .. } => post_http_json(addr, "/api/compact", "{}"),
+            AppendTarget::Http { .. } => {
+                // HTTP compaction endpoint has been removed - compaction is now automatic
+                // For testing purposes, we'll just return Ok since we can't trigger it via HTTP
+                Ok(())
+            }
         }
     }
 }
@@ -192,8 +239,10 @@ fn test_generate_sample_data() {
     ];
 
     for (key, json_str) in ai_agents_data {
+        // Convert JSON string to native Object datatype
+        let obj_value = parse_json_to_datavalue(json_str);
         target
-            .append("ai_agents", key, DataValue::String(json_str.to_string()))
+            .append("ai_agents", key, obj_value)
             .expect("Failed to append AI agent telemetry");
     }
 
@@ -236,12 +285,10 @@ fn test_generate_sample_data() {
     ];
 
     for (key, json_str) in prediction_markets_data {
+        // Convert JSON string to native Object datatype
+        let obj_value = parse_json_to_datavalue(json_str);
         target
-            .append(
-                "prediction_markets",
-                key,
-                DataValue::String(json_str.to_string()),
-            )
+            .append("prediction_markets", key, obj_value)
             .expect("Failed to append prediction markets data");
     }
 
@@ -276,12 +323,10 @@ fn test_generate_sample_data() {
     ];
 
     for (key, json_str) in iot_telemetry_data {
+        // Convert JSON string to native Object datatype
+        let obj_value = parse_json_to_datavalue(json_str);
         target
-            .append(
-                "iot_telemetry",
-                key,
-                DataValue::String(json_str.to_string()),
-            )
+            .append("iot_telemetry", key, obj_value)
             .expect("Failed to append IoT telemetry");
     }
 
@@ -324,13 +369,162 @@ fn test_generate_sample_data() {
     ];
 
     for (key, json_str) in football_livescore_data {
+        // Convert JSON string to native Object datatype
+        let obj_value = parse_json_to_datavalue(json_str);
         target
-            .append(
-                "football_livescore",
-                key,
-                DataValue::String(json_str.to_string()),
-            )
+            .append("football_livescore", key, obj_value)
             .expect("Failed to append football livescore");
+    }
+
+    // Flush any buffered HTTP batches
+    target
+        .flush()
+        .expect("Failed to flush HTTP batch data to active server");
+
+    println!("Injecting rich Transaction data for relationship testing...");
+
+    // 5. Ingest realistic transaction data for testing correlate/chain/sequence operations
+    let transaction_data = vec![
+        (
+            "tx_001",
+            r#"{"transaction_id": "tx_001", "user_id": "user_101", "amount": 1500.0, "currency": "USD", "status": "completed", "timestamp": 1780245000, "merchant": "Amazon"}"#,
+        ),
+        (
+            "tx_002",
+            r#"{"transaction_id": "tx_002", "user_id": "user_102", "amount": 250.0, "currency": "USD", "status": "completed", "timestamp": 1780245100, "merchant": "Netflix"}"#,
+        ),
+        (
+            "tx_003",
+            r#"{"transaction_id": "tx_003", "user_id": "user_101", "amount": 3500.0, "currency": "USD", "status": "completed", "timestamp": 1780245200, "merchant": "Apple"}"#,
+        ),
+        (
+            "tx_004",
+            r#"{"transaction_id": "tx_004", "user_id": "user_103", "amount": 75.0, "currency": "USD", "status": "pending", "timestamp": 1780245300, "merchant": "Spotify"}"#,
+        ),
+        (
+            "tx_005",
+            r#"{"transaction_id": "tx_005", "user_id": "user_102", "amount": 1200.0, "currency": "USD", "status": "failed", "timestamp": 1780245400, "merchant": "Best Buy", "error": "insufficient_funds"}"#,
+        ),
+        (
+            "tx_006",
+            r#"{"transaction_id": "tx_006", "user_id": "user_101", "amount": 89.99, "currency": "USD", "status": "completed", "timestamp": 1780245500, "merchant": "Uber"}"#,
+        ),
+        (
+            "tx_007",
+            r#"{"transaction_id": "tx_007", "user_id": "user_104", "amount": 1999.99, "currency": "USD", "status": "completed", "timestamp": 1780245600, "merchant": "Dell"}"#,
+        ),
+        (
+            "tx_008",
+            r#"{"transaction_id": "tx_008", "user_id": "user_103", "amount": 45.50, "currency": "USD", "status": "completed", "timestamp": 1780245700, "merchant": "Starbucks"}"#,
+        ),
+    ];
+
+    for (key, json_str) in transaction_data {
+        // Convert JSON string to native Object datatype
+        let obj_value = parse_json_to_datavalue(json_str);
+        target
+            .append("transactions", key, obj_value)
+            .expect("Failed to append transaction data");
+    }
+
+    println!("Injecting rich Login data for relationship testing...");
+
+    // 6. Ingest login data for correlation testing
+    let login_data = vec![
+        (
+            "login_001",
+            r#"{"login_id": "login_001", "user_id": "user_101", "timestamp": 1780244900, "ip": "192.168.1.101", "device": "iPhone 15", "status": "success"}"#,
+        ),
+        (
+            "login_002",
+            r#"{"login_id": "login_002", "user_id": "user_102", "timestamp": 1780245050, "ip": "192.168.1.102", "device": "MacBook Pro", "status": "success"}"#,
+        ),
+        (
+            "login_003",
+            r#"{"login_id": "login_003", "user_id": "user_101", "timestamp": 1780245150, "ip": "192.168.1.101", "device": "iPhone 15", "status": "success"}"#,
+        ),
+        (
+            "login_004",
+            r#"{"login_id": "login_004", "user_id": "user_103", "timestamp": 1780245250, "ip": "192.168.1.103", "device": "Windows PC", "status": "success"}"#,
+        ),
+        (
+            "login_005",
+            r#"{"login_id": "login_005", "user_id": "user_102", "timestamp": 1780245350, "ip": "192.168.1.102", "device": "MacBook Pro", "status": "failed", "error": "wrong_password"}"#,
+        ),
+        (
+            "login_006",
+            r#"{"login_id": "login_006", "user_id": "user_101", "timestamp": 1780245450, "ip": "192.168.1.101", "device": "iPhone 15", "status": "success"}"#,
+        ),
+    ];
+
+    for (key, json_str) in login_data {
+        // Convert JSON string to native Object datatype
+        let obj_value = parse_json_to_datavalue(json_str);
+        target
+            .append("logins", key, obj_value)
+            .expect("Failed to append login data");
+    }
+
+    println!("Injecting rich Order/Shipment/Delivery data for chain testing...");
+
+    // 7. Ingest order data for chain relationship testing
+    let order_data = vec![
+        (
+            "order_001",
+            r#"{"order_id": "order_001", "user_id": "user_101", "amount": 299.99, "status": "paid", "timestamp": 1780245000}"#,
+        ),
+        (
+            "order_002",
+            r#"{"order_id": "order_002", "user_id": "user_102", "amount": 149.99, "status": "paid", "timestamp": 1780245100}"#,
+        ),
+    ];
+
+    for (key, json_str) in order_data {
+        // Convert JSON string to native Object datatype
+        let obj_value = parse_json_to_datavalue(json_str);
+        target
+            .append("orders", key, obj_value)
+            .expect("Failed to append order data");
+    }
+
+    // 8. Ingest shipment data for chain relationship testing
+    let shipment_data = vec![
+        (
+            "shipment_001",
+            r#"{"shipment_id": "shipment_001", "order_id": "order_001", "carrier": "FedEx", "status": "shipped", "timestamp": 1780245200}"#,
+        ),
+        (
+            "shipment_002",
+            r#"{"shipment_id": "shipment_002", "order_id": "order_002", "carrier": "UPS", "status": "shipped", "timestamp": 1780245300}"#,
+        ),
+    ];
+
+    for (key, json_str) in shipment_data {
+        // Convert JSON string to native Object datatype
+        let obj_value = parse_json_to_datavalue(json_str);
+        target
+            .append("shipments", key, obj_value)
+            .expect("Failed to append shipment data");
+    }
+
+    // 9. Ingest delivery data for chain relationship testing
+    let delivery_data = vec![
+        (
+            "delivery_001",
+            r#"{"delivery_id": "delivery_001", "shipment_id": "shipment_001", "status": "delivered", "timestamp": 1780245400, "signature": "John Doe"}"#,
+        ),
+        (
+            "delivery_002",
+            r#"{"delivery_id": "delivery_002", "shipment_id": "shipment_002", "status": "delivered", "timestamp": 1780245500, "signature": "Jane Smith"}"#,
+        ),
+    ];
+
+    for (key, json_str) in delivery_data {
+        // Convert JSON string to native Object datatype
+        let obj_value = parse_json_to_datavalue(json_str);
+        target
+            .append("deliveries", key, obj_value)
+            .expect("Failed to append delivery data");
     }
 
     // Flush any buffered HTTP batches

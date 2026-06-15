@@ -1,5 +1,6 @@
 // Rebuild trigger for embedded static UI assets
 use crate::codec::{LivenCodec, LivenFrame};
+use crate::error::LivenError;
 use crate::executor::{apply_pipeline_stages_to_vec, execute_query, execute_query_stream};
 use crate::parser::{parse_pipeline, parse_query};
 use crate::storage::StorageEngine;
@@ -35,9 +36,9 @@ use std::sync::Mutex;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthKeyRecord {
     pub key_id: String,
-    pub role: String,     // 'admin', 'read-only', 'write-only'
-    pub auth_key: String, // BLAKE3 hex storage hash
-    pub status: String,   // 'active', 'revoked'
+    pub role: String,
+    pub auth_key: String,
+    pub status: String,
     #[serde(default)]
     pub allowed_tags: Vec<u32>,
 }
@@ -120,6 +121,35 @@ pub struct ServerState {
     pub identity_cache: std::sync::RwLock<HashMap<String, ClientIdentity>>,
 }
 
+impl ServerState {
+    /// Get the number of active connections
+    pub fn active_connection_count(&self) -> usize {
+        self.active_connections.lock().unwrap().len()
+    }
+
+    /// Get the number of active broadcast subscribers
+    pub fn broadcast_subscriber_count(&self) -> usize {
+        self.engine.broadcast_subscriber_count()
+    }
+
+    /// Write current status to a file for CLI status command
+    pub fn write_status_file(&self) -> std::io::Result<()> {
+        use std::io::Write;
+
+        let status_file = "liven.status";
+        let mut file = std::fs::File::create(status_file)?;
+
+        let status = format!(
+            "connections={}\nsubscribers={}",
+            self.active_connection_count(),
+            self.broadcast_subscriber_count()
+        );
+
+        file.write_all(status.as_bytes())?;
+        Ok(())
+    }
+}
+
 pub fn lookup_key_by_hash(engine: &StorageEngine, incoming_hash: &str) -> Option<AuthKeyRecord> {
     let keys = engine.list_keys("auth_keys");
     for k in keys {
@@ -160,7 +190,7 @@ pub fn kill_active_connections_for_hash(state: &ServerState, hash: &str) {
 pub fn bootstrap_auth_keys_table(
     engine: &StorageEngine,
     config_master_key: Option<&str>,
-) -> Result<(), String> {
+) -> crate::error::Result<()> {
     let keys = engine.list_keys("auth_keys");
     let mut root_admin_exists = false;
 
@@ -299,7 +329,7 @@ pub async fn run_server(
     engine: Arc<StorageEngine>,
     config: crate::config::AppConfig,
     run_ui: bool,
-) -> Result<(), String> {
+) -> crate::error::Result<()> {
     let state = Arc::new(ServerState {
         engine: engine.clone(),
         config: config.clone(),
@@ -320,6 +350,18 @@ pub async fn run_server(
         bootstrap_auth_keys_table(&engine, config.security.master_key.as_deref())?;
     }
 
+    // P12: Development mode warning banner
+    if config.security.mode == "none"
+        && (config.server.environment == "development" || config.server.environment == "test")
+    {
+        println!("┌─────────────────────────────────────────────┐");
+        println!("│  🔓 WARNING: Authentication is disabled.       │");
+        println!("│  LIVEN accepts all connections.             │");
+        println!("│  Set security.mode = auth_key in liven.toml │");
+        println!("│  before deploying to production.            │");
+        println!("└─────────────────────────────────────────────┘");
+    }
+
     // Populate identity_cache on startup from database stream keys
     {
         let keys = engine.list_keys("auth_keys");
@@ -333,7 +375,7 @@ pub async fn run_server(
                 let capabilities = match auth_rec.role.as_str() {
                     "admin" => crate::security::CAP_ROOT,
                     "read-only" => crate::security::CAP_READ,
-                    "write-only" => crate::security::CAP_WRITE,
+                    "write" => crate::security::CAP_WRITE,
                     _ => crate::security::CAP_NONE,
                 };
                 let client_cn = auth_rec.key_id.clone();
@@ -379,11 +421,47 @@ pub async fn run_server(
         }
     });
 
+    // Auto-compaction background task — checks every 60 seconds
+    let engine_compact = engine.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(60));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            interval.tick().await;
+            if engine_compact.should_compact() {
+                tracing::info!("Auto-compaction triggered");
+                let eng = engine_compact.clone();
+                if let Err(e) = tokio::task::spawn_blocking(move || eng.compact())
+                    .await
+                    .unwrap_or(Err(crate::error::LivenError::Internal(
+                        "Compaction task panicked".to_string(),
+                    )))
+                {
+                    tracing::warn!("Auto-compaction failed: {}", e);
+                }
+            }
+        }
+    });
+
+    // Status update background task — updates status file every 5 seconds
+    let state_for_status = state.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(5));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            interval.tick().await;
+            if let Err(e) = state_for_status.write_status_file() {
+                tracing::debug!("Failed to write status file: {}", e);
+            }
+        }
+    });
+
     // UI app router serving embedded SPA static assets AND Web API
     let ui_app = Router::new()
         .route("/ws", get(ws_handler))
         .route("/api/live/stream", get(ws_handler))
         .route("/api/health", get(health_handler))
+        .route("/api/heartbeat", get(heartbeat_handler))
         .route("/api/system/config", get(system_config_handler))
         .route("/api/system/auth/status", get(system_auth_status_handler))
         .route("/api/system/auth/login", post(system_auth_login_handler))
@@ -399,7 +477,6 @@ pub async fn run_server(
         .route("/api/ingest", post(ingest_handler))
         .route("/api/query", post(query_handler))
         .route("/api/streams", get(list_streams_handler))
-        .route("/api/compact", post(compact_handler))
         .fallback(static_handler)
         .with_state(state.clone())
         .layer(CorsLayer::permissive());
@@ -605,13 +682,20 @@ pub async fn run_server(
         let framed = tokio_util::codec::Framed::new(stream, LivenCodec::default());
         let (mut writer, mut reader) = framed.split();
 
+        // P12: Warn on production connections with no security
+        if state.config.server.environment == "production" && state.config.security.mode == "none" {
+            tracing::warn!(
+                "🚨 Production connection accepted with authentication disabled! Set security.mode = auth_key in liven.toml immediately!"
+            );
+        }
+
         loop {
             tokio::select! {
                 frame_res = reader.next() => {
                     match frame_res {
                         Some(Ok(frame)) => {
                             match frame {
-                                crate::codec::LivenFrame::Connect { client_id } => {
+                                crate::codec::LivenFrame::Connect { client_id, .. } => {
                                     if is_auth_key_mode {
                                         let hash = blake3::hash(client_id.as_bytes());
                                         let hash_hex = crate::security::hex_encode(hash.as_bytes());
@@ -620,7 +704,7 @@ pub async fn run_server(
                                                 capabilities = match auth_rec.role.as_str() {
                                                     "admin" => crate::security::CAP_ROOT,
                                                     "read-only" => crate::security::CAP_READ,
-                                                    "write-only" => crate::security::CAP_WRITE,
+                                                    "write" => crate::security::CAP_WRITE,
                                                     _ => crate::security::CAP_NONE,
                                                 };
                                                 let (close_tx, new_close_rx) = tokio::sync::oneshot::channel::<()>();
@@ -835,17 +919,17 @@ pub async fn run_server(
         tokio::select! {
             res = ui_server => {
                 if let Err(e) = res {
-                    return Err(format!("UI server error: {}", e));
+                    return Err(LivenError::Internal(format!("UI server error: {}", e)));
                 }
             }
             res = tcp_handle => {
                 let Err(e) = res;
-                return Err(format!("TCP server error: {}", e));
+                return Err(LivenError::Internal(format!("TCP server error: {}", e)));
             }
         }
     } else {
         let Err(e) = tcp_handle.await;
-        return Err(format!("TCP server error: {}", e));
+        return Err(LivenError::Internal(format!("TCP server error: {}", e)));
     }
 
     Ok(())
@@ -877,7 +961,9 @@ pub fn check_query_capabilities(query_str: &str, capabilities: u8) -> bool {
             | crate::types::Query::PipelineDelete { .. } => {
                 (capabilities & crate::security::CAP_WRITE) != 0
             }
-            crate::types::Query::Drop { .. } => (capabilities & crate::security::CAP_ADMIN) != 0,
+            crate::types::Query::Drop { .. } => {
+                (capabilities & crate::security::CAP_ROOT) == crate::security::CAP_ROOT
+            }
             crate::types::Query::ListStreams => (capabilities & crate::security::CAP_READ) != 0,
             crate::types::Query::Status => (capabilities & crate::security::CAP_READ) != 0,
             crate::types::Query::Pipeline(stages) => {
@@ -899,9 +985,57 @@ pub fn check_query_capabilities(query_str: &str, capabilities: u8) -> bool {
                 }
             }
             crate::types::Query::Listen { .. } => (capabilities & crate::security::CAP_READ) != 0,
+            crate::types::Query::Explain { .. } => (capabilities & crate::security::CAP_READ) != 0,
         },
         Err(_) => true,
     }
+}
+
+/// Validates that the request originates from the same host as the server.
+/// This prevents external access to REST endpoints that are intended only
+/// for the embedded Web UI.
+fn is_request_from_ui(headers: &HeaderMap, config: &crate::config::ServerConfig) -> bool {
+    let host_port = format!("{}:{}", config.host, config.webui_port);
+    let localhost = format!("127.0.0.1:{}", config.webui_port);
+    let localhost6 = format!("[::1]:{}", config.webui_port);
+    let localhost_name = format!("localhost:{}", config.webui_port);
+
+    // Check Host header
+    if let Some(host) = headers.get(header::HOST).and_then(|h| h.to_str().ok()) {
+        if host == host_port || host == localhost || host == localhost6 || host == localhost_name {
+            return true;
+        }
+    }
+
+    // Check Origin header (set by browsers)
+    if let Some(origin) = headers.get(header::ORIGIN).and_then(|h| h.to_str().ok()) {
+        let origin_clean = origin
+            .trim_start_matches("http://")
+            .trim_start_matches("https://");
+        if origin_clean == host_port
+            || origin_clean == localhost
+            || origin_clean == localhost6
+            || origin_clean == localhost_name
+        {
+            return true;
+        }
+    }
+
+    // Check Referer header (fallback)
+    if let Some(referer) = headers.get(header::REFERER).and_then(|h| h.to_str().ok()) {
+        if let Some(after) = referer.split("://").nth(1) {
+            let authority = after.split('/').next().unwrap_or("");
+            if authority == host_port
+                || authority == localhost
+                || authority == localhost6
+                || authority == localhost_name
+            {
+                return true;
+            }
+        }
+    }
+
+    false
 }
 
 // WebSocket handler
@@ -1187,17 +1321,25 @@ pub fn validate_session_and_slide(
 
     let mut sessions = state.sessions.lock().unwrap();
     if let Some(session) = sessions.get_mut(&session_id) {
-        if session.last_seen.elapsed() > Duration::from_secs(300) {
+        // 30 minutes idle timeout (1800 seconds)
+        if session.last_seen.elapsed() > Duration::from_secs(1800) {
             sessions.remove(&session_id);
             return Err(StatusCode::UNAUTHORIZED);
         }
+
+        // 8 hours absolute timeout (28800 seconds)
+        if session.last_seen.elapsed() > Duration::from_secs(28800) {
+            sessions.remove(&session_id);
+            return Err(StatusCode::UNAUTHORIZED);
+        }
+
         session.last_seen = std::time::Instant::now();
         let user_id = session.user_id.clone();
         let role = session.role.clone();
 
         let mut response_headers = HeaderMap::new();
         let cookie = format!(
-            "liven_session={}; HttpOnly; SameSite=Lax; Max-Age=300; Path=/",
+            "liven_session={}; HttpOnly; SameSite=Lax; Max-Age=28800; Path=/",
             session_id
         );
         if let Ok(val) = header::HeaderValue::from_str(&cookie) {
@@ -1216,8 +1358,12 @@ struct SystemLoginRequest {
 
 async fn system_auth_login_handler(
     State(state): State<Arc<ServerState>>,
+    headers: HeaderMap,
     Json(payload): Json<SystemLoginRequest>,
 ) -> Response {
+    if !is_request_from_ui(&headers, &state.config.server) {
+        return StatusCode::NOT_FOUND.into_response();
+    }
     let token = payload.token.trim();
     if token.is_empty() {
         return (StatusCode::BAD_REQUEST, "Authorization key cannot be empty").into_response();
@@ -1277,7 +1423,7 @@ async fn system_auth_login_handler(
             }
 
             let cookie = format!(
-                "liven_session={}; HttpOnly; SameSite=Lax; Max-Age=300; Path=/",
+                "liven_session={}; HttpOnly; SameSite=Lax; Max-Age=28800; Path=/",
                 session_id
             );
 
@@ -1306,13 +1452,16 @@ async fn system_auth_login_handler(
 #[derive(Serialize)]
 struct SystemStatusResponse {
     authenticated: bool,
-    user_id: Option<String>,
+    role: Option<String>,
 }
 
 async fn system_auth_status_handler(
     State(state): State<Arc<ServerState>>,
     headers: HeaderMap,
 ) -> impl IntoResponse {
+    if !is_request_from_ui(&headers, &state.config.server) {
+        return StatusCode::NOT_FOUND.into_response();
+    }
     if let Some(cookie_val) = extract_session_cookie(&headers) {
         let mut sessions = state.sessions.lock().unwrap();
         if let Some(session) = sessions.get_mut(&cookie_val) {
@@ -1321,6 +1470,25 @@ async fn system_auth_status_handler(
             } else {
                 session.last_seen = std::time::Instant::now();
                 let user_id = session.user_id.clone();
+
+                // Look up the user's role from the identity cache
+                let role = state
+                    .identity_cache
+                    .read()
+                    .unwrap()
+                    .get(&user_id)
+                    .map(|identity| {
+                        if identity.capabilities == crate::security::CAP_ROOT {
+                            "admin".to_string()
+                        } else if identity.capabilities == crate::security::CAP_WRITE {
+                            "write".to_string()
+                        } else if identity.capabilities == crate::security::CAP_READ {
+                            "read-only".to_string()
+                        } else {
+                            "unknown".to_string()
+                        }
+                    });
+
                 let cookie = format!(
                     "liven_session={}; HttpOnly; SameSite=Lax; Max-Age=300; Path=/",
                     cookie_val
@@ -1332,7 +1500,7 @@ async fn system_auth_status_handler(
                     .body(Body::from(
                         serde_json::json!(SystemStatusResponse {
                             authenticated: true,
-                            user_id: Some(user_id),
+                            role,
                         })
                         .to_string(),
                     ))
@@ -1347,7 +1515,7 @@ async fn system_auth_status_handler(
         .body(Body::from(
             serde_json::json!(SystemStatusResponse {
                 authenticated: false,
-                user_id: None,
+                role: None,
             })
             .to_string(),
         ))
@@ -1489,7 +1657,7 @@ async fn system_auth_generate_key_handler(
         let capabilities = match payload_role.as_str() {
             "admin" => crate::security::CAP_ROOT,
             "read-only" => crate::security::CAP_READ,
-            "write-only" => crate::security::CAP_WRITE,
+            "write" => crate::security::CAP_WRITE,
             _ => crate::security::CAP_NONE,
         };
         let mut cache = state.identity_cache.write().unwrap();
@@ -1598,24 +1766,8 @@ async fn ingest_handler(
         Err(status) => return status.into_response(),
     };
 
-    let content_type = headers
-        .get(header::CONTENT_TYPE)
-        .and_then(|h| h.to_str().ok())
-        .unwrap_or("application/json");
-
-    let items: Vec<(String, String, DataValue)> = if content_type == "application/msgpack" {
-        match rmp_serde::from_slice::<Vec<RawIngestRecord>>(&body) {
-            Ok(recs) => rcs_to_batch(recs),
-            Err(e) => {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    slide_headers,
-                    format!("MessagePack error: {}", e),
-                )
-                    .into_response();
-            }
-        }
-    } else {
+    // Server only supports JSONL format for ingest (not MessagePack)
+    let items: Vec<(String, String, DataValue)> =
         match serde_json::from_slice::<Vec<RawIngestRecord>>(&body) {
             Ok(recs) => rcs_to_batch(recs),
             Err(e) => {
@@ -1626,8 +1778,7 @@ async fn ingest_handler(
                 )
                     .into_response();
             }
-        }
-    };
+        };
 
     if items.is_empty() {
         return (
@@ -1670,10 +1821,7 @@ async fn query_handler(
         Err(status) => return status.into_response(),
     };
 
-    let accept = headers
-        .get(header::ACCEPT)
-        .and_then(|h| h.to_str().ok())
-        .unwrap_or("application/json");
+    // Server only supports JSON format (accept header ignored)
 
     match parse_query(&payload.query) {
         Ok(query) => match execute_query(&state.engine, &query) {
@@ -1689,85 +1837,36 @@ async fn query_handler(
                 }
 
                 if let Some(fmt) = export_format {
-                    match fmt {
-                        ExportFormat::Jsonl => {
-                            let mut out = String::new();
-                            for r in results {
-                                if let Ok(s) = serde_json::to_string(&r) {
-                                    out.push_str(&s);
-                                    out.push('\n');
-                                }
-                            }
-                            let mut res_headers = slide_headers.clone();
-                            res_headers.insert(
-                                header::CONTENT_TYPE,
-                                header::HeaderValue::from_static("text/plain"),
-                            );
-                            return (StatusCode::OK, res_headers, out).into_response();
-                        }
-                        ExportFormat::Csv => {
-                            let mut writer = csv::Writer::from_writer(Vec::new());
-                            let _ = writer.write_record([
-                                "sequence_id",
-                                "timestamp",
-                                "stream",
-                                "key",
-                                "value",
-                            ]);
-                            for r in results {
-                                let val_str = match r.value {
-                                    DataValue::String(s) => s,
-                                    _ => format!("{:?}", r.value),
-                                };
-                                let _ = writer.write_record([
-                                    r.sequence_id.to_string(),
-                                    r.timestamp.to_string(),
-                                    r.stream_name.clone(),
-                                    r.key.to_string(),
-                                    val_str,
-                                ]);
-                            }
-                            let out_bytes = writer.into_inner().unwrap_or_default();
-                            let mut res_headers = slide_headers.clone();
-                            res_headers.insert(
-                                header::CONTENT_TYPE,
-                                header::HeaderValue::from_static("text/csv"),
-                            );
-                            return (StatusCode::OK, res_headers, out_bytes).into_response();
-                        }
-                        ExportFormat::MsgPack => {
-                            if let Ok(bytes) = rmp_serde::to_vec(&results) {
-                                let mut res_headers = slide_headers.clone();
-                                res_headers.insert(
-                                    header::CONTENT_TYPE,
-                                    header::HeaderValue::from_static("application/msgpack"),
-                                );
-                                return (StatusCode::OK, res_headers, bytes).into_response();
-                            }
+                    // Server only supports JSONL format for exports
+                    if fmt != ExportFormat::Jsonl {
+                        return (
+                            StatusCode::BAD_REQUEST,
+                            slide_headers.clone(),
+                            format!(
+                                "Server only supports JSONL export format, but got: {:?}",
+                                fmt
+                            ),
+                        )
+                            .into_response();
+                    }
+
+                    let mut out = String::new();
+                    for r in results {
+                        if let Ok(s) = serde_json::to_string(&r) {
+                            out.push_str(&s);
+                            out.push('\n');
                         }
                     }
+                    let mut res_headers = slide_headers.clone();
+                    res_headers.insert(
+                        header::CONTENT_TYPE,
+                        header::HeaderValue::from_static("text/plain"),
+                    );
+                    return (StatusCode::OK, res_headers, out).into_response();
                 }
 
-                if accept == "application/msgpack" {
-                    match rmp_serde::to_vec(&results) {
-                        Ok(bytes) => {
-                            let mut res_headers = slide_headers.clone();
-                            res_headers.insert(
-                                header::CONTENT_TYPE,
-                                header::HeaderValue::from_static("application/msgpack"),
-                            );
-                            (StatusCode::OK, res_headers, bytes).into_response()
-                        }
-                        Err(e) => (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            slide_headers,
-                            format!("MsgPack serialization error: {}", e),
-                        )
-                            .into_response(),
-                    }
-                } else {
-                    (StatusCode::OK, slide_headers, Json(results)).into_response()
-                }
+                // Server only supports JSON format (not MessagePack)
+                (StatusCode::OK, slide_headers, Json(results)).into_response()
             }
             Err(e) => (
                 StatusCode::BAD_REQUEST,
@@ -1797,30 +1896,36 @@ async fn list_streams_handler(
     (StatusCode::OK, slide_headers, Json(streams)).into_response()
 }
 
-async fn compact_handler(
+async fn health_handler(
     State(state): State<Arc<ServerState>>,
     headers: HeaderMap,
 ) -> impl IntoResponse {
-    let (_user_id, _role, slide_headers) = match validate_session_and_slide(&state, &headers) {
-        Ok(res) => res,
-        Err(status) => return status.into_response(),
-    };
-    match state.engine.compact() {
-        Ok(_) => (StatusCode::OK, slide_headers, "Compaction complete").into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            slide_headers,
-            format!("Compaction error: {}", e),
-        )
-            .into_response(),
+    if !is_request_from_ui(&headers, &state.config.server) {
+        return StatusCode::NOT_FOUND.into_response();
     }
-}
-
-async fn health_handler() -> impl IntoResponse {
     (
         StatusCode::OK,
         Json(serde_json::json!({ "status": "healthy" })),
     )
+        .into_response()
+}
+
+async fn heartbeat_handler(
+    State(state): State<Arc<ServerState>>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    // Validate the session and slide the timeout
+    match validate_session_and_slide(&state, &headers) {
+        Ok((_user_id, _role, slide_headers)) => {
+            (
+                StatusCode::OK,
+                slide_headers,
+                Json(serde_json::json!({ "status": "heartbeat_received", "message": "Session kept alive" })),
+            )
+                .into_response()
+        }
+        Err(status) => status.into_response(),
+    }
 }
 
 async fn static_handler(uri: axum::http::Uri) -> impl IntoResponse {
@@ -1855,12 +1960,22 @@ async fn system_config_handler(
     State(state): State<Arc<ServerState>>,
     headers: HeaderMap,
 ) -> impl IntoResponse {
-    let mut config = state.config.clone();
-    config.security.master_key = None;
-
-    if let Ok((_user_id, _role, slide_headers)) = validate_session_and_slide(&state, &headers) {
-        (StatusCode::OK, slide_headers, Json(config)).into_response()
-    } else {
-        (StatusCode::OK, HeaderMap::new(), Json(config)).into_response()
+    // Allow UI requests to fetch config without authentication
+    // This is necessary for the UI to determine the security mode before authenticating
+    if !is_request_from_ui(&headers, &state.config.server) {
+        return StatusCode::NOT_FOUND.into_response();
     }
+
+    let config = state.config.clone();
+
+    // Return only essential configuration that UI needs (no sensitive data)
+    let response = serde_json::json!({
+        "webui_port": config.server.webui_port,
+        "db_port": config.server.db_port,
+        "security": {
+            "mode": config.security.mode
+        }
+    });
+
+    (StatusCode::OK, Json(response)).into_response()
 }

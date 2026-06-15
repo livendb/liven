@@ -116,10 +116,6 @@ fn test_all_proposed_syntaxes() {
     // 6. Group
     let q = parse_query("from(\"orders\") | group(status, count(), sum(amount))").unwrap();
     if let Query::Pipeline(ref stages) = q {
-        if let PipelineStage::Filter { expr: _ } = &stages[1] {
-            // Wait, the group field might be parsed differently.
-            // Let's make sure it matches the exact structures in the original test!
-        }
         if let PipelineStage::Group {
             field,
             aggregations,
@@ -193,4 +189,116 @@ fn test_all_proposed_syntaxes() {
     assert!(matches!(q, Query::ListStreams));
     let q = parse_query("streams(  )").unwrap();
     assert!(matches!(q, Query::ListStreams));
+}
+
+// ── New feature: filter operators ──
+
+#[test]
+fn test_contains_operator() {
+    let q = parse_query(r#"from("logs") | filter(message contains "error")"#).unwrap();
+    assert!(matches!(q, Query::Pipeline(_)));
+}
+
+#[test]
+fn test_endswith_operator() {
+    let q = parse_query(r#"from("files") | filter(name endsWith ".log")"#).unwrap();
+    assert!(matches!(q, Query::Pipeline(_)));
+}
+
+#[test]
+fn test_between_operator() {
+    let q = parse_query(r#"from("orders") | filter(amount between [100, 500])"#).unwrap();
+    assert!(matches!(q, Query::Pipeline(_)));
+}
+
+#[test]
+fn test_not_operator() {
+    let q = parse_query(r#"from("users") | filter(not status == "inactive")"#).unwrap();
+    assert!(matches!(q, Query::Pipeline(_)));
+
+    // not with parenthesised expression
+    let q =
+        parse_query(r#"from("users") | filter(not (status == "inactive" or status == "deleted"))"#)
+            .unwrap();
+    assert!(matches!(q, Query::Pipeline(_)));
+}
+
+#[test]
+fn test_pipe_in_string_literal() {
+    // pipe character inside string literal should not split the pipeline
+    let q = parse_query(r#"from("logs") | filter(message == "a|b")"#).unwrap();
+    assert!(matches!(q, Query::Pipeline(_)));
+}
+
+#[test]
+fn test_sequence_with_parenthesised_sub_expr() {
+    let q = parse_query(
+        r#"from("auth") | sequence((action == "fail" or action == "error"), then: action == "block", within: 60000)"#,
+    )
+    .unwrap();
+    assert!(matches!(q, Query::Pipeline(_)));
+}
+
+// ── New feature: distinct stage ──
+
+#[test]
+fn test_distinct_parsing() {
+    // bare identifier
+    let stages = parse_pipeline(r#"from("events") | distinct(type)"#).unwrap();
+    assert_eq!(stages.len(), 2);
+    assert_eq!(
+        stages[0],
+        PipelineStage::From {
+            stream_name: "events".to_string()
+        }
+    );
+    assert_eq!(
+        stages[1],
+        PipelineStage::Distinct {
+            field: "type".to_string()
+        }
+    );
+
+    // quoted field name
+    let stages = parse_pipeline(r#"from("events") | distinct("type")"#).unwrap();
+    assert_eq!(
+        stages[1],
+        PipelineStage::Distinct {
+            field: "type".to_string()
+        }
+    );
+}
+
+// ── New feature: explain ──
+
+#[test]
+fn test_explain_parsing() {
+    // explain a pipeline query (bare identifiers to avoid double-escape issue)
+    let q = parse_query(r#"explain("from(orders) | filter(amount > 100)")"#).unwrap();
+    assert!(matches!(q, Query::Explain { .. }));
+
+    // explain an insert (bare identifiers)
+    let q = parse_query(r#"explain("from(users).insert(k1, {name: test})")"#).unwrap();
+    assert!(matches!(q, Query::Explain { .. }));
+
+    // explain list streams
+    let q = parse_query(r#"explain("streams")"#).unwrap();
+    assert!(matches!(q, Query::Explain { .. }));
+
+    // explain status
+    let q = parse_query(r#"explain("status")"#).unwrap();
+    assert!(matches!(q, Query::Explain { .. }));
+}
+
+// ── New feature: escape sequences in string literals ──
+
+#[test]
+fn test_escape_sequences_in_strings() {
+    // escaped quote inside string
+    let q = parse_query(r#"from("logs") | filter(message == "hello\"world")"#).unwrap();
+    assert!(matches!(q, Query::Pipeline(_)));
+
+    // escaped backslash
+    let q = parse_query(r#"from("paths") | filter(path == "c:\\users\\test")"#).unwrap();
+    assert!(matches!(q, Query::Pipeline(_)));
 }

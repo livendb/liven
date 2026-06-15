@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Key, Eye, EyeOff, Sun, Moon } from "lucide-react";
+import { Eye, EyeOff, Sun, Moon, Monitor } from "lucide-react";
 import { submitSystemLogin } from "../utils/requests";
 
 interface LoginProps {
@@ -54,7 +54,11 @@ export default function Login({ onLoginSuccess }: LoginProps) {
   }, [theme]);
 
   const toggleTheme = () => {
-    setTheme((prev) => (prev === "dark" ? "light" : "dark"));
+    setTheme((prev) => {
+      if (prev === "dark") return "light";
+      if (prev === "light") return "system";
+      return "dark"; // if currently system, go back to dark
+    });
   };
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -84,7 +88,7 @@ export default function Login({ onLoginSuccess }: LoginProps) {
   };
 
   return (
-    <div className="relative min-h-screen flex items-center justify-center overflow-hidden font-sans transition-all duration-500 bg-body-bg text-text-main">
+    <div className="relative min-h-screen flex flex-col items-center justify-center overflow-hidden font-sans transition-all duration-500 bg-body-bg text-text-main">
       {/* Premium background gradient spheres and glows */}
       {resolvedTheme === "dark" ? (
         <>
@@ -113,34 +117,36 @@ export default function Login({ onLoginSuccess }: LoginProps) {
               ? "bg-zinc-950/60 border-zinc-800 text-primary hover:bg-zinc-900 hover:border-primary/60"
               : "bg-white/80 border-zinc-200/60 text-primary hover:bg-zinc-50 hover:border-primary-hover"
           }`}
-          title={`Switch to ${resolvedTheme === "dark" ? "Light" : "Dark"} Mode`}
+          title={`Switch to ${theme === "dark" ? "Light" : theme === "light" ? "System" : "Dark"} Mode`}
         >
-          {resolvedTheme === "dark" ? (
+          {theme === "dark" ? (
             <Sun className="w-5 h-5" />
-          ) : (
+          ) : theme === "light" ? (
             <Moon className="w-5 h-5" />
+          ) : (
+            <Monitor className="w-5 h-5" />
           )}
         </button>
       </div>
 
+      {/* Logo and Title outside the card */}
+      <div className="relative z-10 text-center mb-6">
+        <div className="flex justify-center">
+          <img src={`/logo.svg`} alt="LivenDB Logo" className="w-20 h-20" />
+          <h1 className="text-5xl font-extrabold tracking-tight text-zinc-500 dark:text-zinc-200 mt-2">
+            LivenDB
+          </h1>
+        </div>
+      </div>
+
       {/* Login glassmorphic card container */}
       <div
-        className={`relative w-full max-w-md mx-4 p-8 rounded-3xl border backdrop-blur-2xl shadow-2xl transition-all  ${
+        className={`relative w-full max-w-md mx-4 p-8 rounded-3xl border backdrop-blur-2xl shadow-2xl transition-all ${
           resolvedTheme === "dark"
             ? "border-zinc-800 bg-zinc-900 shadow-primary/30"
             : "border-primary/20 bg-white/90 shadow-primary/5"
         }`}
       >
-        {/* Header/Logo */}
-        <div className="text-center mb-8">
-          <h1 className="text-4xl font-extrabold tracking-tight text-primary">
-            LIVEN
-          </h1>
-          <p className="text-xs font-bold tracking-widest mt-1.5 uppercase text-accent">
-            Admin Login
-          </p>
-        </div>
-
         {/* Action feedback notifications */}
         {error && (
           <div
@@ -235,7 +241,6 @@ export default function Login({ onLoginSuccess }: LoginProps) {
               </span>
             ) : (
               <>
-                <Key className="w-4 h-4" />
                 <span>Sign In</span>
               </>
             )}

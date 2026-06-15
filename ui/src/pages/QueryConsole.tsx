@@ -18,12 +18,14 @@ import {
   Database,
   List,
   Table,
+  Share2,
 } from "lucide-react";
 import { Record } from "../types";
 import { getDbApiUrl } from "../utils/api";
 import { gruvboxDark, atomOneLight } from "../utils/theme";
 import RowExpand from "../components/RowExpand";
 import PrettifiedGridView from "../components/PrettifiedGridView";
+import GraphView from "../components/GraphView";
 
 export interface QueryConsoleProps {
   query: string;
@@ -476,7 +478,7 @@ export default function QueryConsole({
   setIsHelpOpen,
   streams,
 }: QueryConsoleProps) {
-  const [viewMode, setViewMode] = useState<"list" | "table">("list");
+  const [viewMode, setViewMode] = useState<"list" | "table" | "graph">("list");
   const [hasExecuted, setHasExecuted] = useState(false);
 
   // Setup CodeMirror autocomplete extension using streams prop
@@ -932,6 +934,18 @@ export default function QueryConsole({
                     <Table className="w-3.5 h-3.5" />
                     <span>Table</span>
                   </button>
+                  <button
+                    onClick={() => setViewMode("graph")}
+                    className={`px-2.5 py-1.5 rounded-xs flex items-center gap-1.5 text-[11px] transition-all font-bold cursor-pointer ${
+                      viewMode === "graph"
+                        ? "bg-primary text-white"
+                        : "text-zinc-450 hover:text-zinc-800 dark:hover:text-zinc-200"
+                    }`}
+                    title="Graph View"
+                  >
+                    <Share2 className="w-3.5 h-3.5" />
+                    <span>Graph</span>
+                  </button>
                 </div>
 
                 <div className="w-px h-4 bg-zinc-200 dark:bg-zinc-800 shrink-0" />
@@ -968,16 +982,19 @@ export default function QueryConsole({
                   />
                 ))}
               </div>
-            ) : (
+            ) : viewMode === "table" ? (
               /* Paginated Table (Prettified dynamic grid view) */
               <PrettifiedGridView
                 records={paginatedResults}
                 resolvedTheme={resolvedTheme}
               />
+            ) : (
+              /* Graph View */
+              <GraphView records={paginatedResults} query={query} />
             )}
 
             {/* Pagination Controls */}
-            {totalPages > 1 && (
+            {viewMode !== "graph" && totalPages > 1 && (
               <div className="px-6 py-4 border-t border-zinc-100 dark:border-zinc-800 bg-zinc-50/20 dark:bg-zinc-900/5 flex items-center justify-between">
                 <button
                   disabled={queryCurrentPage === 1}

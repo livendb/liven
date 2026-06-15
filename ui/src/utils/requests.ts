@@ -1,7 +1,9 @@
 import { getDbApiUrl } from "./api";
 
 // 1. Submit Symmetric Auth Key Login
-export async function submitSystemLogin(token: string): Promise<{ status: string; user_id: string; permissions: string }> {
+export async function submitSystemLogin(
+  token: string,
+): Promise<{ status: string; user_id: string; permissions: string }> {
   const res = await fetch(getDbApiUrl("/api/system/auth/login"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -18,7 +20,10 @@ export async function submitSystemLogin(token: string): Promise<{ status: string
 }
 
 // 1.5. Submit Session Auth Logout
-export async function submitSystemLogout(): Promise<{ status: string; message: string }> {
+export async function submitSystemLogout(): Promise<{
+  status: string;
+  message: string;
+}> {
   const res = await fetch(getDbApiUrl("/api/system/auth/logout"), {
     method: "POST",
     credentials: "include", // Transmits and handles the cleared session cookie
@@ -32,9 +37,12 @@ export async function submitSystemLogout(): Promise<{ status: string; message: s
   return res.json();
 }
 
-
 // 2. Fetch Cookie-based Session Auth Status
-export async function fetchAuthStatus(): Promise<{ authenticated: boolean; user_id?: string }> {
+export async function fetchAuthStatus(): Promise<{
+  authenticated: boolean;
+  user_id?: string;
+  role?: string;
+}> {
   const res = await fetch(getDbApiUrl("/api/system/auth/status"), {
     method: "GET",
     credentials: "include", // Ensures the session cookie is transmitted
@@ -81,7 +89,7 @@ export async function fetchAuthKeys(): Promise<AuthKeyRecord[]> {
 // 4. Generate a New Symmetric Auth Key
 export async function generateAuthKey(
   keyId: string,
-  role: string
+  role: string,
 ): Promise<GenerateKeyResponse> {
   const res = await fetch(getDbApiUrl("/api/system/auth/keys"), {
     method: "POST",
@@ -99,7 +107,9 @@ export async function generateAuthKey(
 }
 
 // 4.5. Revoke an Existing Auth Key
-export async function revokeAuthKey(keyId: string): Promise<{ status: string }> {
+export async function revokeAuthKey(
+  keyId: string,
+): Promise<{ status: string }> {
   const res = await fetch(getDbApiUrl("/api/system/auth/keys/revoke"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -116,7 +126,10 @@ export async function revokeAuthKey(keyId: string): Promise<{ status: string }> 
 }
 
 // 5. System Config Fetching
-export async function fetchSystemConfig(): Promise<{ security_mode: string; allow_local_auto_generation?: boolean }> {
+export async function fetchSystemConfig(): Promise<{
+  security_mode: string;
+  allow_local_auto_generation?: boolean;
+}> {
   const res = await fetch(getDbApiUrl("/api/system/config"));
   if (!res.ok) {
     const text = await res.text();
@@ -153,7 +166,10 @@ export async function executeQuery(queryStr: string): Promise<any[]> {
 }
 
 // 8. Ingestion helper
-export async function executeIngest(streamName: string, records: any[]): Promise<{ count: number }> {
+export async function executeIngest(
+  streamName: string,
+  records: any[],
+): Promise<{ count: number }> {
   const res = await fetch(getDbApiUrl("/api/ingest"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -163,19 +179,6 @@ export async function executeIngest(streamName: string, records: any[]): Promise
   if (!res.ok) {
     const text = await res.text();
     throw new Error(text || "Ingest failed.");
-  }
-  return res.json();
-}
-
-// 9. Compaction trigger helper
-export async function executeCompact(streamName: string): Promise<any> {
-  const res = await fetch(getDbApiUrl(`/api/compact?stream=${encodeURIComponent(streamName)}`), {
-    method: "POST",
-    credentials: "include",
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text || "Compaction failed.");
   }
   return res.json();
 }

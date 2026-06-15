@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Theme Switch Test</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://unpkg.com/lucide@latest" rel="stylesheet">
+</head>
+<body class="bg-gray-100 dark:bg-gray-900 transition-colors duration-500">
+    <div class="flex flex-col items-center justify-center min-h-screen">
+        <div class="bg-white dark:bg-gray-800 p-8 rounded-lg shadow-lg">
+            <h1 class="text-2xl font-bold mb-4 text-gray-800 dark:text-white">Theme Switch Test</h1>
+            <div id="theme-info" class="mb-4 text-gray-600 dark:text-gray-300">
+                Current theme: <span id="current-theme" class="font-mono font-bold">dark</span>
+            </div>
+            <button
+                id="theme-toggle"
+                class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+                Toggle Theme
+            </button>
+        </div>
+    </div>
+
+    <script></script>
+        let currentTheme = 'dark';
+
+        document.getElementById('theme-toggle').addEventListener('click', function() {
+            if (currentTheme === 'dark') {
+                currentTheme = 'light';
+                document.documentElement.classList.remove('dark');
+            } else if (currentTheme === 'light') {
+                currentTheme = 'system';
+                // For demo, we'll just toggle dark mode to simulate system
+                document.documentElement.classList.add('dark');
+            } else {
+                currentTheme = 'dark';
+                document.documentElement.classList.add('dark');
+            }
+
+            document.getElementById('current-theme').textContent = currentTheme;
+            this.textContent = `Next: ${getNextTheme(currentTheme)}`;
+        });
+
+        function getNextTheme(current) {
+            if (current === 'dark') return 'light';
+            if (current === 'light') return 'system';
+            return 'dark';
+        }
+    </script>
+</body>
+</html>

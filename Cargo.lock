@@ -1123,6 +1123,7 @@ name = "liven"
 version = "0.0.1"
 dependencies = [
  "axum",
+ "base64 0.22.1",
  "blake3",
  "bytes",
  "config",
@@ -1144,6 +1145,8 @@ dependencies = [
  "rustls-pemfile",
  "serde",
  "serde_json",
+ "tempfile",
+ "thiserror",
  "tokio",
  "tokio-rustls",
  "tokio-util",

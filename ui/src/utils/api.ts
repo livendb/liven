@@ -1,6 +1,5 @@
-// VivoDB API & Utility Helpers
-
-export let dbPort = typeof window !== "undefined" ? (window.location.port || "43120") : "43120";
+export let dbPort =
+  typeof window !== "undefined" ? window.location.port || "43120" : "43120";
 
 export function setDbPort(port: string) {
   dbPort = port;

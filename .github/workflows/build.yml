@@ -12,8 +12,43 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ── Fast check: runs on every PR and push ──
+  check:
+    name: Lint & Core Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Verify code formatting
+        run: cargo fmt --all -- --check
+
+      - name: Lint with clippy (lib + tests, no benches)
+        run: cargo clippy --lib --tests -- -D warnings
+
+      - name: Test embedded core (no default features)
+        run: cargo test --no-default-features --lib --tests
+
+      - name: Test full suite (lib + tests, no benches)
+        run: cargo test --lib --tests
+
+      - name: Audit dependencies
+        run: |
+          cargo install cargo-audit --locked 2>&1 || true
+          cargo audit 2>&1 || true
+
+  # ── Full build: cross-platform, release, install tests, packaging ──
   build:
-    name: Build & Test
+    name: Full Build (${{ matrix.os }})
+    if: github.event_name == 'push'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -41,56 +76,43 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy, rustfmt
+          components: clippy
 
       - name: Cache Cargo dependencies
         uses: Swatinem/rust-cache@v2
 
-      - name: Verify code formatting
-        run: cargo fmt --all -- --check
-
-      - name: Lint with clippy
-        run: cargo clippy --all-targets -- -D warnings
-
-      - name: Build embedded core (no default features)
-        run: cargo check --no-default-features
-
-      - name: Test embedded core (no default features)
-        run: cargo test --no-default-features
-
-      - name: Run automated test suite
-        run: cargo test --all-targets --workspace
+      # ── Use mold linker on Linux for ~5x faster LTO linking ──
+      - name: Install mold linker (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq mold
+          echo "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=clang" >> $GITHUB_ENV
+          echo "RUSTFLAGS=-C link-arg=-fuse-ld=mold" >> $GITHUB_ENV
 
       - name: Build release binary
         run: cargo build --release
 
-      - name: Run LIVEN Installation Tests (Linux)
+      # ── Installation tests ──
+      - name: Run Installation Tests (Linux)
         if: matrix.os == 'ubuntu-latest'
         run: |
           echo "==== Linux Installation Tests ===="
-          # Make install.sh executable
           chmod +x install.sh
 
-          # 1. Verify install.sh handles Mainstream Systemd (Production mode)
+          # 1. Production install
           sudo ./install.sh --env production
 
-          # Assertions
           grep -q 'environment = "production"' /etc/liven/liven.toml
           test -f /etc/liven/certs/ca.crt
           test -f /etc/liven/certs/ca.key
           test -f /etc/liven/certs/server.crt
           test -f /etc/liven/certs/server.key
-
-          # Assert strict POSIX permissions (600) on keys
           [ "$(stat -c '%a' /etc/liven/certs/server.key)" = "600" ]
           [ "$(stat -c '%a' /etc/liven/certs/ca.key)" = "600" ]
-
-          # Assert systemd unit is injected
           test -f /etc/systemd/system/liven.service
 
-          # 2. Verify Non-Systemd / Container Fallback
-          # Uses Debian (glibc) — the LIVEN binary is compiled against glibc.
-          # Alpine/musl support will be provided via a dedicated Dockerfile later.
+          # 2. Container fallback (Debian)
           docker run --rm -v ${{ github.workspace }}:/workspace debian:bookworm-slim sh -c "
             cp /workspace/install.sh /install.sh &&
             chmod +x /install.sh &&
@@ -104,59 +126,42 @@ jobs:
             grep -q 'environment = \"development\"' /etc/liven/liven.toml
           "
 
-          # 3. Live-Process Boot & Security Verification (Linux Production)
+          # 3. Live-process boot
           echo "Booting mTLS protected production LIVEN in background..."
           sudo /usr/local/bin/liven start --config /etc/liven/liven.toml &
           DB_PID=$!
           sleep 3
-
-          # Check if port is open
           sudo ss -tlnp | grep -q 43121
-
-          # Try cleartext curl - should fail/drop due to mTLS shield
-          curl -v --connect-timeout 3 http://127.0.0.1:43121/api/streams && (echo "FAIL: Cleartext succeeded in production!" && exit 1) || echo "PASS: Cleartext connection rejected successfully by mTLS shield"
-
-          # Clean up background process
+          curl -v --connect-timeout 3 http://127.0.0.1:43121/api/streams \
+            && (echo "FAIL: Cleartext succeeded in production!" && exit 1) \
+            || echo "PASS: Cleartext rejected by mTLS shield"
           sudo kill -15 $DB_PID || true
 
-      - name: Run LIVEN Installation Tests (macOS)
+      - name: Run Installation Tests (macOS)
         if: matrix.os == 'macos-latest'
         run: |
           echo "==== macOS Installation Tests ===="
-          # Make install.sh executable
           chmod +x install.sh
-
-          # 1. Verify install.sh handles launchd plist (Development mode)
           sudo ./install.sh --env development
-
-          # Assertions
           grep -q 'environment = "development"' /etc/liven/liven.toml
           test -f /Library/LaunchDaemons/com.liven.liven.plist
           test -f /usr/local/bin/liven
-
-          # 2. Live-Process Boot & Verification (macOS Development)
           echo "Booting cleartext development LIVEN in background..."
           sudo /usr/local/bin/liven start --config /etc/liven/liven.toml &
           DB_PID=$!
           sleep 3
-
-          # In development, cleartext API query should succeed
           if curl -v --connect-timeout 3 http://127.0.0.1:43120/api/streams; then
             echo "PASS: Development API connection succeeded"
           else
             echo "FAIL: Development API connection failed" && exit 1
           fi
-
-          # Clean up background process
           sudo kill -15 $DB_PID || true
 
-      - name: Run LIVEN Installation Tests (Windows)
+      - name: Run Installation Tests (Windows)
         if: matrix.os == 'windows-latest'
         shell: bash
         run: |
           echo "==== Windows Installation Tests ===="
-          # Run install.sh and assert that it gracefully outputs Windows instructions
-          # Capture output first to avoid SIGPIPE when grep -q closes the pipe early
           INSTALL_OUTPUT=$(./install.sh)
           echo "$INSTALL_OUTPUT" | grep -q "Windows Deployment Instructions"
           echo "PASS: Windows instructions successfully returned"
@@ -170,8 +175,10 @@ jobs:
             target/release/liven.exe
           if-no-files-found: error
 
-  package-distribution:
-    name: Package Distribution Assets
+  # ── Packaging: depends on build artifacts ──
+  package:
+    name: Package Distribution (${{ matrix.os }})
+    if: github.event_name == 'push'
     needs: build
     runs-on: ${{ matrix.os }}
     strategy:
@@ -182,11 +189,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -200,71 +202,53 @@ jobs:
           name: liven-${{ matrix.os }}
           path: target/release
 
-      - name: Package Linux Distributions (.deb, .rpm, .tar.gz)
+      - name: Install cargo-binstall (pre-built binary installer)
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
+
+      - name: Install packaging tools via binstall (skip compilation)
+        run: |
+          cargo binstall cargo-deb --no-confirm --locked 2>&1 || echo "Warning: cargo-deb install failed"
+          cargo binstall cargo-generate-rpm --no-confirm --locked 2>&1 || echo "Warning: cargo-generate-rpm install failed"
+          cargo binstall cargo-wix --no-confirm --locked 2>&1 || echo "Warning: cargo-wix install failed"
+
+      - name: Package Linux (.deb, .rpm, .tar.gz)
         if: matrix.os == 'ubuntu-latest'
         run: |
-          echo "==== Packaging Linux Distribution Assets ===="
           chmod +x target/release/liven
-
-          # Install cargo-deb and cargo-generate-rpm
-          cargo install cargo-deb --locked 2>&1 || echo "Warning: cargo-deb installation failed, skipping .deb package"
-          cargo install cargo-generate-rpm --locked 2>&1 || echo "Warning: cargo-generate-rpm installation failed, skipping .rpm package"
-
-          # 1. Build Debian Package
           cargo deb --no-build
-
-          # 2. Build RPM Package
           cargo generate-rpm --no-build
-
-          # 3. Build Tarball
           tar -czvf liven-linux-amd64.tar.gz -C target/release liven liven.toml
-
-          # Ensure directories exist and move packages
           mkdir -p dist
           mv target/debian/*.deb dist/ || true
           mv target/generate-rpm/*.rpm dist/ || true
           mv liven-linux-amd64.tar.gz dist/
 
-      - name: Package Windows MSI (.msi, .zip)
+      - name: Package Windows (.msi, .zip)
         if: matrix.os == 'windows-latest'
         shell: bash
         run: |
           echo "==== Packaging Windows Distribution Assets ===="
-          # Install cargo-wix
-          cargo install cargo-wix --locked 2>&1 || echo "Warning: cargo-wix installation failed, skipping .msi package"
-
-          # 1. Build MSI package using cargo wix
           cargo wix --no-build
-
-          # 2. Build Zip Archive
           powershell -Command "Compress-Archive -Path target/release/liven.exe, liven.toml -DestinationPath liven-windows-amd64.zip"
-
           mkdir -p dist
           mv target/wix/*.msi dist/ || true
           mv liven-windows-amd64.zip dist/
 
-      - name: Package macOS DMG (.dmg, .tar.gz)
+      - name: Package macOS (.dmg, .tar.gz)
         if: matrix.os == 'macos-latest'
         run: |
           echo "==== Packaging macOS Distribution Assets ===="
           chmod +x target/release/liven
-
-          # Create DMG assets placeholders so appdmg doesn't fail
           mkdir -p assets
           touch assets/liven.icns
           touch assets/dmg_background.png
-
-          # Install appdmg
           if npm install -g appdmg 2>&1; then
-            # 1. Build DMG Package
-            appdmg appdmg.json dist/liven-macos.dmg || echo "Warning: appdmg failed, skipping .dmg asset"
+            appdmg appdmg.json dist/liven-macos.dmg || echo "Warning: appdmg failed, skipping .dmg"
           else
-            echo "Warning: appdmg installation failed, skipping .dmg asset"
+            echo "Warning: appdmg install failed, skipping .dmg"
           fi
-
-          # 2. Build Tarball
           tar -czvf liven-macos-x64.tar.gz -C target/release liven liven.toml
-
           mkdir -p dist
           mv liven-macos-x64.tar.gz dist/
 

@@ -19,6 +19,7 @@ export interface NavbarProps {
   setTheme: (theme: "system" | "light" | "dark") => void;
   securityMode?: string;
   isAuthenticated?: boolean;
+  userRole?: string | null;
   onLogout?: () => void;
 }
 
@@ -29,16 +30,23 @@ export default function Navbar({
   setTheme,
   securityMode = "none",
   isAuthenticated = false,
+  userRole = null,
   onLogout,
 }: NavbarProps) {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
 
-  const navItems = [
-    { id: "dashboard", label: "Dashboard", icon: Activity },
-    { id: "query", label: "Query Console", icon: Terminal },
-    { id: "explorer", label: "Stream Explorer", icon: Database },
-    { id: "security", label: "Security & Keys", icon: Shield },
-  ] as const;
+  const baseNavItems = [
+    { id: "dashboard" as const, label: "Dashboard", icon: Activity },
+    { id: "query" as const, label: "Query Console", icon: Terminal },
+    { id: "explorer" as const, label: "Stream Explorer", icon: Database },
+  ];
+
+  const adminNavItems = [
+    { id: "security" as const, label: "Security & Keys", icon: Shield },
+  ];
+
+  const navItems =
+    userRole === "admin" ? [...baseNavItems, ...adminNavItems] : baseNavItems;
 
   const handleTabClick = (
     tabId: "dashboard" | "query" | "explorer" | "security",
@@ -139,10 +147,9 @@ export default function Navbar({
         <div className="flex flex-col gap-6 w-full pt-6">
           {/* LOGO AND BRAND HEADER */}
           <div className="px-6 flex flex-row gap-1.5">
-            <img src={"logo.png"} className="h-7" />
-            <h1 className="font-semibold text-lg leading-none mt-2 tracking-wider text-primary select-none">
-              Liven
-              <span className="text-accent">DB</span>
+            <img src={"logo.svg"} className="h-10" />
+            <h1 className="font-semibold text-lg leading-none mt-2 tracking-wider text-zinc-500 dark:text-white select-none">
+              LivenDB
             </h1>
           </div>
 
