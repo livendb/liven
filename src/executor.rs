@@ -1622,8 +1622,11 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> crate::error::Res
                 .as_millis() as i64;
 
             let value_str = format!(
-                r#"{{"active_connections":{},"broadcast_subscribers":{}}}"#,
-                active_connections, broadcast_subscribers
+                r#"{{"max_connections":{},"broadcast_capacity":{},"active_connections":{},"broadcast_subscribers":{}}}"#,
+                engine.max_connections,
+                engine.broadcast_capacity,
+                active_connections,
+                broadcast_subscribers
             );
 
             Ok(vec![Record {

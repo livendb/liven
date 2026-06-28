@@ -381,150 +381,347 @@ fn test_generate_sample_data() {
         .flush()
         .expect("Failed to flush HTTP batch data to active server");
 
-    println!("Injecting rich Transaction data for relationship testing...");
+    println!("Injecting rich relationship data covering enrich, correlate, chain, and sequence...");
 
-    // 5. Ingest realistic transaction data for testing correlate/chain/sequence operations
-    let transaction_data = vec![
-        (
-            "tx_001",
-            r#"{"transaction_id": "tx_001", "user_id": "user_101", "amount": 1500.0, "currency": "USD", "status": "completed", "timestamp": 1780245000, "merchant": "Amazon"}"#,
-        ),
-        (
-            "tx_002",
-            r#"{"transaction_id": "tx_002", "user_id": "user_102", "amount": 250.0, "currency": "USD", "status": "completed", "timestamp": 1780245100, "merchant": "Netflix"}"#,
-        ),
-        (
-            "tx_003",
-            r#"{"transaction_id": "tx_003", "user_id": "user_101", "amount": 3500.0, "currency": "USD", "status": "completed", "timestamp": 1780245200, "merchant": "Apple"}"#,
-        ),
-        (
-            "tx_004",
-            r#"{"transaction_id": "tx_004", "user_id": "user_103", "amount": 75.0, "currency": "USD", "status": "pending", "timestamp": 1780245300, "merchant": "Spotify"}"#,
-        ),
-        (
-            "tx_005",
-            r#"{"transaction_id": "tx_005", "user_id": "user_102", "amount": 1200.0, "currency": "USD", "status": "failed", "timestamp": 1780245400, "merchant": "Best Buy", "error": "insufficient_funds"}"#,
-        ),
-        (
-            "tx_006",
-            r#"{"transaction_id": "tx_006", "user_id": "user_101", "amount": 89.99, "currency": "USD", "status": "completed", "timestamp": 1780245500, "merchant": "Uber"}"#,
-        ),
-        (
-            "tx_007",
-            r#"{"transaction_id": "tx_007", "user_id": "user_104", "amount": 1999.99, "currency": "USD", "status": "completed", "timestamp": 1780245600, "merchant": "Dell"}"#,
-        ),
-        (
-            "tx_008",
-            r#"{"transaction_id": "tx_008", "user_id": "user_103", "amount": 45.50, "currency": "USD", "status": "completed", "timestamp": 1780245700, "merchant": "Starbucks"}"#,
-        ),
-    ];
+    // =======================================================================
+    // RELATIONSHIP DATA — 60+ records per stream, designed to match
+    // the sample queries in ui/src/constants/samples.ts
+    //
+    // CORRELATE:
+    //   from("transactions") | correlate("logins", "user_id", within: 60000)
+    //   → Both streams share user_id with close timestamps
+    //
+    // SEQUENCE:
+    //   from("telemetry") | sequence(event == "cpu_spike", then: event == "memory_leak", within: 30000)
+    //   from("auth") | sequence(action == "login_fail", then: action == "login_fail", then: action == "login_fail", within: 60000)
+    //
+    // CHAIN:
+    //   from("prompts") | chain("responses", "prompt_id")
+    //   from("prompts") | chain("responses", "prompt_id") | chain("memory", "response_id")
+    //   from("orders") | chain("shipments", "order_id") | chain("deliveries", "shipment_id")
+    //
+    // ENRICH:
+    //   from("prompts") | enrich("users", "user_id")
+    //
+    // Key design principle for chain:
+    //   chain(target_stream, join_key) does engine.get(target_stream, join_key_value)
+    //   So the target record's KEY must equal the join_key_value from the source
+    // =======================================================================
 
-    for (key, json_str) in transaction_data {
-        // Convert JSON string to native Object datatype
-        let obj_value = parse_json_to_datavalue(json_str);
+    // ── 5. Users (enrich source) ────────────────────────────────────────────
+    let users: Vec<(String, String)> = (1..=20)
+        .map(|i| {
+            let id = format!("user_{:03}", i);
+            let user = format!(
+                r#"{{"user_id": "{id}", "full_name": "User {i}", "email": "user{i}@example.com", "tier": "{}", "country": "{}", "signup_ts": {}}}"#,
+                ["free", "silver", "gold", "platinum"][i % 4],
+                ["US", "UK", "CA", "DE", "JP", "AU"][i % 6],
+                1000 + i * 100
+            );
+            (id, user)
+        })
+        .collect();
+    for (key, json) in &users {
         target
-            .append("transactions", key, obj_value)
-            .expect("Failed to append transaction data");
+            .append("users", key, parse_json_to_datavalue(json))
+            .expect("Failed to append users data");
     }
 
-    println!("Injecting rich Login data for relationship testing...");
-
-    // 6. Ingest login data for correlation testing
-    let login_data = vec![
-        (
-            "login_001",
-            r#"{"login_id": "login_001", "user_id": "user_101", "timestamp": 1780244900, "ip": "192.168.1.101", "device": "iPhone 15", "status": "success"}"#,
-        ),
-        (
-            "login_002",
-            r#"{"login_id": "login_002", "user_id": "user_102", "timestamp": 1780245050, "ip": "192.168.1.102", "device": "MacBook Pro", "status": "success"}"#,
-        ),
-        (
-            "login_003",
-            r#"{"login_id": "login_003", "user_id": "user_101", "timestamp": 1780245150, "ip": "192.168.1.101", "device": "iPhone 15", "status": "success"}"#,
-        ),
-        (
-            "login_004",
-            r#"{"login_id": "login_004", "user_id": "user_103", "timestamp": 1780245250, "ip": "192.168.1.103", "device": "Windows PC", "status": "success"}"#,
-        ),
-        (
-            "login_005",
-            r#"{"login_id": "login_005", "user_id": "user_102", "timestamp": 1780245350, "ip": "192.168.1.102", "device": "MacBook Pro", "status": "failed", "error": "wrong_password"}"#,
-        ),
-        (
-            "login_006",
-            r#"{"login_id": "login_006", "user_id": "user_101", "timestamp": 1780245450, "ip": "192.168.1.101", "device": "iPhone 15", "status": "success"}"#,
-        ),
+    // ── 6. Transactions (correlate partner with logins) ─────────────────────
+    // Each transaction has user_id, amount, timestamp, merchant
+    let merchants = [
+        "Amazon",
+        "Netflix",
+        "Apple",
+        "Uber",
+        "Delta",
+        "Walmart",
+        "Target",
+        "Starbucks",
+        "Best Buy",
+        "Spotify",
     ];
-
-    for (key, json_str) in login_data {
-        // Convert JSON string to native Object datatype
-        let obj_value = parse_json_to_datavalue(json_str);
+    let mut transactions: Vec<(String, String)> = Vec::with_capacity(65);
+    for i in 1..=65 {
+        let user_idx = ((i * 7) % 20) + 1;
+        let user_id = format!("user_{:03}", user_idx);
+        let merchant = merchants[i % merchants.len()];
+        let amount = ((i as f64 * 37.7) % 500.0 + 10.0) * 100.0; // cents
+        let amount_f = amount.round() / 100.0;
+        let ts = 1000 + i * 150; // millisecond timestamps, spread out
+        let status = if i % 7 == 0 {
+            "pending"
+        } else if i % 13 == 0 {
+            "failed"
+        } else {
+            "completed"
+        };
+        let key = format!("tx_{:03}", i);
+        let json = format!(
+            r#"{{"transaction_id": "{key}", "user_id": "{user_id}", "amount": {amount_f}, "currency": "USD", "merchant": "{merchant}", "status": "{status}", "timestamp": {ts}}}"#
+        );
+        transactions.push((key, json));
+    }
+    for (key, json) in &transactions {
         target
-            .append("logins", key, obj_value)
-            .expect("Failed to append login data");
+            .append("transactions", key, parse_json_to_datavalue(json))
+            .expect("Failed to append transactions data");
     }
 
-    println!("Injecting rich Order/Shipment/Delivery data for chain testing...");
-
-    // 7. Ingest order data for chain relationship testing
-    let order_data = vec![
-        (
-            "order_001",
-            r#"{"order_id": "order_001", "user_id": "user_101", "amount": 299.99, "status": "paid", "timestamp": 1780245000}"#,
-        ),
-        (
-            "order_002",
-            r#"{"order_id": "order_002", "user_id": "user_102", "amount": 149.99, "status": "paid", "timestamp": 1780245100}"#,
-        ),
+    // ── 7. Logins (correlate source with transactions) ──────────────────────
+    // Logins share user_ids with transactions and have close timestamps (±30000ms)
+    let devices = [
+        "iPhone 15",
+        "MacBook Pro",
+        "Pixel 9",
+        "Windows PC",
+        "iPad Air",
+        "Linux Workstation",
     ];
-
-    for (key, json_str) in order_data {
-        // Convert JSON string to native Object datatype
-        let obj_value = parse_json_to_datavalue(json_str);
+    let ips = [
+        "192.168.1.10",
+        "192.168.1.20",
+        "10.0.0.1",
+        "172.16.0.1",
+        "192.168.2.50",
+    ];
+    let mut logins: Vec<(String, String)> = Vec::with_capacity(65);
+    for i in 1..=65 {
+        let user_idx = ((i * 7) % 20) + 1;
+        let user_id = format!("user_{:03}", user_idx);
+        let device = devices[i % devices.len()];
+        let ip = ips[(i * 3) % ips.len()];
+        // Login timestamp within ±25000ms of the matching transaction
+        let base_ts = 1000i64 + i as i64 * 150;
+        let offset: i64 = if i % 3 == 0 {
+            -500
+        } else if i % 3 == 1 {
+            200
+        } else {
+            800
+        };
+        let ts = base_ts + offset;
+        let status = if i % 11 == 0 { "failed" } else { "success" };
+        let key = format!("login_{:03}", i);
+        let json = format!(
+            r#"{{"login_id": "{key}", "user_id": "{user_id}", "timestamp": {ts}, "ip": "{ip}", "device": "{device}", "status": "{status}"}}"#
+        );
+        logins.push((key, json));
+    }
+    for (key, json) in &logins {
         target
-            .append("orders", key, obj_value)
-            .expect("Failed to append order data");
+            .append("logins", key, parse_json_to_datavalue(json))
+            .expect("Failed to append logins data");
     }
 
-    // 8. Ingest shipment data for chain relationship testing
-    let shipment_data = vec![
-        (
-            "shipment_001",
-            r#"{"shipment_id": "shipment_001", "order_id": "order_001", "carrier": "FedEx", "status": "shipped", "timestamp": 1780245200}"#,
-        ),
-        (
-            "shipment_002",
-            r#"{"shipment_id": "shipment_002", "order_id": "order_002", "carrier": "UPS", "status": "shipped", "timestamp": 1780245300}"#,
-        ),
-    ];
-
-    for (key, json_str) in shipment_data {
-        // Convert JSON string to native Object datatype
-        let obj_value = parse_json_to_datavalue(json_str);
+    // ── 8. Telemetry (sequence: cpu_spike → memory_leak) ────────────────────
+    let mut telemetry: Vec<(String, String)> = Vec::with_capacity(66);
+    for batch in 0..11 {
+        // Each batch: normal events, then cpu_spike, then memory_leak
+        let base_ts = 100000 + batch * 40000;
+        let device = format!("server_{:02}", batch + 1);
+        telemetry.push((
+            format!("tel_{}_norm1", batch),
+            format!(r#"{{"device_id": "{device}", "event": "heartbeat", "cpu_pct": 23.0, "mem_pct": 45.0, "timestamp": {}}}"#, base_ts),
+        ));
+        telemetry.push((
+            format!("tel_{}_norm2", batch),
+            format!(r#"{{"device_id": "{device}", "event": "heartbeat", "cpu_pct": 28.0, "mem_pct": 48.0, "timestamp": {}}}"#, base_ts + 5000),
+        ));
+        telemetry.push((
+            format!("tel_{}_spike", batch),
+            format!(r#"{{"device_id": "{device}", "event": "cpu_spike", "cpu_pct": 97.0, "mem_pct": 72.0, "timestamp": {}}}"#, base_ts + 10000),
+        ));
+        telemetry.push((
+            format!("tel_{}_norm3", batch),
+            format!(r#"{{"device_id": "{device}", "event": "heartbeat", "cpu_pct": 88.0, "mem_pct": 76.0, "timestamp": {}}}"#, base_ts + 15000),
+        ));
+        telemetry.push((
+            format!("tel_{}_leak", batch),
+            format!(r#"{{"device_id": "{device}", "event": "memory_leak", "cpu_pct": 65.0, "mem_pct": 94.0, "timestamp": {}}}"#, base_ts + 20000),
+        ));
+        telemetry.push((
+            format!("tel_{}_oom", batch),
+            format!(r#"{{"device_id": "{device}", "event": "oom_kill", "cpu_pct": 12.0, "mem_pct": 99.0, "timestamp": {}}}"#, base_ts + 25000),
+        ));
+    }
+    for (key, json) in &telemetry {
         target
-            .append("shipments", key, obj_value)
-            .expect("Failed to append shipment data");
+            .append("telemetry", key, parse_json_to_datavalue(json))
+            .expect("Failed to append telemetry data");
     }
 
-    // 9. Ingest delivery data for chain relationship testing
-    let delivery_data = vec![
-        (
-            "delivery_001",
-            r#"{"delivery_id": "delivery_001", "shipment_id": "shipment_001", "status": "delivered", "timestamp": 1780245400, "signature": "John Doe"}"#,
-        ),
-        (
-            "delivery_002",
-            r#"{"delivery_id": "delivery_002", "shipment_id": "shipment_002", "status": "delivered", "timestamp": 1780245500, "signature": "Jane Smith"}"#,
-        ),
-    ];
-
-    for (key, json_str) in delivery_data {
-        // Convert JSON string to native Object datatype
-        let obj_value = parse_json_to_datavalue(json_str);
+    // ── 9. Auth events (sequence: 3x login_fail) ────────────────────────────
+    let mut auth_events: Vec<(String, String)> = Vec::with_capacity(66);
+    for batch in 0..10 {
+        let base_ts = 200000 + batch * 70000;
+        let user_id = format!("user_{:03}", (batch % 10) + 1);
+        // 3 consecutive failures, then a success
+        auth_events.push((
+            format!("auth_{}_fail1", batch),
+            format!(r#"{{"user_id": "{user_id}", "action": "login_fail", "reason": "wrong_password", "ip": "10.0.0.{}", "timestamp": {}}}"#, batch + 10, base_ts),
+        ));
+        auth_events.push((
+            format!("auth_{}_fail2", batch),
+            format!(r#"{{"user_id": "{user_id}", "action": "login_fail", "reason": "wrong_password", "ip": "10.0.0.{}", "timestamp": {}}}"#, batch + 10, base_ts + 5000),
+        ));
+        auth_events.push((
+            format!("auth_{}_fail3", batch),
+            format!(r#"{{"user_id": "{user_id}", "action": "login_fail", "reason": "invalid_token", "ip": "10.0.0.{}", "timestamp": {}}}"#, batch + 10, base_ts + 10000),
+        ));
+        auth_events.push((
+            format!("auth_{}_success", batch),
+            format!(r#"{{"user_id": "{user_id}", "action": "login_success", "ip": "10.0.0.{}", "timestamp": {}}}"#, batch + 10, base_ts + 15000),
+        ));
+        // Extra random events
+        for j in 0..3 {
+            auth_events.push((
+                format!("auth_{}_extra_{}", batch, j),
+                format!(r#"{{"user_id": "user_{:03}", "action": "login_success", "ip": "192.168.1.{}", "timestamp": {}}}"#,
+                    ((batch + j * 3) % 20) + 1,
+                    20 + j * 10,
+                    base_ts + 20000 + j * 3000
+                ),
+            ));
+        }
+    }
+    for (key, json) in &auth_events {
         target
-            .append("deliveries", key, obj_value)
-            .expect("Failed to append delivery data");
+            .append("auth", key, parse_json_to_datavalue(json))
+            .expect("Failed to append auth events");
+    }
+
+    // ── 10. Prompts (chain root for prompts→responses→memory) ──────────────
+    let mut prompts: Vec<(String, String)> = Vec::with_capacity(65);
+    for i in 1..=65 {
+        let key = format!("prompt_{:03}", i);
+        let prompt_id = &key;
+        let user_idx = ((i * 3) % 20) + 1;
+        let user_id = format!("user_{:03}", user_idx);
+        let text = match i % 5 {
+            0 => format!("Explain quantum computing in simple terms"),
+            1 => format!("Write a Rust function to parse CSV"),
+            2 => format!("Summarize the latest AI research papers"),
+            3 => format!("Debug this code: fn broken(x) {{ x + }}"),
+            _ => format!("Generate a SQL query for user analytics"),
+        };
+        let json = format!(
+            r#"{{"prompt_id": "{prompt_id}", "user_id": "{user_id}", "text": "{text}", "tokens": {}, "timestamp": {}}}"#,
+            50 + (i * 13) % 400,
+            300000 + i * 200
+        );
+        prompts.push((key, json));
+    }
+    for (key, json) in &prompts {
+        target
+            .append("prompts", key, parse_json_to_datavalue(json))
+            .expect("Failed to append prompts data");
+    }
+
+    // ── 11. Responses (chain hop 1: prompts → responses via prompt_id) ─────
+    // Key = prompt_id value so chain("responses", "prompt_id") resolves
+    let mut responses: Vec<(String, String)> = Vec::with_capacity(65);
+    for i in 1..=65 {
+        let key = format!("prompt_{:03}", i); // key = prompt_id
+        let response_id = format!("response_{:03}", i);
+        let model = ["gpt-4o", "claude-3.5-sonnet", "gemini-2.0-pro"][i % 3];
+        let json = format!(
+            r#"{{"response_id": "{response_id}", "prompt_id": "{key}", "model": "{model}", "text": "Response to prompt {i}", "tokens": {}, "latency_ms": {}, "timestamp": {}}}"#,
+            100 + (i * 17) % 900,
+            200 + (i * 11) % 3000,
+            300000 + i * 200 + 1000
+        );
+        responses.push((key, json));
+    }
+    for (key, json) in &responses {
+        target
+            .append("responses", key, parse_json_to_datavalue(json))
+            .expect("Failed to append responses data");
+    }
+
+    // ── 12. Memory (chain hop 2: prompts→responses→memory via response_id) ─
+    // Key = response_id value so chain("memory", "response_id") resolves
+    let mut memories: Vec<(String, String)> = Vec::with_capacity(65);
+    for i in 1..=65 {
+        let key = format!("response_{:03}", i); // key = response_id
+        let memory_id = format!("memory_{:03}", i);
+        let json = format!(
+            r#"{{"memory_id": "{memory_id}", "response_id": "{key}", "summary": "Embedding summary for prompt {i}", "vector_dim": 768, "ttl_days": 30, "created_at": {}}}"#,
+            300000 + i * 200 + 2000
+        );
+        memories.push((key, json));
+    }
+    for (key, json) in &memories {
+        target
+            .append("memory", key, parse_json_to_datavalue(json))
+            .expect("Failed to append memory data");
+    }
+
+    // ── 13. Orders (chain root for orders→shipments→deliveries) ────────────
+    let mut orders: Vec<(String, String)> = Vec::with_capacity(65);
+    for i in 1..=65 {
+        let key = format!("order_{:03}", i);
+        let user_idx = ((i * 7) % 20) + 1;
+        let user_id = format!("user_{:03}", user_idx);
+        let items = (i % 5) + 1;
+        let amount_f = (i as f64 * 29.99) % 500.0 + 15.0;
+        let ts = 400000 + i * 300;
+        let json = format!(
+            r#"{{"order_id": "{key}", "user_id": "{user_id}", "total": {amount_f:.2}, "currency": "USD", "items": {items}, "timestamp": {ts}}}"#
+        );
+        orders.push((key, json));
+    }
+    for (key, json) in &orders {
+        target
+            .append("orders", key, parse_json_to_datavalue(json))
+            .expect("Failed to append orders data");
+    }
+
+    // ── 14. Shipments (chain hop 1: orders → shipments via order_id) ───────
+    // Key = order_id value so chain("shipments", "order_id") resolves
+    let carriers = ["FedEx", "UPS", "USPS", "DHL", "Amazon Logistics"];
+    let mut shipments: Vec<(String, String)> = Vec::with_capacity(65);
+    for i in 1..=65 {
+        let key = format!("order_{:03}", i); // key = order_id
+        let shipment_id = format!("ship_{:03}", i);
+        let carrier = carriers[i % carriers.len()];
+        let tracking = format!(
+            "{}-{:06}-{}",
+            carrier.to_uppercase(),
+            i * 12345 % 999999,
+            if i % 2 == 0 { "USA" } else { "INTL" }
+        );
+        let status = if i <= 50 { "delivered" } else { "in_transit" };
+        let est_days = (i % 7) + 2;
+        let ts = 400000 + i * 300 + 5000;
+        let json = format!(
+            r#"{{"shipment_id": "{shipment_id}", "order_id": "{key}", "carrier": "{carrier}", "tracking": "{tracking}", "status": "{status}", "estimated_days": {est_days}, "timestamp": {ts}}}"#
+        );
+        shipments.push((key, json));
+    }
+    for (key, json) in &shipments {
+        target
+            .append("shipments", key, parse_json_to_datavalue(json))
+            .expect("Failed to append shipments data");
+    }
+
+    // ── 15. Deliveries (chain hop 2: orders→shipments→deliveries via shipment_id) ─
+    // Key = shipment_id value so chain("deliveries", "shipment_id") resolves
+    let mut deliveries: Vec<(String, String)> = Vec::with_capacity(65);
+    for i in 1..=65 {
+        let key = format!("ship_{:03}", i); // key = shipment_id
+        let delivery_id = format!("del_{:03}", i);
+        let recipient = format!("Customer {}", i);
+        let ts = 400000 + i * 300 + 15000;
+        let json = format!(
+            r#"{{"delivery_id": "{delivery_id}", "shipment_id": "{key}", "signed_by": "{recipient}", "status": "delivered", "timestamp": {ts}}}"#
+        );
+        deliveries.push((key, json));
+    }
+    for (key, json) in &deliveries {
+        target
+            .append("deliveries", key, parse_json_to_datavalue(json))
+            .expect("Failed to append deliveries data");
     }
 
     // Flush any buffered HTTP batches
@@ -536,6 +733,52 @@ fn test_generate_sample_data() {
     target
         .compact()
         .expect("Failed to compact generated sample database segments");
+
+    println!("\n🔍 Relationship data summary:");
+    println!(
+        "   users ........... {:>3} records  (enrich source)",
+        users.len()
+    );
+    println!(
+        "   transactions ... {:>3} records  (correlate partner with logins)",
+        transactions.len()
+    );
+    println!(
+        "   logins ......... {:>3} records  (correlate source)",
+        logins.len()
+    );
+    println!(
+        "   telemetry ...... {:>3} records  (sequence: cpu_spike → memory_leak)",
+        telemetry.len()
+    );
+    println!(
+        "   auth ........... {:>3} records  (sequence: 3x login_fail)",
+        auth_events.len()
+    );
+    println!(
+        "   prompts ........ {:>3} records  (chain root → responses → memory)",
+        prompts.len()
+    );
+    println!(
+        "   responses ...... {:>3} records  (chain hop 1)",
+        responses.len()
+    );
+    println!(
+        "   memory ......... {:>3} records  (chain hop 2)",
+        memories.len()
+    );
+    println!(
+        "   orders ......... {:>3} records  (chain root → shipments → deliveries)",
+        orders.len()
+    );
+    println!(
+        "   shipments ...... {:>3} records  (chain hop 1)",
+        shipments.len()
+    );
+    println!(
+        "   deliveries ..... {:>3} records  (chain hop 2)",
+        deliveries.len()
+    );
 
     println!("✨ Test sample data generation completed successfully! Premium datasets online.");
 

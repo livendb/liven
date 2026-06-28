@@ -10,7 +10,7 @@ import {
   X,
   LogOut,
 } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 export interface NavbarProps {
   activeTab: "dashboard" | "query" | "explorer" | "security";
@@ -35,18 +35,22 @@ export default function Navbar({
 }: NavbarProps) {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
 
-  const baseNavItems = [
+  // Debug: Log when userRole changes
+  useEffect(() => {
+    console.log("Navbar: userRole changed to:", userRole);
+  }, [userRole]);
+
+  const showAdminItems = userRole === "admin" && securityMode === "auth_key";
+
+  // FIX: Filter out falsy values before rendering - only include security tab if admin
+  const navItems = [
     { id: "dashboard" as const, label: "Dashboard", icon: Activity },
     { id: "query" as const, label: "Query Console", icon: Terminal },
     { id: "explorer" as const, label: "Stream Explorer", icon: Database },
+    ...(showAdminItems
+      ? [{ id: "security" as const, label: "Security & Keys", icon: Shield }]
+      : []),
   ];
-
-  const adminNavItems = [
-    { id: "security" as const, label: "Security & Keys", icon: Shield },
-  ];
-
-  const navItems =
-    userRole === "admin" ? [...baseNavItems, ...adminNavItems] : baseNavItems;
 
   const handleTabClick = (
     tabId: "dashboard" | "query" | "explorer" | "security",
@@ -89,7 +93,7 @@ export default function Navbar({
           className="w-full flex items-center justify-center gap-2 px-3 py-2 text-[13px] font-bold tracking-wider text-rose-600 hover:text-rose-700 dark:text-rose-400 dark:hover:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/20 border border-transparent hover:border-rose-200 dark:hover:border-rose-900/30 rounded-lg transition-all active:scale-[0.98]"
         >
           <LogOut className="w-3.5 h-3.5" />
-          <span>Log Out Session</span>
+          <span>Log out</span>
         </button>
       </div>
     );
@@ -107,7 +111,7 @@ export default function Navbar({
                 : "system",
           );
         }}
-        className="p-1.5 rounded-md border  border-gray-200 dark:border-white/10 text-zinc-400 dark:text-zinc-400 hover:opacity-90 transition-colors"
+        className="p-1.5 rounded-md border border-gray-200 dark:border-white/10 text-zinc-400 dark:text-zinc-400 hover:opacity-90 transition-colors"
         title={`Theme: ${theme === "system" ? "Auto" : theme === "light" ? "Light" : "Dark"}`}
       >
         <div className="flex items-center gap-1.5 text-[10px] font-medium tracking-wider">
@@ -147,7 +151,7 @@ export default function Navbar({
         <div className="flex flex-col gap-6 w-full pt-6">
           {/* LOGO AND BRAND HEADER */}
           <div className="px-6 flex flex-row gap-1.5">
-            <img src={"logo.svg"} className="h-10" />
+            <img src={"logo.svg"} className="h-10" alt="LivenDB Logo" />
             <h1 className="font-semibold text-lg leading-none mt-2 tracking-wider text-zinc-500 dark:text-white select-none">
               LivenDB
             </h1>
@@ -168,19 +172,19 @@ export default function Navbar({
       {/* 2. RESPONSIVE TOP NAVBAR (Mobile < 768px)                */}
       {/* ======================================================== */}
       <header className="md:hidden h-14 w-full fixed top-0 left-0 px-4 flex items-center justify-between border-b border-white/10 dark:border-zinc-800/50 bg-white dark:bg-zinc-900 backdrop-blur-md z-40 transition-colors duration-300">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => setIsDrawerOpen(true)}
-            className="p-1.5 rounded-md hover:bg-white/10 text-zinc-300 hover:text-white transition-colors"
-            aria-label="Open Drawer"
-          >
-            <Menu className="w-5 h-5 text-zinc-900 dark:text-zinc-100" />
-          </button>
-          <h1 className="font-semibold text-sm leading-none tracking-wider text-primary select-none">
-            Liven
-            <span className="text-accent">DB</span>
+        <div className="flex flex-row gap-1.5 items-center">
+          <img src={"logo.svg"} className="h-6" alt="LivenDB Logo" />
+          <h1 className="font-semibold text-base leading-none tracking-wider text-zinc-500 dark:text-white select-none">
+            LivenDB
           </h1>
         </div>
+        <button
+          onClick={() => setIsDrawerOpen(true)}
+          className="p-1.5 rounded-md hover:bg-white/10 text-zinc-300 hover:text-white transition-colors"
+          aria-label="Open Drawer"
+        >
+          <Menu className="w-5 h-5 text-zinc-900 dark:text-zinc-100" />
+        </button>
       </header>
 
       {/* ======================================================== */}
@@ -198,15 +202,16 @@ export default function Navbar({
             <div className="flex flex-col gap-6 w-full pt-5">
               {/* Drawer Header */}
               <div className="px-5 flex items-center justify-between">
-                <div className="flex flex-col gap-1">
-                  <h1 className="font-semibold text-base leading-none tracking-wider text-primary select-none">
-                    Liven
-                    <span className="text-accent">DB</span>
+                <div className="flex flex-row gap-1.5 items-center">
+                  <img src={"logo.svg"} className="h-8" alt="LivenDB Logo" />
+                  <h1 className="font-semibold text-lg leading-none tracking-wider text-zinc-500 dark:text-white select-none">
+                    LivenDB
                   </h1>
                 </div>
                 <button
                   onClick={() => setIsDrawerOpen(false)}
                   className="p-1.5 rounded-md hover:bg-white/10 text-zinc-300 hover:text-white transition-colors"
+                  aria-label="Close Drawer"
                 >
                   <X className="w-5 h-5 text-zinc-600 dark:text-zinc-400" />
                 </button>

@@ -182,3 +182,21 @@ export async function executeIngest(
   }
   return res.json();
 }
+
+// 9. Change a key's role (admin only)
+export async function submitRoleChange(
+  keyId: string,
+  role: string,
+): Promise<{ status: string; key_id: string; new_role: string }> {
+  const res = await fetch(getDbApiUrl("/api/system/auth/keys/role"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ key_id: keyId, role }),
+    credentials: "include",
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to update role.");
+  }
+  return res.json();
+}

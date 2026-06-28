@@ -816,7 +816,13 @@ impl StorageEngine {
 
         segments.sort_by_key(|a| a.0);
 
-        let mut records = Vec::new();
+        let mut records: Vec<Record> = Vec::new();
+        // Track the index of the latest record for each (stream, key) pair so that
+        // older versions (from before the most recent upsert) are replaced in-place.
+        // Records are read in offset order (oldest-first), so each subsequent
+        // occurrence of the same (stream, key) overwrites the previous one.
+        use std::collections::HashMap;
+        let mut latest_idx: HashMap<(String, String), usize> = HashMap::new();
 
         for (segment_id, _path) in &segments {
             if records.len() >= effective_limit {
@@ -916,7 +922,14 @@ impl StorageEngine {
                 })?;
 
                 if let Some(rec) = payload_record {
-                    records.push(rec);
+                    let dedup_key = (rec.stream_name.clone(), rec.key.to_string());
+                    if let Some(&prev_idx) = latest_idx.get(&dedup_key) {
+                        // Replace older version of the same key
+                        records[prev_idx] = rec;
+                    } else {
+                        latest_idx.insert(dedup_key, records.len());
+                        records.push(rec);
+                    }
                 }
 
                 offset += 26 + (payload_len as u64);
@@ -1183,14 +1196,24 @@ impl StorageEngine {
         drop(ts_idx_guard);
 
         let mut records = Vec::with_capacity(pointers.len());
+        use std::collections::HashMap;
+        let mut seen: HashMap<(String, String), usize> = HashMap::new();
         for ptr in pointers {
             match self.read_record(ptr) {
                 Ok(rec) => {
                     if rec.stream_name == stream_name
                         && rec.timestamp >= start_ms
                         && rec.timestamp <= end_ms
+                        && rec.flags & 0x02 == 0
+                    // Skip tombstones
                     {
-                        records.push(rec);
+                        let dedup_key = (rec.stream_name.clone(), rec.key.to_string());
+                        if let Some(&prev_idx) = seen.get(&dedup_key) {
+                            records[prev_idx] = rec;
+                        } else {
+                            seen.insert(dedup_key, records.len());
+                            records.push(rec);
+                        }
                     }
                 }
                 Err(e) => {
@@ -1669,8 +1692,14 @@ fn deserialize_payload_borrowed(
 }
 
 pub fn deserialize_payload(payload: &[u8]) -> crate::error::Result<(String, String, DataValue)> {
-    let (stream_name, key, value) = deserialize_payload_borrowed(payload, 0x02)?;
-    Ok((stream_name.to_string(), key.to_string(), value))
+    // Try MsgPack first (type_tag 0x02). If that fails, try raw Vector
+    // (type_tag 8). This handles fuzz tests where serialize_payload_into may
+    // write a Vector as raw bytes but the caller has no header type_tag.
+    if let Ok(result) = deserialize_payload_borrowed(payload, 0x02) {
+        return Ok((result.0.to_string(), result.1.to_string(), result.2));
+    }
+    let (_stream_name, _key, value) = deserialize_payload_borrowed(payload, 8)?;
+    Ok((_stream_name.to_string(), _key.to_string(), value))
 }
 
 pub struct FrameReader<'a> {

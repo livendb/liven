@@ -45,6 +45,10 @@ pub struct AuthKeyRecord {
 
 pub struct SessionInfo {
     pub user_id: String,
+    /// Role captured at login time. Not re-validated against the current
+    /// auth_keys record on every request — a role change on an existing
+    /// key (if that feature is ever added) won't take effect until the
+    /// session is recreated.
     pub role: String,
     pub last_seen: std::time::Instant,
 }
@@ -372,12 +376,7 @@ pub async fn run_server(
                 && let Ok(auth_rec) = serde_json::from_str::<AuthKeyRecord>(&json_str)
                 && auth_rec.status == "active"
             {
-                let capabilities = match auth_rec.role.as_str() {
-                    "admin" => crate::security::CAP_ROOT,
-                    "read-only" => crate::security::CAP_READ,
-                    "write" => crate::security::CAP_WRITE,
-                    _ => crate::security::CAP_NONE,
-                };
+                let capabilities = crate::server::capabilities_for_role(&auth_rec.role);
                 let client_cn = auth_rec.key_id.clone();
                 identity_cache.insert(
                     client_cn.clone(),
@@ -473,6 +472,10 @@ pub async fn run_server(
         .route(
             "/api/system/auth/keys/revoke",
             post(system_auth_revoke_key_handler),
+        )
+        .route(
+            "/api/system/auth/keys/role",
+            post(system_auth_update_role_handler),
         )
         .route("/api/ingest", post(ingest_handler))
         .route("/api/query", post(query_handler))
@@ -701,13 +704,8 @@ pub async fn run_server(
                                         let hash_hex = crate::security::hex_encode(hash.as_bytes());
                                         if let Some(auth_rec) = lookup_key_by_hash(&state.engine, &hash_hex) {
                                             if auth_rec.status == "active" {
-                                                capabilities = match auth_rec.role.as_str() {
-                                                    "admin" => crate::security::CAP_ROOT,
-                                                    "read-only" => crate::security::CAP_READ,
-                                                    "write" => crate::security::CAP_WRITE,
-                                                    _ => crate::security::CAP_NONE,
-                                                };
-                                                let (close_tx, new_close_rx) = tokio::sync::oneshot::channel::<()>();
+                                                capabilities = crate::server::capabilities_for_role(&auth_rec.role);
+                                                    let (close_tx, new_close_rx) = tokio::sync::oneshot::channel::<()>();
                                                 {
                                                     let mut conns = state.active_connections.lock().unwrap();
                                                     conns.push(ActiveNativeConnection {
@@ -935,6 +933,15 @@ pub async fn run_server(
     Ok(())
 }
 
+/// Map a role string to its capability bitmask.
+///
+/// Used throughout the server to convert the string role stored in
+/// `AuthKeyRecord` (and replicated in `SessionInfo`) into a bitmask
+/// suitable for `check_query_capabilities`.
+pub fn capabilities_for_role(role: &str) -> u8 {
+    crate::security::capabilities_for_role(role)
+}
+
 pub fn check_query_capabilities(query_str: &str, capabilities: u8) -> bool {
     if capabilities == crate::security::CAP_ROOT {
         return true;
@@ -955,11 +962,13 @@ pub fn check_query_capabilities(query_str: &str, capabilities: u8) -> bool {
             | crate::types::Query::Upsert { .. }
             | crate::types::Query::UpsertBatch { .. }
             | crate::types::Query::Update { .. }
-            | crate::types::Query::DeleteKey { .. }
+            | crate::types::Query::PipelineUpdate { .. } => {
+                (capabilities & crate::security::CAP_INSERT) != 0
+            }
+            crate::types::Query::DeleteKey { .. }
             | crate::types::Query::Empty { .. }
-            | crate::types::Query::PipelineUpdate { .. }
             | crate::types::Query::PipelineDelete { .. } => {
-                (capabilities & crate::security::CAP_WRITE) != 0
+                (capabilities & crate::security::CAP_DELETE) != 0
             }
             crate::types::Query::Drop { .. } => {
                 (capabilities & crate::security::CAP_ROOT) == crate::security::CAP_ROOT
@@ -967,19 +976,19 @@ pub fn check_query_capabilities(query_str: &str, capabilities: u8) -> bool {
             crate::types::Query::ListStreams => (capabilities & crate::security::CAP_READ) != 0,
             crate::types::Query::Status => (capabilities & crate::security::CAP_READ) != 0,
             crate::types::Query::Pipeline(stages) => {
-                let mut requires_write = false;
+                let mut requires_delete = false;
                 for stage in &stages {
                     match stage {
                         crate::types::PipelineStage::Delete
                         | crate::types::PipelineStage::Trash => {
-                            requires_write = true;
+                            requires_delete = true;
                             break;
                         }
                         _ => {}
                     }
                 }
-                if requires_write {
-                    (capabilities & crate::security::CAP_WRITE) != 0
+                if requires_delete {
+                    (capabilities & crate::security::CAP_DELETE) != 0
                 } else {
                     (capabilities & crate::security::CAP_READ) != 0
                 }
@@ -1452,6 +1461,7 @@ async fn system_auth_login_handler(
 #[derive(Serialize)]
 struct SystemStatusResponse {
     authenticated: bool,
+    user_id: Option<String>,
     role: Option<String>,
 }
 
@@ -1480,9 +1490,11 @@ async fn system_auth_status_handler(
                     .map(|identity| {
                         if identity.capabilities == crate::security::CAP_ROOT {
                             "admin".to_string()
-                        } else if identity.capabilities == crate::security::CAP_WRITE {
+                        } else if (identity.capabilities & crate::security::CAP_DELETE) != 0 {
+                            "write-delete".to_string()
+                        } else if (identity.capabilities & crate::security::CAP_INSERT) != 0 {
                             "write".to_string()
-                        } else if identity.capabilities == crate::security::CAP_READ {
+                        } else if (identity.capabilities & crate::security::CAP_READ) != 0 {
                             "read-only".to_string()
                         } else {
                             "unknown".to_string()
@@ -1500,6 +1512,7 @@ async fn system_auth_status_handler(
                     .body(Body::from(
                         serde_json::json!(SystemStatusResponse {
                             authenticated: true,
+                            user_id: Some(user_id.clone()),
                             role,
                         })
                         .to_string(),
@@ -1515,6 +1528,7 @@ async fn system_auth_status_handler(
         .body(Body::from(
             serde_json::json!(SystemStatusResponse {
                 authenticated: false,
+                user_id: None,
                 role: None,
             })
             .to_string(),
@@ -1567,6 +1581,12 @@ struct RevokeKeyRequest {
     key_id: String,
 }
 
+#[derive(Deserialize)]
+struct UpdateRoleRequest {
+    key_id: String,
+    role: String,
+}
+
 async fn system_auth_list_keys_handler(
     State(state): State<Arc<ServerState>>,
     headers: HeaderMap,
@@ -1609,7 +1629,11 @@ async fn system_auth_generate_key_handler(
     }
 
     let payload_role = payload.role.trim().to_lowercase();
-    if payload_role != "admin" && payload_role != "read-only" && payload_role != "write-only" {
+    if payload_role != "admin"
+        && payload_role != "read-only"
+        && payload_role != "write"
+        && payload_role != "write-delete"
+    {
         return (StatusCode::BAD_REQUEST, "Invalid role").into_response();
     }
 
@@ -1654,12 +1678,7 @@ async fn system_auth_generate_key_handler(
 
     // Write-through to identity_cache
     {
-        let capabilities = match payload_role.as_str() {
-            "admin" => crate::security::CAP_ROOT,
-            "read-only" => crate::security::CAP_READ,
-            "write" => crate::security::CAP_WRITE,
-            _ => crate::security::CAP_NONE,
-        };
+        let capabilities = crate::server::capabilities_for_role(&payload_role);
         let mut cache = state.identity_cache.write().unwrap();
         cache.insert(
             trimmed_id.to_string(),
@@ -1756,15 +1775,125 @@ async fn system_auth_revoke_key_handler(
         .into_response()
 }
 
+async fn system_auth_update_role_handler(
+    State(state): State<Arc<ServerState>>,
+    headers: HeaderMap,
+    Json(payload): Json<UpdateRoleRequest>,
+) -> impl IntoResponse {
+    let (_user_id, role, slide_headers) = match validate_session_and_slide(&state, &headers) {
+        Ok(res) => res,
+        Err(status) => return status.into_response(),
+    };
+    if role != "admin" {
+        return (StatusCode::FORBIDDEN, "Forbidden: Admin role required").into_response();
+    }
+
+    let new_role = payload.role.trim().to_lowercase();
+    if !["admin", "read-only", "write", "write-delete"].contains(&new_role.as_str()) {
+        return (StatusCode::BAD_REQUEST, "Invalid role").into_response();
+    }
+
+    let trimmed_id = payload.key_id.trim();
+    if trimmed_id.is_empty() {
+        return (StatusCode::BAD_REQUEST, "Key ID cannot be empty").into_response();
+    }
+
+    // Fetch existing record — same lookup pattern as revoke handler
+    let opt_record = match state.engine.get("auth_keys", trimmed_id) {
+        Ok(Some(rec)) => {
+            if let DataValue::String(json_str) = rec.value {
+                serde_json::from_str::<AuthKeyRecord>(&json_str).ok()
+            } else {
+                None
+            }
+        }
+        _ => None,
+    };
+
+    let mut auth_rec = match opt_record {
+        Some(rec) => rec,
+        None => return (StatusCode::NOT_FOUND, "Key not found").into_response(),
+    };
+
+    if auth_rec.role == new_role {
+        return (
+            StatusCode::OK,
+            slide_headers,
+            Json(serde_json::json!({
+                "status": "success",
+                "message": "Role unchanged"
+            })),
+        )
+            .into_response();
+    }
+
+    let old_hash = auth_rec.auth_key.clone();
+    auth_rec.role = new_role.clone();
+
+    let json_val = match serde_json::to_string(&auth_rec) {
+        Ok(s) => s,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    };
+
+    if let Err(e) = state
+        .engine
+        .append("auth_keys", trimmed_id, DataValue::String(json_val), false)
+    {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to update storage: {}", e),
+        )
+            .into_response();
+    }
+
+    // Update identity_cache in place with new capabilities
+    {
+        let mut cache = state.identity_cache.write().unwrap();
+        if let Some(identity) = cache.get_mut(trimmed_id) {
+            identity.capabilities = crate::security::capabilities_for_role(&new_role);
+        }
+    }
+
+    // Evict any cached REST session tied to this key_id
+    {
+        let mut sessions = state.sessions.lock().unwrap();
+        sessions.retain(|_, s| s.user_id != trimmed_id);
+    }
+
+    // Force-disconnect any live native TCP connection using the OLD capabilities
+    kill_active_connections_for_hash(&state, &old_hash);
+
+    (
+        StatusCode::OK,
+        slide_headers,
+        Json(serde_json::json!({
+            "status": "success",
+            "key_id": trimmed_id,
+            "new_role": new_role
+        })),
+    )
+        .into_response()
+}
+
 async fn ingest_handler(
     State(state): State<Arc<ServerState>>,
     headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> impl IntoResponse {
-    let (_user_id, _role, slide_headers) = match validate_session_and_slide(&state, &headers) {
+    let (_user_id, role, slide_headers) = match validate_session_and_slide(&state, &headers) {
         Ok(res) => res,
         Err(status) => return status.into_response(),
     };
+
+    let capabilities = crate::server::capabilities_for_role(&role);
+    if capabilities & crate::security::CAP_INSERT == 0 {
+        return (
+            StatusCode::FORBIDDEN,
+            slide_headers,
+            "Insufficient capabilities: write access required",
+        )
+            .into_response();
+    }
 
     // Server only supports JSONL format for ingest (not MessagePack)
     let items: Vec<(String, String, DataValue)> =
@@ -1816,10 +1945,20 @@ async fn query_handler(
     headers: HeaderMap,
     Json(payload): Json<QueryRequest>,
 ) -> impl IntoResponse {
-    let (_user_id, _role, slide_headers) = match validate_session_and_slide(&state, &headers) {
+    let (_user_id, role, slide_headers) = match validate_session_and_slide(&state, &headers) {
         Ok(res) => res,
         Err(status) => return status.into_response(),
     };
+
+    let capabilities = crate::server::capabilities_for_role(&role);
+    if !check_query_capabilities(&payload.query, capabilities) {
+        return (
+            StatusCode::FORBIDDEN,
+            slide_headers,
+            "Insufficient capabilities for this query",
+        )
+            .into_response();
+    }
 
     // Server only supports JSON format (accept header ignored)
 
@@ -1865,7 +2004,6 @@ async fn query_handler(
                     return (StatusCode::OK, res_headers, out).into_response();
                 }
 
-                // Server only supports JSON format (not MessagePack)
                 (StatusCode::OK, slide_headers, Json(results)).into_response()
             }
             Err(e) => (
@@ -1888,10 +2026,21 @@ async fn list_streams_handler(
     State(state): State<Arc<ServerState>>,
     headers: HeaderMap,
 ) -> impl IntoResponse {
-    let (_user_id, _role, slide_headers) = match validate_session_and_slide(&state, &headers) {
+    let (_user_id, role, slide_headers) = match validate_session_and_slide(&state, &headers) {
         Ok(res) => res,
         Err(status) => return status.into_response(),
     };
+
+    let capabilities = crate::server::capabilities_for_role(&role);
+    if capabilities & crate::security::CAP_READ == 0 {
+        return (
+            StatusCode::FORBIDDEN,
+            slide_headers,
+            "Insufficient capabilities: read access required",
+        )
+            .into_response();
+    }
+
     let streams = state.engine.list_streams();
     (StatusCode::OK, slide_headers, Json(streams)).into_response()
 }

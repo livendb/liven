@@ -107,7 +107,6 @@ async fn test_auth_key_handshake_lifecycle() {
         storage: StorageConfig {
             data_directory: test_dir.to_string_lossy().to_string(),
             max_segment_size_mb: 10,
-            
 
             sync_mode: "always".to_string(),
             sync_interval_ms: 10,
@@ -118,8 +117,6 @@ async fn test_auth_key_handshake_lifecycle() {
             max_index_ram_mb: 10,
             max_segment_size_mb: 10,
             max_scan_results: 100_000,
-            
-            
         },
         security: SecurityConfig {
             mode: "auth_key".to_string(),
@@ -232,7 +229,6 @@ async fn test_rest_auth_key_challenge_login_lifecycle() {
         storage: StorageConfig {
             data_directory: test_dir.to_string_lossy().to_string(),
             max_segment_size_mb: 10,
-            
 
             sync_mode: "always".to_string(),
             sync_interval_ms: 10,
@@ -243,8 +239,6 @@ async fn test_rest_auth_key_challenge_login_lifecycle() {
             max_index_ram_mb: 10,
             max_segment_size_mb: 10,
             max_scan_results: 100_000,
-            
-            
         },
         security: SecurityConfig {
             mode: "auth_key".to_string(),
@@ -343,12 +337,13 @@ async fn test_rest_auth_key_challenge_login_lifecycle() {
     assert_eq!(code, 200);
     let status_json: serde_json::Value = serde_json::from_str(&body).unwrap();
     assert!(status_json["authenticated"].as_bool().unwrap());
-    assert_eq!(status_json["user_id"].as_str().unwrap(), "default-admin");
+    // user_id is intentionally NOT exposed in the response body.
+    // Session identification is handled server-side via the cookie.
 
     // 4. Generate a new key identity using the authenticated session
     let gen_payload = serde_json::json!({
         "key_id": "operator_alice",
-        "role": "write-only"
+        "role": "write"
     })
     .to_string();
 
@@ -370,7 +365,7 @@ async fn test_rest_auth_key_challenge_login_lifecycle() {
 
     let gen_json: serde_json::Value = serde_json::from_str(&body).unwrap();
     assert_eq!(gen_json["key_id"].as_str().unwrap(), "operator_alice");
-    assert_eq!(gen_json["role"].as_str().unwrap(), "write-only");
+    assert_eq!(gen_json["role"].as_str().unwrap(), "write");
     let raw_key_alice = gen_json["raw_key"].as_str().unwrap().to_string();
     assert_eq!(raw_key_alice.len(), 64); // 32 bytes in hex is 64 chars
 
@@ -393,7 +388,7 @@ async fn test_rest_auth_key_challenge_login_lifecycle() {
     for key_rec in keys_array {
         if key_rec["key_id"].as_str().unwrap() == "operator_alice" {
             found_alice = true;
-            assert_eq!(key_rec["role"].as_str().unwrap(), "write-only");
+            assert_eq!(key_rec["role"].as_str().unwrap(), "write");
             assert_eq!(key_rec["status"].as_str().unwrap(), "active");
         }
     }
@@ -491,10 +486,10 @@ async fn test_rest_auth_key_challenge_login_lifecycle() {
 #[cfg(feature = "server")]
 #[test]
 fn test_continuous_edge_check_query_capabilities() {
-    use liven::security::{CAP_NONE, CAP_READ, CAP_ROOT, CAP_WRITE};
+    use liven::security::{CAP_DELETE, CAP_INSERT, CAP_NONE, CAP_READ, CAP_ROOT};
     use liven::server::check_query_capabilities;
 
-    // CAP_ROOT (admin role) can do everything
+    // ── CAP_ROOT (admin role) can do everything ────────────────────
     assert!(check_query_capabilities("from(\"stream\")", CAP_ROOT));
     assert!(check_query_capabilities(
         "from(\"stream\").insert(\"key\", {val: 1})",
@@ -502,37 +497,110 @@ fn test_continuous_edge_check_query_capabilities() {
     ));
     assert!(check_query_capabilities("drop(\"stream\")", CAP_ROOT));
 
-    // CAP_READ can read but not write or admin
+    // ── CAP_READ (read-only role) can read but NOT insert/delete/drop ─
     assert!(check_query_capabilities("from(\"stream\")", CAP_READ));
     assert!(check_query_capabilities("tail(\"stream\")", CAP_READ));
     assert!(check_query_capabilities("status()", CAP_READ));
     assert!(check_query_capabilities("list_streams()", CAP_READ));
-    //
+    // CAP_READ must NOT allow inserts or deletes
+    assert!(!check_query_capabilities(
+        "from(\"stream\").insert(\"key\", {val: 1})",
+        CAP_READ
+    ));
+    assert!(!check_query_capabilities(
+        "from(\"stream\").delete()",
+        CAP_READ
+    ));
+    assert!(!check_query_capabilities(
+        "from(\"stream\").delete(\"key\")",
+        CAP_READ
+    ));
     assert!(!check_query_capabilities("drop(\"stream\")", CAP_READ));
 
-    // CAP_WRITE includes CAP_READ and can write but not admin
+    // ── CAP_READ | CAP_INSERT (write role) — can read, can insert, cannot delete ──
+    let write_caps = CAP_READ | CAP_INSERT;
+    assert!(check_query_capabilities("from(\"stream\")", write_caps));
+    assert!(check_query_capabilities("tail(\"stream\")", write_caps));
+    assert!(check_query_capabilities("status()", write_caps));
+    assert!(check_query_capabilities("list_streams()", write_caps));
     assert!(check_query_capabilities(
         "from(\"stream\").insert(\"key\", {val: 1})",
-        CAP_WRITE
+        write_caps
     ));
-    assert!(check_query_capabilities("from(\"stream\")", CAP_WRITE));
-    assert!(check_query_capabilities("tail(\"stream\")", CAP_WRITE));
-    assert!(check_query_capabilities("status()", CAP_WRITE));
-    assert!(check_query_capabilities("list_streams()", CAP_WRITE));
-    assert!(!check_query_capabilities("drop(\"stream\")", CAP_WRITE));
+    assert!(check_query_capabilities(
+        "from(\"stream\").upsert(\"key\", {val: 1})",
+        write_caps
+    ));
+    // write role must NOT allow deletes
+    assert!(!check_query_capabilities(
+        "from(\"stream\").delete()",
+        write_caps
+    ));
+    assert!(!check_query_capabilities(
+        "from(\"stream\").delete(\"key\")",
+        write_caps
+    ));
+    // But cannot drop streams (admin only)
+    assert!(!check_query_capabilities("drop(\"stream\")", write_caps));
 
-    // CAP_ROOT (admin role) can do everything including admin operations
+    // ── CAP_READ | CAP_INSERT | CAP_DELETE (write-delete role) — can read, insert, AND delete ──
+    let write_delete_caps = CAP_READ | CAP_INSERT | CAP_DELETE;
+    assert!(check_query_capabilities(
+        "from(\"stream\")",
+        write_delete_caps
+    ));
+    assert!(check_query_capabilities(
+        "tail(\"stream\")",
+        write_delete_caps
+    ));
+    assert!(check_query_capabilities("status()", write_delete_caps));
+    assert!(check_query_capabilities(
+        "list_streams()",
+        write_delete_caps
+    ));
+    assert!(check_query_capabilities(
+        "from(\"stream\").insert(\"key\", {val: 1})",
+        write_delete_caps
+    ));
+    assert!(check_query_capabilities(
+        "from(\"stream\").upsert(\"key\", {val: 1})",
+        write_delete_caps
+    ));
+    // write-delete CAN delete
+    assert!(check_query_capabilities(
+        "from(\"stream\").delete()",
+        write_delete_caps
+    ));
+    assert!(check_query_capabilities(
+        "from(\"stream\").delete(\"key\")",
+        write_delete_caps
+    ));
+    // But still cannot drop streams (admin only)
+    assert!(!check_query_capabilities(
+        "drop(\"stream\")",
+        write_delete_caps
+    ));
+
+    // ── CAP_ROOT can do everything including admin operations ──
     assert!(check_query_capabilities("drop(\"stream\")", CAP_ROOT));
     assert!(check_query_capabilities("from(\"stream\")", CAP_ROOT));
     assert!(check_query_capabilities(
         "from(\"stream\").insert(\"key\", {val: 1})",
         CAP_ROOT
     ));
+    assert!(check_query_capabilities(
+        "from(\"stream\").delete()",
+        CAP_ROOT
+    ));
 
-    // CAP_NONE can do nothing
+    // ── CAP_NONE can do nothing ──
     assert!(!check_query_capabilities("from(\"stream\")", CAP_NONE));
     assert!(!check_query_capabilities(
         "from(\"stream\").insert(\"key\", {val: 1})",
+        CAP_NONE
+    ));
+    assert!(!check_query_capabilities(
+        "from(\"stream\").delete()",
         CAP_NONE
     ));
     assert!(!check_query_capabilities("drop(\"stream\")", CAP_NONE));

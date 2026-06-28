@@ -3,6 +3,23 @@ name = "liven"
 version = "0.0.1"
 edition = "2024"
 license = "SSPL-1.0 OR Commercial"
+description = "High-velocity embedded database with streaming pipelines, vector search, and real-time subscriptions"
+homepage = "https://liven.db"
+repository = "https://github.com/livendb/liven"
+readme = "README.md"
+keywords = [
+    "database",
+    "streaming",
+    "embedded",
+    "time-series",
+    "vector-search",
+    "pipeline",
+]
+categories = [
+    "database",
+    "database-implementations",
+    "data-structures",
+]
 
 [lib]
 name = "liven"
@@ -103,6 +120,10 @@ maintainer-scripts = "debian"
 
 [package.metadata.generate-rpm]
 summary = "LIVEN High-Performance Storage Engine"
+
+[package.metadata.docs.rs]
+features = ["server", "tui", "tls"]
+rustdoc-args = ["--cfg", "docsrs"]
 description = "High-performance storage engine with ZTNA and mTLS support"
 license = "SSPL-1.0"
 release = "1"

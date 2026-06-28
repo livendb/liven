@@ -1,5 +1,5 @@
 import { Suspense, useState, useEffect, useRef } from "react";
-import { WifiOff, RefreshCw, Shield, Activity } from "lucide-react";
+import { WifiOff, RefreshCw, Shield, Activity, XCircle, X } from "lucide-react";
 import { Route, Switch, useLocation } from "wouter";
 
 // Components & Pages
@@ -22,7 +22,9 @@ export default function App() {
   const [securityMode, setSecurityMode] = useState<string>("none");
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [userRole, setUserRole] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
   const [authChecking, setAuthChecking] = useState<boolean>(true);
+  const [capabilityError, setCapabilityError] = useState<string | null>(null);
 
   // Register a global fetch interceptor inside useEffect to handle 401/403 redirections
   useEffect(() => {
@@ -32,7 +34,7 @@ export default function App() {
       init.credentials = "include";
       try {
         const response = await originalFetch(input, init);
-        if (response.status === 401 || response.status === 403) {
+        if (response.status === 401) {
           const urlStr =
             typeof input === "string"
               ? input
@@ -47,6 +49,18 @@ export default function App() {
           ) {
             setIsAuthenticated(false);
           }
+        } else if (response.status === 403) {
+          // Authenticated but insufficient role capability — do NOT log out
+          // or redirect. Surface the error to the user instead.
+          let message = "You don't have permission to perform this action.";
+          try {
+            const cloned = response.clone();
+            const text = await cloned.text();
+            if (text) message = text;
+          } catch {
+            // ignore — fall back to default message
+          }
+          setCapabilityError(message);
         }
         return response;
       } catch (err) {
@@ -70,6 +84,14 @@ export default function App() {
       }
     }
   }, [authChecking, securityMode, isAuthenticated, location, setLocation]);
+
+  // Auto-dismiss capability error toast after 4 seconds
+  useEffect(() => {
+    if (capabilityError) {
+      const timer = setTimeout(() => setCapabilityError(null), 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [capabilityError]);
 
   // Derive activeTab from URL location path for sidebar/header rendering
   let activeTab: "dashboard" | "query" | "explorer" | "security" = "dashboard";
@@ -238,6 +260,7 @@ export default function App() {
               if (status.authenticated) {
                 setIsAuthenticated(true);
                 setUserRole(status.role || null);
+                setUserId(status.user_id || null);
               } else {
                 setIsAuthenticated(false);
                 setUserRole(null);
@@ -530,8 +553,15 @@ export default function App() {
   if (location === "/login") {
     return (
       <Login
-        onLoginSuccess={() => {
+        onLoginSuccess={async () => {
           setIsAuthenticated(true);
+          try {
+            const status = await fetchAuthStatus();
+            setUserRole(status.role || null);
+            setUserId(status.user_id || null);
+          } catch {
+            setUserRole(null);
+          }
           setLocation("/");
         }}
       />
@@ -574,6 +604,28 @@ export default function App() {
               >
                 <RefreshCw className="w-3.5 h-3.5" />
                 Reconnect
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Capability error toast — auto-dismissed after 4 seconds */}
+        {capabilityError && (
+          <div className="fixed top-4 right-4 z-50 max-w-sm animate-slide-left">
+            <div className="bg-rose-50 dark:bg-rose-950/90 border border-rose-200 dark:border-rose-800/60 rounded-lg p-4 shadow-xl flex items-start gap-3">
+              <div className="shrink-0 mt-0.5">
+                <XCircle className="w-4 h-4 text-rose-500" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-semibold text-rose-800 dark:text-rose-200">
+                  {capabilityError}
+                </p>
+              </div>
+              <button
+                onClick={() => setCapabilityError(null)}
+                className="shrink-0 p-0.5 rounded text-rose-400 hover:text-rose-600 dark:hover:text-rose-300 transition-colors"
+              >
+                <X className="w-3.5 h-3.5" />
               </button>
             </div>
           </div>
@@ -676,6 +728,7 @@ export default function App() {
                     addActivity={addActivity}
                     setIsHelpOpen={setIsHelpOpen}
                     streams={streams}
+                    userRole={userRole}
                   />
                 </Route>
                 <Route path="/explorer">
@@ -693,6 +746,7 @@ export default function App() {
                     fetchStreams={fetchStreams}
                     addActivity={addActivity}
                     resolvedTheme={resolvedTheme}
+                    userRole={userRole}
                   />
                 </Route>
                 <Route path="/unauthorized">
@@ -729,6 +783,7 @@ export default function App() {
                     <Security
                       addActivity={addActivity}
                       resolvedTheme={resolvedTheme}
+                      currentKeyId={userId}
                     />
                   ) : (
                     <div className="p-8 text-center bg-white dark:bg-gray-500 rounded-md border border-slate-200 dark:border-slate-800">

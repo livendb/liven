@@ -1,4 +1,12 @@
 # ── Build stage ──
+FROM node:20-bookworm AS ui-builder
+
+WORKDIR /ui
+COPY ui/package.json ui/package-lock.json ./
+RUN npm ci --legacy-peer-deps
+COPY ui .
+RUN npm run build
+
 FROM rust:latest AS builder
 
 WORKDIR /app
@@ -9,6 +17,9 @@ COPY src ./src
 COPY benches ./benches
 COPY tests ./tests
 COPY build.rs ./
+
+# Copy pre-built UI assets
+COPY --from=ui-builder /ui/dist ./ui/dist
 
 # Build release binary
 RUN cargo build --release --locked && \

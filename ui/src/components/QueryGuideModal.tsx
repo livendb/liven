@@ -149,7 +149,7 @@ export default function QueryGuideModal({
 
                   {/* IDE-style Code Block */}
                   <div className="space-y-3.5">
-                    <CodeBlock language="javascript" code={sample.code} />
+                    <CodeBlock language="liven" code={sample.code} />
 
                     {/* Actions bar */}
                     <div className="flex items-center justify-end gap-3 pt-1">

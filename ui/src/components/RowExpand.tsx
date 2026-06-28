@@ -151,7 +151,7 @@ export default function RowExpand({ record }: RowExpandProps) {
               Raw Payload Document
             </span>
             <div className="relative">
-              <CodeBlock language="typescript" code={highlightedHtml} />
+              <CodeBlock language="liven" code={highlightedHtml} />
             </div>
           </div>
         </div>

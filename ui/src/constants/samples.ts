@@ -374,7 +374,7 @@ export const relationshipSamples = [
     title: "Correlate Streams by Time Window",
     badge: "CORRELATE",
     code: 'from("transactions") | correlate("logins", "user_id", within: 60000)',
-    desc: "Join two streams on a shared key within a time window. Retains and enriches records that have matching events in the correlated stream. Uses a pre-built HashMap for O(N + M) instead of O(N × M).",
+    desc: "Join two streams on a shared key within a time window. Retains and enriches records that have matching events in the correlated stream.",
     hint: "Place restrictive filters before correlate to reduce the record set before the windowed join executes. The correlate stage now pre-fetches source records into a HashMap for O(1) lookups.",
   },
   {

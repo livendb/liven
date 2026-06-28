@@ -26,7 +26,6 @@ import { gruvboxDark, atomOneLight } from "../utils/theme";
 import RowExpand from "../components/RowExpand";
 import PrettifiedGridView from "../components/PrettifiedGridView";
 import GraphView from "../components/GraphView";
-
 export interface QueryConsoleProps {
   query: string;
   setQuery: (query: string) => void;
@@ -55,6 +54,7 @@ export interface QueryConsoleProps {
   ) => void;
   setIsHelpOpen: (open: boolean) => void;
   streams: string[];
+  userRole?: string | null;
 }
 
 // Helper function to generate dynamic pagination numbers
@@ -135,7 +135,7 @@ const livenLanguage = StreamLanguage.define({
     if (stream.match(/^(?:then:|within)\b/)) return "keyword";
 
     // Functions
-    if (stream.match(/^(?:now|cursor)\b/)) return "keyword";
+    if (stream.match(/^(?:now|cursor|status)\b/)) return "keyword";
 
     // Operators
     if (
@@ -355,6 +355,12 @@ function getQueryCompletions(streams: string[]) {
           type: "function",
           detail: "Current timestamp",
         },
+        {
+          label: "status",
+          apply: "status()",
+          type: "function",
+          detail: "Server status and metrics",
+        },
         { label: "and", apply: "and ", type: "keyword", detail: "Logical and" },
         { label: "or", apply: "or ", type: "keyword", detail: "Logical or" },
         { label: "not", apply: "not ", type: "keyword", detail: "Logical not" },
@@ -477,6 +483,7 @@ export default function QueryConsole({
   addActivity,
   setIsHelpOpen,
   streams,
+  userRole: _userRole,
 }: QueryConsoleProps) {
   const [viewMode, setViewMode] = useState<"list" | "table" | "graph">("list");
   const [hasExecuted, setHasExecuted] = useState(false);
@@ -542,7 +549,15 @@ export default function QueryConsole({
 
         const elapsed = Math.round(performance.now() - startTime);
 
-        if (res.ok) {
+        if (res.status === 403) {
+          const errText = await res.text();
+          setQueryError(`Permission Denied: ${errText}`);
+          addActivity(
+            `Query rejected: insufficient permissions — ${errText}`,
+            "query",
+            "error",
+          );
+        } else if (res.ok) {
           const recs = await res.json();
           setQueryResults(recs);
           setQueryStats({ count: recs.length, timeMs: elapsed });
@@ -990,7 +1005,7 @@ export default function QueryConsole({
               />
             ) : (
               /* Graph View */
-              <GraphView records={paginatedResults} query={query} />
+              <GraphView records={paginatedResults} />
             )}
 
             {/* Pagination Controls */}

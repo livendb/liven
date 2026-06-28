@@ -9,8 +9,6 @@ import {
   XCircle,
   Download,
   ChevronDown,
-  FileCode,
-  FileSpreadsheet,
   FileText,
   CheckCircle2,
   Upload,
@@ -45,6 +43,7 @@ export interface StreamExplorerProps {
     type?: "info" | "success" | "warn" | "error",
   ) => void;
   resolvedTheme: "light" | "dark";
+  userRole?: string | null;
 }
 
 // Helper function to generate dynamic pagination numbers
@@ -109,6 +108,7 @@ export default function StreamExplorer({
   fetchStreams,
   addActivity,
   resolvedTheme,
+  userRole,
 }: StreamExplorerProps) {
   const [viewMode, setViewMode] = useState<"list" | "table">("list");
 
@@ -117,8 +117,6 @@ export default function StreamExplorer({
 
   // Modal states for bulk import
   const [isImportingOpen, setIsImportingOpen] = useState(false);
-  const [importFormat, setImportFormat] = useState<"jsonl" | "csv">("jsonl");
-  const [importTargetStream, setImportTargetStream] = useState("logs");
   const [importFileContent, setImportFileContent] = useState("");
   const [importError, setImportError] = useState("");
   const [importSuccess, setImportSuccess] = useState("");
@@ -188,46 +186,24 @@ export default function StreamExplorer({
       setImportError("");
       return;
     }
-    if (importFormat === "jsonl") {
-      const lines = importFileContent.split("\n");
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i].trim();
-        if (!line) continue;
-        try {
-          JSON.parse(line);
-        } catch (err: any) {
-          setImportError(`JSONL Syntax Error (Line ${i + 1}): ${err.message}`);
-          return;
-        }
-      }
-    } else if (importFormat === "csv") {
-      const lines = importFileContent.split("\n");
-      if (lines.length < 2) {
-        setImportError("CSV must contain at least a header and one row.");
-        return;
-      }
-      const headers = lines[0].split(",").map((h) => h.trim());
-      const keyIdx = headers.indexOf("key");
-      const valIdx = headers.indexOf("value");
-      if (keyIdx === -1 || valIdx === -1) {
-        setImportError('CSV headers must include "key" and "value" columns.');
+    const lines = importFileContent.split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) continue;
+      try {
+        JSON.parse(line);
+      } catch (err: any) {
+        setImportError(`JSONL Syntax Error (Line ${i + 1}): ${err.message}`);
         return;
       }
     }
     setImportError("");
-  }, [importFileContent, importFormat]);
+  }, [importFileContent]);
 
   // Handle uploaded text files
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
-    const name = file.name.toLowerCase();
-    if (name.endsWith(".csv")) {
-      setImportFormat("csv");
-    } else if (name.endsWith(".jsonl") || name.endsWith(".json")) {
-      setImportFormat("jsonl");
-    }
 
     const reader = new FileReader();
     reader.onload = (evt) => {
@@ -253,7 +229,7 @@ export default function StreamExplorer({
     setImportSuccess("");
 
     addActivity(
-      `Parsing and importing bulk mass-ingestion payload into stream "${importTargetStream}"`,
+      `Parsing and importing bulk mass-ingestion payload into stream "${selectedStream}"`,
       "storage",
       "info",
     );
@@ -261,56 +237,19 @@ export default function StreamExplorer({
     try {
       const batch: any[] = [];
 
-      if (importFormat === "jsonl") {
-        const lines = importFileContent.split("\n");
-        for (let i = 0; i < lines.length; i++) {
-          const line = lines[i].trim();
-          if (!line) continue;
-          try {
-            const parsed = JSON.parse(line);
-            batch.push({
-              stream: importTargetStream,
-              key: parsed.key || `gen_${i}_${Date.now()}`,
-              value: parsed.value !== undefined ? parsed.value : parsed,
-            });
-          } catch {
-            throw new Error(`Line ${i + 1} contains invalid JSON.`);
-          }
-        }
-      } else {
-        const lines = importFileContent.split("\n");
-        if (lines.length < 2) {
-          throw new Error("CSV must contain at least a header and one row.");
-        }
-        const headers = lines[0].split(",").map((h) => h.trim());
-        const keyIdx = headers.indexOf("key");
-        const valIdx = headers.indexOf("value");
-
-        if (keyIdx === -1 || valIdx === -1) {
-          throw new Error(
-            'CSV headers must include "key" and "value" columns.',
-          );
-        }
-
-        for (let i = 1; i < lines.length; i++) {
-          const line = lines[i].trim();
-          if (!line) continue;
-          const cols = line.split(",");
-          const k = cols[keyIdx]?.trim();
-          let v = cols[valIdx]?.trim();
-
-          if (!k) continue;
-
-          // Attempt to parse number or json
-          try {
-            v = JSON.parse(v);
-          } catch {}
-
+      const lines = importFileContent.split("\n");
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) continue;
+        try {
+          const parsed = JSON.parse(line);
           batch.push({
-            stream: importTargetStream,
-            key: k,
-            value: v,
+            stream: parsed.stream || selectedStream,
+            key: parsed.key || `gen_${i}_${Date.now()}`,
+            value: parsed.value !== undefined ? parsed.value : parsed,
           });
+        } catch {
+          throw new Error(`Line ${i + 1} contains invalid JSON.`);
         }
       }
 
@@ -326,20 +265,16 @@ export default function StreamExplorer({
 
       if (res.ok) {
         setImportSuccess(
-          `Successfully ingested ${batch.length} records into stream "${importTargetStream}"! fdatasync flushed.`,
+          `Successfully ingested ${batch.length} records into stream "${selectedStream}"! fdatasync flushed.`,
         );
         addActivity(
-          `Bulk mass-ingestion completed: successfully ingested ${batch.length} records into stream "${importTargetStream}".`,
+          `Bulk mass-ingestion completed: successfully ingested ${batch.length} records into stream "${selectedStream}".`,
           "storage",
           "success",
         );
         setImportFileContent("");
         fetchStreams();
-        if (selectedStream === importTargetStream) {
-          loadStreamRecords();
-        } else {
-          setSelectedStream(importTargetStream);
-        }
+        loadStreamRecords();
         // Graceful automatic modal closing
         setTimeout(() => {
           setIsImportingOpen(false);
@@ -362,27 +297,20 @@ export default function StreamExplorer({
     }
   };
 
-  // Stream Export Handler
-  const handleStreamExport = async (format: "json" | "jsonl" | "csv") => {
+  // Stream Export Handler — JSONL only
+  const handleStreamExport = async () => {
     if (!selectedStream) return;
     setIsExporting(true);
     setIsExportDropdownOpen(false);
 
     addActivity(
-      `Preparing export for stream "${selectedStream}" in "${format}" format`,
+      `Preparing JSONL export for stream "${selectedStream}"`,
       "query",
       "info",
     );
 
     try {
-      let queryStr = "";
-      if (format === "csv") {
-        queryStr = `from("${selectedStream}") | export(csv)`;
-      } else if (format === "jsonl") {
-        queryStr = `from("${selectedStream}") | export(jsonl)`;
-      } else {
-        queryStr = `from("${selectedStream}")`;
-      }
+      const queryStr = `from("${selectedStream}") | export(jsonl)`;
 
       const res = await fetch(getDbApiUrl("/api/query"), {
         method: "POST",
@@ -395,30 +323,14 @@ export default function StreamExplorer({
         throw new Error(err);
       }
 
-      let mimeType = "application/json";
-      let ext = "json";
-      let body: any;
-
-      if (format === "csv") {
-        mimeType = "text/csv";
-        ext = "csv";
-        body = await res.text();
-      } else if (format === "jsonl") {
-        mimeType = "text/plain";
-        ext = "jsonl";
-        body = await res.text();
-      } else {
-        const data = await res.json();
-        body = JSON.stringify(data, null, 2);
-      }
-
-      const blob = new Blob([body], { type: `${mimeType};charset=utf-8;` });
+      const body = await res.text();
+      const blob = new Blob([body], { type: "text/plain;charset=utf-8;" });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
       link.setAttribute(
         "download",
-        `${selectedStream}_export_${Date.now()}.${ext}`,
+        `${selectedStream}_export_${Date.now()}.jsonl`,
       );
       document.body.appendChild(link);
       link.click();
@@ -426,7 +338,7 @@ export default function StreamExplorer({
       URL.revokeObjectURL(url);
 
       addActivity(
-        `Successfully exported stream "${selectedStream}" as ${format}`,
+        `Successfully exported stream "${selectedStream}" as JSONL`,
         "query",
         "success",
       );
@@ -457,19 +369,20 @@ export default function StreamExplorer({
             <h4 className="font-bold text-zinc-900 dark:text-white text-sm  tracking-wider">
               Streams
             </h4>
-            <button
-              onClick={() => {
-                setImportTargetStream(selectedStream || "logs");
-                setImportFileContent("");
-                setImportSuccess("");
-                setImportError("");
-                setIsImportingOpen(true);
-              }}
-              className="p-1.5 rounded bg-primary/10 hover:bg-primary/20 text-accent transition-colors"
-              title="Import Stream Data"
-            >
-              <Plus className="w-4 h-4" />
-            </button>
+            {userRole && userRole !== "read-only" && (
+              <button
+                onClick={() => {
+                  setImportFileContent("");
+                  setImportSuccess("");
+                  setImportError("");
+                  setIsImportingOpen(true);
+                }}
+                className="p-1.5 rounded bg-primary/10 hover:bg-primary/20 text-accent transition-colors"
+                title="Import Stream Data"
+              >
+                <Plus className="w-4 h-4" />
+              </button>
+            )}
           </div>
 
           {filteredStreams.length === 0 ? (
@@ -508,7 +421,7 @@ export default function StreamExplorer({
           </div>
 
           <div className="flex items-center gap-3">
-            {selectedStream && (
+            {selectedStream && userRole === "admin" && (
               <button
                 onClick={() => {
                   setDeleteConfirmText("");
@@ -553,27 +466,13 @@ export default function StreamExplorer({
                     className="fixed inset-0 z-35"
                     onClick={() => setIsExportDropdownOpen(false)}
                   />
-                  <div className="absolute right-0 mt-2 w-56 rounded-md border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 shadow-2xl p-1.5 z-40 animate-fade-in ">
+                  <div className="absolute right-0 mt-2 w-48 rounded-md border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 shadow-2xl p-1.5 z-40 animate-fade-in ">
                     <button
-                      onClick={() => handleStreamExport("json")}
-                      className="w-full text-left px-3 py-2 rounded text-xs font-bold text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-900 hover:text-zinc-00 dark:hover:text-white transition-all flex items-center gap-2"
-                    >
-                      <FileCode className="w-4 h-4 text-purple-600" />
-                      <span>JSON (Standard Array)</span>
-                    </button>
-                    <button
-                      onClick={() => handleStreamExport("jsonl")}
+                      onClick={() => handleStreamExport()}
                       className="w-full text-left px-3 py-2 rounded text-xs font-bold text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-900 hover:text-zinc-900 dark:hover:text-white transition-all flex items-center gap-2"
                     >
                       <FileText className="w-4 h-4 text-accent" />
                       <span>JSON Lines (.jsonl)</span>
-                    </button>
-                    <button
-                      onClick={() => handleStreamExport("csv")}
-                      className="w-full text-left px-3 py-2 rounded text-xs font-bold text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-900 hover:text-zinc-900 dark:hover:text-white transition-all flex items-center gap-2"
-                    >
-                      <FileSpreadsheet className="w-4 h-4 text-amber-500" />
-                      <span>CSV Table (.csv)</span>
                     </button>
                   </div>
                 </>
@@ -775,53 +674,6 @@ export default function StreamExplorer({
             </div>
 
             <form onSubmit={handleBulkImport} className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-zinc-500 dark:text-zinc-400">
-                    Target Ingestion Stream
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={importTargetStream}
-                    onChange={(e) => setImportTargetStream(e.target.value)}
-                    className="w-full bg-transparent text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-800 rounded px-4 py-2.5 text-xs outline-none focus:border-primary font-semibold"
-                  />
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-zinc-500 dark:text-zinc-400">
-                    Payload Source Format
-                  </label>
-                  <div className="grid grid-cols-2 gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setImportFormat("jsonl")}
-                      className={`py-2 px-3 rounded border text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${
-                        importFormat === "jsonl"
-                          ? "border-primary bg-primary/10 text-primary"
-                          : "border-zinc-200 dark:border-zinc-800  text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200"
-                      }`}
-                    >
-                      <FileCode className="w-4 h-4" />
-                      JSON Lines (.jsonl)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setImportFormat("csv")}
-                      className={`py-2 px-3 rounded border text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${
-                        importFormat === "csv"
-                          ? "border-primary bg-primary/10 text-primary"
-                          : "border-zinc-200 dark:border-zinc-800  text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200"
-                      }`}
-                    >
-                      <FileSpreadsheet className="w-4 h-4" />
-                      CSV Tables (.csv)
-                    </button>
-                  </div>
-                </div>
-              </div>
-
               {/* Drag & Drop File Upload Area */}
               <div className="space-y-1.5">
                 <label className="text-xs font-bold text-zinc-500 dark:text-zinc-400">
@@ -830,7 +682,7 @@ export default function StreamExplorer({
                 <div className="border border-dashed border-zinc-200 dark:border-zinc-800 rounded-md p-4 text-center hover:border-primary dark:hover:border-primary transition-colors relative cursor-pointer group">
                   <input
                     type="file"
-                    accept=".jsonl,.csv,.json,.txt"
+                    accept=".jsonl,.json,.txt"
                     onChange={handleFileChange}
                     className="absolute inset-0 opacity-0 cursor-pointer"
                   />
@@ -840,7 +692,7 @@ export default function StreamExplorer({
                     <span className="text-primary">browse</span>
                   </p>
                   <p className="text-[10px] text-zinc-400 dark:text-zinc-500 mt-1">
-                    Supports .jsonl, .json, and .csv files
+                    Supports .jsonl file
                   </p>
                 </div>
               </div>
@@ -850,16 +702,16 @@ export default function StreamExplorer({
                 <label className="text-xs font-bold text-zinc-500 dark:text-zinc-400 flex items-center justify-between">
                   <span>Pasted Document Editor</span>
                   <span className="text-[10px] text-zinc-400 dark:text-zinc-600 font-mono">
-                    {importFormat === "jsonl"
-                      ? 'Each row: {"key": "id", "value": {"any": "payload"}}'
-                      : 'First row headers "key" and "value" required'}
+                    {
+                      'Each row: {"stream": "logs", "key": "001", "value": "hello"}'
+                    }
                   </span>
                 </label>
                 <div className="border border-zinc-200 dark:border-zinc-800 rounded-md overflow-hidden text-xs">
                   <CodeMirror
                     value={importFileContent}
                     height="160px"
-                    extensions={importFormat === "jsonl" ? [json()] : []}
+                    extensions={[json()]}
                     onChange={(val) => setImportFileContent(val)}
                     theme={
                       resolvedTheme === "dark" ? gruvboxDark : atomOneLight

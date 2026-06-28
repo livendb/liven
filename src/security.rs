@@ -2,8 +2,12 @@ use rand::rngs::OsRng;
 
 pub const CAP_NONE: u8 = 0x00;
 pub const CAP_READ: u8 = 0x01; // historical scan, subscribes, list streams, status
-pub const CAP_WRITE: u8 = 0x03; // inserts, updates, upserts, plus all read operations
+pub const CAP_INSERT: u8 = 0x02; // inserts, updates, upserts
+pub const CAP_DELETE: u8 = 0x04; // deletes, empties
 pub const CAP_ROOT: u8 = 0xFF; // unrestricted/full - admin role
+
+/// Back-compat alias — checks both insert and delete.
+pub const CAP_WRITE: u8 = CAP_INSERT | CAP_DELETE;
 
 pub fn generate_nonce() -> [u8; 32] {
     let mut nonce = [0u8; 32];
@@ -28,4 +32,15 @@ pub fn hex_decode(s: &str) -> Result<Vec<u8>, String> {
 
 pub fn hex_encode(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{:02x}", b)).collect()
+}
+
+/// Single source of truth for role-string → capability bitmask.
+pub fn capabilities_for_role(role: &str) -> u8 {
+    match role {
+        "admin" => CAP_ROOT,
+        "read-only" => CAP_READ,
+        "write" => CAP_READ | CAP_INSERT,
+        "write-delete" => CAP_READ | CAP_INSERT | CAP_DELETE,
+        _ => CAP_NONE,
+    }
 }

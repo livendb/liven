@@ -88,7 +88,7 @@ export default function Login({ onLoginSuccess }: LoginProps) {
   };
 
   return (
-    <div className="relative min-h-screen flex flex-col items-center justify-center overflow-hidden font-sans transition-all duration-500 bg-body-bg text-text-main">
+    <div className="relative min-h-screen margin-2 flex flex-col items-center justify-center overflow-hidden font-sans transition-all duration-500 bg-body-bg text-text-main">
       {/* Premium background gradient spheres and glows */}
       {resolvedTheme === "dark" ? (
         <>
@@ -141,7 +141,7 @@ export default function Login({ onLoginSuccess }: LoginProps) {
 
       {/* Login glassmorphic card container */}
       <div
-        className={`relative w-full max-w-md mx-4 p-8 rounded-3xl border backdrop-blur-2xl shadow-2xl transition-all ${
+        className={`relative w-10/12 max-w-md mx-4 p-8 rounded-3xl  border backdrop-blur-2xl shadow-2xl transition-all ${
           resolvedTheme === "dark"
             ? "border-zinc-800 bg-zinc-900 shadow-primary/30"
             : "border-primary/20 bg-white/90 shadow-primary/5"

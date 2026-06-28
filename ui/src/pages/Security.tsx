@@ -14,11 +14,13 @@ import {
   Eye,
   EyeOff,
   Info,
+  Edit3,
 } from "lucide-react";
 import {
   fetchAuthKeys,
   generateAuthKey,
   revokeAuthKey,
+  submitRoleChange,
   AuthKeyRecord,
   GenerateKeyResponse,
 } from "../utils/requests";
@@ -30,11 +32,13 @@ export interface SecurityProps {
     type?: "info" | "success" | "warn" | "error",
   ) => void;
   resolvedTheme: "light" | "dark";
+  currentKeyId?: string | null;
 }
 
 export default function Security({
   addActivity,
   resolvedTheme,
+  currentKeyId,
 }: SecurityProps) {
   // Config & Keys State
   const [securityMode, setSecurityMode] = useState<string>("auth_key");
@@ -56,6 +60,15 @@ export default function Security({
   // Modal State - Revoke Confirmation
   const [keyToRevoke, setKeyToRevoke] = useState<string | null>(null);
   const [revokeLoading, setRevokeLoading] = useState<boolean>(false);
+
+  // Modal State - Change Role
+  const [keyToChangeRole, setKeyToChangeRole] = useState<AuthKeyRecord | null>(
+    null,
+  );
+  const [changeRoleNewRole, setChangeRoleNewRole] =
+    useState<string>("read-only");
+  const [changeRoleLoading, setChangeRoleLoading] = useState<boolean>(false);
+  const [changeRoleError, setChangeRoleError] = useState<string>("");
 
   // Load configuration and active keys
   const loadConfigAndKeys = async (silent = false) => {
@@ -117,6 +130,40 @@ export default function Security({
       );
     } finally {
       setRevokeLoading(false);
+    }
+  };
+
+  // Open change role modal
+  const handleOpenChangeRole = (record: AuthKeyRecord) => {
+    setKeyToChangeRole(record);
+    setChangeRoleNewRole(record.role);
+    setChangeRoleError("");
+  };
+
+  // Perform role change
+  const handleChangeRole = async () => {
+    if (!keyToChangeRole) return;
+    setChangeRoleLoading(true);
+    setChangeRoleError("");
+    try {
+      await submitRoleChange(keyToChangeRole.key_id, changeRoleNewRole);
+      addActivity(
+        `Role for key "${keyToChangeRole.key_id}" changed to ${changeRoleNewRole}`,
+        "server",
+        "success",
+      );
+      setKeyToChangeRole(null);
+      await loadConfigAndKeys(true);
+    } catch (err: any) {
+      console.error(err);
+      setChangeRoleError(err.message || "Failed to change role.");
+      addActivity(
+        `Failed to change role for key "${keyToChangeRole.key_id}": ${err.message || "Unknown error"}`,
+        "server",
+        "error",
+      );
+    } finally {
+      setChangeRoleLoading(false);
     }
   };
 
@@ -257,9 +304,14 @@ export default function Security({
                           desc: "Unlimited capabilities. Able to list, create, and revoke other key identities.",
                         },
                         {
-                          role: "write-only",
-                          title: "Write-Only Access",
-                          desc: "Allows write operations like data ingestion and compaction triggers.",
+                          role: "write-delete",
+                          title: "Write & Delete Access",
+                          desc: "Allows read, write, and delete operations.",
+                        },
+                        {
+                          role: "write",
+                          title: "Write Access",
+                          desc: "Allows read and write operations, but cannot delete records.",
                         },
                         {
                           role: "read-only",
@@ -507,6 +559,156 @@ export default function Security({
           </div>
         </div>
       )}
+
+      {/* MODAL 3: CHANGE ROLE */}
+      {keyToChangeRole && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-body-bg/95 backdrop-blur-xl transition-opacity duration-300"
+            onClick={() => setKeyToChangeRole(null)}
+          />
+
+          <div className="relative w-full max-w-md rounded-2xl border border-border-subtle p-6 shadow-2xl transform transition-all duration-300 scale-100 bg-panel-bg">
+            <button
+              onClick={() => setKeyToChangeRole(null)}
+              className="absolute top-5 right-5 p-1.5 rounded-lg text-zinc-400 hover:text-zinc-200 transition-colors hover:bg-zinc-500/10"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            <div className="space-y-5">
+              <div className="flex items-center gap-3 text-accent">
+                <div className="w-10 h-10 rounded-2xl bg-accent/10 flex items-center justify-center border border-accent/20">
+                  <Key className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-zinc-900 dark:text-zinc-100">
+                    Change Key Role
+                  </h3>
+                  <p className="text-[10px] text-zinc-500 uppercase tracking-widest font-extrabold mt-0.5">
+                    {keyToChangeRole.key_id}
+                  </p>
+                </div>
+              </div>
+
+              {keyToChangeRole.role === "admin" && (
+                <div className="p-4 rounded border text-[11px] leading-relaxed font-semibold bg-amber-500/10 border-amber-500/20 text-amber-600 dark:text-amber-400">
+                  <p className="uppercase text-[10px] font-black tracking-wider flex items-center gap-1 mb-1">
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0" /> Warning
+                  </p>
+                  You are changing your own key's role. If you downgrade from
+                  admin, you will lose access to this page immediately.
+                </div>
+              )}
+
+              <div className="space-y-3">
+                <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest block">
+                  New Role
+                </label>
+                <div className="grid grid-cols-1 gap-2">
+                  {[
+                    {
+                      role: "read-only",
+                      title: "Read-Only",
+                      desc: "Query and browse streams only",
+                    },
+                    {
+                      role: "write",
+                      title: "Write",
+                      desc: "Read + insert/update data",
+                    },
+                    {
+                      role: "write-delete",
+                      title: "Write & Delete",
+                      desc: "Read, insert, and delete records",
+                    },
+                    {
+                      role: "admin",
+                      title: "Root Admin",
+                      desc: "Full access including key management",
+                    },
+                  ].map((item) => {
+                    const isSelected = changeRoleNewRole === item.role;
+                    return (
+                      <button
+                        key={item.role}
+                        type="button"
+                        onClick={() => setChangeRoleNewRole(item.role)}
+                        className={`p-3 rounded border text-left flex items-start gap-3.5 transition-all ${
+                          isSelected
+                            ? "border-primary bg-primary/[0.03] ring-1 ring-primary"
+                            : resolvedTheme === "dark"
+                              ? "border-zinc-800 bg-zinc-900/15 hover:border-zinc-700 text-zinc-300"
+                              : "border-zinc-200 bg-white hover:border-zinc-300 text-zinc-700"
+                        }`}
+                      >
+                        <div
+                          className={`w-5 h-5 rounded-full border flex items-center justify-center shrink-0 mt-0.5 transition-all ${
+                            isSelected
+                              ? "border-primary bg-primary text-white"
+                              : "border-zinc-500"
+                          }`}
+                        >
+                          {isSelected && (
+                            <Check className="w-3 h-3 stroke-[3]" />
+                          )}
+                        </div>
+                        <div className="space-y-0.5">
+                          <span className="text-xs font-bold text-zinc-900 dark:text-zinc-100">
+                            {item.title}
+                          </span>
+                          <p className="text-[10px] text-zinc-500 leading-normal">
+                            {item.desc}
+                          </p>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="p-4 rounded border text-[11px] leading-relaxed font-semibold bg-zinc-500/10 border-zinc-500/20 text-zinc-600 dark:text-zinc-400">
+                <p className="flex items-center gap-1">
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                  Active connections using this key will be disconnected.
+                </p>
+              </div>
+
+              {changeRoleError && (
+                <div className="p-3 rounded border text-xs flex items-start gap-2.5 bg-red-950/15 border-red-500/20 text-red-300">
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>{changeRoleError}</span>
+                </div>
+              )}
+
+              <div className="pt-2 flex justify-end gap-3">
+                <button
+                  onClick={() => setKeyToChangeRole(null)}
+                  className={`px-5 py-3 rounded text-xs font-bold uppercase tracking-wider border transition-all ${
+                    resolvedTheme === "dark"
+                      ? "bg-transparent border-zinc-800 text-zinc-400 hover:text-zinc-250 hover:bg-zinc-900/40"
+                      : "bg-white border-zinc-200 text-zinc-500 hover:text-zinc-800 hover:bg-zinc-50"
+                  }`}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleChangeRole}
+                  disabled={
+                    changeRoleLoading ||
+                    changeRoleNewRole === keyToChangeRole.role
+                  }
+                  className="px-6 py-3 bg-primary hover:bg-primary-hover disabled:opacity-50 text-white font-bold text-xs uppercase tracking-wider rounded transition-all shadow-md active:scale-[0.98]"
+                >
+                  {changeRoleLoading
+                    ? "Updating..."
+                    : "Change Role & Disconnect"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       {/* HEADER SECTION */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 pb-6">
         <div className="space-y-1">
@@ -678,9 +880,13 @@ export default function Security({
                           <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider bg-rose-500/10 text-rose-500 border border-rose-500/20">
                             Root Admin
                           </span>
-                        ) : record.role === "write-only" ? (
+                        ) : record.role === "write-delete" ? (
+                          <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider bg-purple-500/10 text-purple-500 border border-purple-500/20">
+                            Write & Delete
+                          </span>
+                        ) : record.role === "write" ? (
                           <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider bg-blue-500/10 text-blue-500 border border-blue-500/20">
-                            Write-Only
+                            Write
                           </span>
                         ) : (
                           <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider bg-zinc-500/10 text-zinc-400 border border-zinc-500/20">
@@ -705,21 +911,37 @@ export default function Security({
 
                       {/* Actions */}
                       <td className="py-4 px-6 text-right">
-                        {isActive ? (
-                          <button
-                            onClick={() =>
-                              handleOpenRevokeConfirm(record.key_id)
-                            }
-                            className={`p-2.5 rounded border border-red-500/10 bg-red-500/[0.02] text-red-400 hover:text-white hover:bg-red-600 hover:border-red-600 hover:shadow-lg hover:shadow-red-950/10 transition-all duration-300`}
-                            title="Revoke Key & Disconnect Users"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        ) : (
-                          <span className="text-zinc-500 dark:text-zinc-600 text-xs font-bold uppercase select-none pr-2.5">
-                            Terminated
-                          </span>
-                        )}
+                        <div className="flex items-center justify-end gap-2">
+                          {isActive && (
+                            <>
+                              {record.key_id !== currentKeyId && (
+                                <button
+                                  onClick={() => handleOpenChangeRole(record)}
+                                  className="p-2.5 rounded border border-zinc-200 dark:border-zinc-700 bg-transparent text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all duration-300"
+                                  title="Change Role"
+                                >
+                                  <Edit3 className="w-4 h-4" />
+                                </button>
+                              )}
+                              {record.key_id !== currentKeyId && (
+                                <button
+                                  onClick={() =>
+                                    handleOpenRevokeConfirm(record.key_id)
+                                  }
+                                  className="p-2.5 rounded border border-red-500/10 bg-red-500/[0.02] text-red-400 hover:text-white hover:bg-red-600 hover:border-red-600 hover:shadow-lg hover:shadow-red-950/10 transition-all duration-300"
+                                  title="Revoke Key & Disconnect Users"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              )}
+                            </>
+                          )}
+                          {!isActive && (
+                            <span className="text-zinc-500 dark:text-zinc-600 text-xs font-bold uppercase select-none pr-2.5">
+                              Terminated
+                            </span>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
