@@ -8,8 +8,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/livendb/liven/actions">
-    <img src="https://img.shields.io/github/actions/workflow/status/livendb/liven/ci.yml?branch=main&label=CI&logo=github" alt="CI">
+  <a href="https://github.com/livendb/liven/actions/workflows/build.yml">
+    <img src="https://img.shields.io/github/actions/workflow/status/livendb/liven/build.yml?branch=main&label=CI&logo=github" alt="CI">
   </a>
   <a href="https://hub.docker.com/r/liven/liven">
     <img src="https://img.shields.io/docker/pulls/liven/liven?logo=docker&label=Docker" alt="Docker">
@@ -18,6 +18,9 @@
     <img src="https://img.shields.io/crates/v/liven?logo=rust&label=crates.io" alt="crates.io">
   </a>
   <br/>
+  <a href="https://docs.rs/liven">
+    <img src="https://img.shields.io/docsrs/liven?logo=docsdotrs&label=docs.rs" alt="docs.rs">
+  </a>
   <a href="https://github.com/livendb/liven/blob/main/LICENSE-SSPL">
     <img src="https://img.shields.io/badge/license-SSPL%201.0%20OR%20Commercial-blue" alt="License">
   </a>
@@ -30,11 +33,14 @@
 Liven is a database built for data that moves. It ingests streaming data, transforms it on the fly, and stores it durably — all with a single pipeline query language. One binary.
 
 ```sh
-# One-liner install
-curl --proto '=https' --tlsv1.2 -sSf https://livendb.com/install | sh
+# Install via crates.io
+cargo install liven
 
-# Or from source
-cargo build --release && ./target/release/liven start
+# Launch the server
+liven start
+
+# One-liner install (Linux & macOS)
+curl --proto '=https' --tlsv1.2 -sSf https://livendb.com/install | sh
 ```
 
 ---
@@ -79,10 +85,14 @@ liven query 'from("events") | filter(priority == "high") .listen()'
 ```
 
 ### Embedded in Rust
+
 ```toml
 [dependencies]
-liven = { path = "../liven", default-features = false }
+liven = { version = "0.0", default-features = false }
 ```
+
+For a minimal embedded build with no server, TUI, or TLS:
+
 ```rust
 use liven::Liven;
 
@@ -91,7 +101,7 @@ db.query(r#"from("events").insert("e1", {type: "click"})"#)?;
 let results = db.query(r#"from("events") | filter(type == "click")"#)?;
 ```
 
-**[Full documentation &rarr;](/docs)**
+**[Full documentation &rarr;](https://docs.rs/liven)**
 
 ---
 
@@ -110,24 +120,45 @@ Client → Pipeline Query Engine → Append-Only Storage
 - **Compaction** reclaims space from deleted records automatically.
 - **Recovery** replays segments on startup. CRC32 checksums catch corruption.
 
-**[Architecture deep dive &rarr;](../docs/architecture.md)**
-
 ---
 
 ## Installation
 
+### From crates.io
+
 ```sh
-# One-liner (Linux & macOS)
-curl --proto '=https' --tlsv1.2 -sSf https://livendb.com/install | sh
-
-# Docker
-docker run -p 43121:43121 -p 43120:43120 liven/liven
-
-# From source
-git clone https://github.com/livendb/liven && cd liven && cargo build --release
+cargo install liven
 ```
 
-[**Installation guide &rarr;](/docs/installation)
+### From source
+
+```sh
+git clone https://github.com/livendb/liven
+cd liven
+cargo build --release
+./target/release/liven start
+```
+
+> The build script automatically compiles the Web UI. If npm is not available,
+> the server binary will still work — only the embedded dashboard will be absent.
+
+### Docker
+
+```sh
+docker run -p 43121:43121 -p 43120:43120 ghcr.io/livendb/liven
+```
+
+### Package managers
+
+| Platform | Format | Command |
+|----------|--------|---------|
+| Debian/Ubuntu | `.deb` | `cargo deb --no-build -p liven` |
+| Fedora/RHEL | `.rpm` | `cargo generate-rpm --no-build -p liven` |
+| macOS | `.dmg` / `.tar.gz` | See [RELEASE.md](./RELEASE.md) |
+| Windows | `.msi` / `.zip` | See [RELEASE.md](./RELEASE.md) |
+
+Pre-built packages for each platform are available on the
+[GitHub Releases](https://github.com/livendb/liven/releases) page.
 
 ---
 
@@ -149,9 +180,46 @@ Liven logs to stdout/stderr. View logs based on your platform:
 
 ## Security
 
-- **Auth-key mode** (default): symmetric keys with BLAKE3 hashing. Roles: read-only, write-only, admin, root. Revoke keys at runtime.
-- **mTLS / ZTNA**: mutual TLS with X.509 certificates. Client CN maps to capabilities.
-- **Master key**: stored in `./liven.key` (mode 0600). Override with `LIVEN_SECURITY_MASTER_KEY`.
+### Auth-key mode (default)
+
+Symmetric keys with BLAKE3 hashing. Four role levels:
+
+| Role | Read | Insert | Delete | Admin |
+|------|------|--------|--------|-------|
+| `read-only` | ✅ | ❌ | ❌ | ❌ |
+| `write` | ✅ | ✅ | ❌ | ❌ |
+| `write-delete` | ✅ | ✅ | ✅ | ❌ |
+| `admin` | ✅ | ✅ | ✅ | ✅ |
+
+Keys can be generated, revoked, and role-changed at runtime via the Web UI or REST API — no server restart required.
+
+### mTLS / ZTNA
+
+Mutual TLS with X.509 certificates. Client CN maps to capabilities. Single-port mode multiplexes cleartext and TLS on the same listener.
+
+### Master key
+
+Stored in `./liven.key` (mode 0600). Override with `LIVEN_SECURITY_MASTER_KEY` environment variable.
+
+---
+
+## Feature flags
+
+Liven uses Cargo feature flags to control the binary size. The `default` feature includes everything:
+
+| Feature | Dependencies | Size impact |
+|---------|-------------|-------------|
+| `server` | axum, tower-http, rust-embed | ~+3 MB (web UI + REST API) |
+| `tui` | ratatui, crossterm | ~+1 MB (interactive terminal) |
+| `tls` | tokio-rustls, x509-parser | ~+500 KB (mTLS support) |
+
+```sh
+# Minimal embedded build (no server, no TUI, no TLS)
+cargo build --release --no-default-features
+
+# Embedded with TLS support
+cargo build --release --no-default-features --features tls
+```
 
 ---
 
