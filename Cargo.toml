@@ -128,13 +128,8 @@ assets = [
     { source = "liven.toml", dest = "/etc/liven/liven.toml", mode = "644", config = true },
     { source = "liven.service", dest = "/usr/lib/systemd/system/liven.service", mode = "644" }
 ]
-conf-files = ["/etc/liven/liven.toml"]
-
-[package.metadata.docs.rs]
-features = ["server", "tui", "tls"]
-rustdoc-args = ["--cfg", "docsrs"]
-
-[package.metadata.generate-rpm.post_install]
+	conf-files = ["/etc/liven/liven.toml"]
+	post_install = """
 # RPM %post installation script
 if [ ! -d /var/lib/liven ]; then
     echo "Creating LIVEN data directory with secure permissions (700)..."
@@ -151,7 +146,7 @@ fi
 systemctl daemon-reload || true
 systemctl enable liven || true
 """
-pre_uninstall = """
+	pre_uninstall = """
 # RPM %preun uninstallation script
 if [ "$1" -eq 0 ]; then
     # Complete uninstall (not an upgrade)
@@ -159,7 +154,11 @@ if [ "$1" -eq 0 ]; then
     systemctl disable liven || true
 fi
 """
-post_uninstall = """
+	post_uninstall = """
 # RPM %postun uninstallation script
 systemctl daemon-reload || true
 """
+
+[package.metadata.docs.rs]
+features = ["server", "tui", "tls"]
+rustdoc-args = ["--cfg", "docsrs"]
