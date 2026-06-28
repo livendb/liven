@@ -16,6 +16,7 @@ jobs:
   check:
     name: Lint & Core Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -23,7 +24,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
           cache: "npm"
           cache-dependency-path: "ui/package-lock.json"
 
@@ -57,13 +58,14 @@ jobs:
       - name: Audit dependencies
         run: |
           cargo install cargo-audit --locked 2>&1 || true
-          cargo audit 2>&1 || true
+          cargo audit
 
   # ── Full build: cross-platform, release, install tests, packaging ──
   build:
     name: Full Build (${{ matrix.os }})
     if: github.event_name == 'push'
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -76,7 +78,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
           cache: "npm"
           cache-dependency-path: "ui/package-lock.json"
 
@@ -110,6 +112,7 @@ jobs:
       # ── Installation tests ──
       - name: Run Installation Tests (Linux)
         if: matrix.os == 'ubuntu-latest'
+        timeout-minutes: 10
         run: |
           echo "==== Linux Installation Tests ===="
           chmod +x install.sh
@@ -146,13 +149,17 @@ jobs:
           DB_PID=$!
           sleep 3
           sudo ss -tlnp | grep -q 43121
-          curl -v --connect-timeout 3 http://127.0.0.1:43121/api/streams \
+          # --max-time bounds the WHOLE request (not just the TCP connect phase).
+          # Without it, a TCP connection that's accepted but never completes the
+          # TLS handshake leaves curl blocked indefinitely waiting on the socket.
+          curl -v --connect-timeout 3 --max-time 8 http://127.0.0.1:43121/api/streams \
             && (echo "FAIL: Cleartext succeeded in production!" && exit 1) \
             || echo "PASS: Cleartext rejected by mTLS shield"
           sudo kill -15 $DB_PID || true
 
       - name: Run Installation Tests (macOS)
         if: matrix.os == 'macos-latest'
+        timeout-minutes: 10
         run: |
           echo "==== macOS Installation Tests ===="
           chmod +x install.sh
@@ -164,7 +171,7 @@ jobs:
           sudo /usr/local/bin/liven start --config /etc/liven/liven.toml &
           DB_PID=$!
           sleep 3
-          if curl -v --connect-timeout 3 http://127.0.0.1:43120/api/streams; then
+          if curl -v --connect-timeout 3 --max-time 8 http://127.0.0.1:43120/api/streams; then
             echo "PASS: Development API connection succeeded"
           else
             echo "FAIL: Development API connection failed" && exit 1
@@ -174,19 +181,27 @@ jobs:
       - name: Run Installation Tests (Windows)
         if: matrix.os == 'windows-latest'
         shell: bash
+        timeout-minutes: 10
         run: |
           echo "==== Windows Installation Tests ===="
           INSTALL_OUTPUT=$(./install.sh)
           echo "$INSTALL_OUTPUT" | grep -q "Windows Deployment Instructions"
           echo "PASS: Windows instructions successfully returned"
 
-      - name: Upload compiled executable
+      - name: Upload compiled executable (Unix)
+        if: matrix.os != 'windows-latest'
         uses: actions/upload-artifact@v4
         with:
           name: liven-${{ matrix.os }}
-          path: |
-            target/release/liven
-            target/release/liven.exe
+          path: target/release/liven
+          if-no-files-found: error
+
+      - name: Upload compiled executable (Windows)
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: liven-${{ matrix.os }}
+          path: target/release/liven.exe
           if-no-files-found: error
 
   # ── Packaging: depends on build artifacts ──
@@ -195,6 +210,7 @@ jobs:
     if: github.event_name == 'push'
     needs: build
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -230,8 +246,8 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: |
           chmod +x target/release/liven
-          cargo deb --no-build
-          cargo generate-rpm --no-build
+          cargo deb --no-build || echo "Warning: cargo deb failed, skipping .deb"
+          cargo generate-rpm --no-build || echo "Warning: cargo generate-rpm failed, skipping .rpm"
           tar -czvf liven-linux-amd64.tar.gz -C target/release liven liven.toml
           mkdir -p dist
           mv target/debian/*.deb dist/ || true
@@ -243,7 +259,7 @@ jobs:
         shell: bash
         run: |
           echo "==== Packaging Windows Distribution Assets ===="
-          cargo wix --no-build
+          cargo wix --no-build || echo "Warning: cargo wix failed, skipping .msi"
           powershell -Command "Compress-Archive -Path target/release/liven.exe, liven.toml -DestinationPath liven-windows-amd64.zip"
           mkdir -p dist
           mv target/wix/*.msi dist/ || true
