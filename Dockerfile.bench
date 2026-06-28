@@ -9,7 +9,7 @@
 # consistent results across different hardware.
 
 # ── Build stage: frontend ──
-FROM node:24-bookworm AS ui-builder
+FROM node:20-bookworm AS ui-builder
 WORKDIR /ui
 COPY ui/package.json ui/package-lock.json ./
 RUN npm ci --legacy-peer-deps
@@ -51,4 +51,4 @@ CMD ["sh", "-c", "echo '=== LIVEN Benchmark Results ===' && \
     echo '' && \
     cargo bench --locked 2>&1 && \
     echo '' && \
-    echo '=== Benchmark Complete ==="]
+    echo '=== Benchmark Complete ==='"]
