@@ -46,6 +46,7 @@ fn post_http_json(addr: &str, path: &str, json_payload: &str) -> Result<(), Stri
     }
 }
 
+#[allow(clippy::large_enum_variant)]
 enum AppendTarget {
     Engine(StorageEngine),
     Http {
@@ -599,11 +600,11 @@ fn test_generate_sample_data() {
         let user_idx = ((i * 3) % 20) + 1;
         let user_id = format!("user_{:03}", user_idx);
         let text = match i % 5 {
-            0 => format!("Explain quantum computing in simple terms"),
-            1 => format!("Write a Rust function to parse CSV"),
-            2 => format!("Summarize the latest AI research papers"),
-            3 => format!("Debug this code: fn broken(x) {{ x + }}"),
-            _ => format!("Generate a SQL query for user analytics"),
+            0 => "Explain quantum computing in simple terms".to_string(),
+            1 => "Write a Rust function to parse CSV".to_string(),
+            2 => "Summarize the latest AI research papers".to_string(),
+            3 => "Debug this code: fn broken(x) { x + }".to_string(),
+            _ => "Generate a SQL query for user analytics".to_string(),
         };
         let json = format!(
             r#"{{"prompt_id": "{prompt_id}", "user_id": "{user_id}", "text": "{text}", "tokens": {}, "timestamp": {}}}"#,

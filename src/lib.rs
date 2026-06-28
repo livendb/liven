@@ -1,14 +1,4 @@
 // LIVEN — High-Velocity Embedded Database
-
-#[allow(
-    clippy::manual_strip,
-    clippy::cloned_ref_to_slice_refs,
-    clippy::match_like_matches_macro,
-    clippy::needless_return,
-    clippy::module_name_repetitions,
-    clippy::ptr_arg
-)]
-pub mod sysinfo;
 //
 // Copyright (c) 2026, LIVEN Maintainers <team@livendb.com>
 //
@@ -26,16 +16,24 @@ pub mod sysinfo;
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 //
 // Commercial licenses are available. Contact: team@livendb.com
-#[allow(
+
+// Crate-level clippy allowances for intentional or pre-existing patterns.
+#![allow(
     clippy::manual_strip,
     clippy::cloned_ref_to_slice_refs,
     clippy::match_like_matches_macro,
+    clippy::needless_return,
+    clippy::module_name_repetitions,
+    clippy::ptr_arg,
+    clippy::empty_line_after_doc_comments,
+    clippy::manual_div_ceil,
     clippy::large_enum_variant,
     clippy::should_implement_trait,
     clippy::too_many_arguments,
-    clippy::ptr_arg
+    clippy::collapsible_if,
+    clippy::vec_init_then_push
 )]
-// LIVEN library entry point
+
 pub mod client;
 pub mod codec;
 pub mod config;
@@ -46,6 +44,7 @@ pub mod import_export;
 pub mod parser;
 pub mod security;
 pub mod storage;
+pub mod sysinfo;
 pub mod types;
 pub use embed::Liven;
 

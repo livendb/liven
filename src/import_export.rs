@@ -61,8 +61,7 @@ pub fn json_to_datavalue_with_base64(json: serde_json::Value) -> Result<DataValu
         }
         serde_json::Value::String(s) => {
             // Check if it's a base64 encoded binary value
-            if s.starts_with("base64:") {
-                let base64_data = &s["base64:".len()..];
+            if let Some(base64_data) = s.strip_prefix("base64:") {
                 match general_purpose::STANDARD.decode(base64_data) {
                     Ok(bytes) => Ok(DataValue::Binary(bytes)),
                     Err(e) => Err(format!("Invalid base64 encoding: {}", e)),

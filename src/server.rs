@@ -1010,10 +1010,10 @@ fn is_request_from_ui(headers: &HeaderMap, config: &crate::config::ServerConfig)
     let localhost_name = format!("localhost:{}", config.webui_port);
 
     // Check Host header
-    if let Some(host) = headers.get(header::HOST).and_then(|h| h.to_str().ok()) {
-        if host == host_port || host == localhost || host == localhost6 || host == localhost_name {
-            return true;
-        }
+    if let Some(host) = headers.get(header::HOST).and_then(|h| h.to_str().ok())
+        && (host == host_port || host == localhost || host == localhost6 || host == localhost_name)
+    {
+        return true;
     }
 
     // Check Origin header (set by browsers)
@@ -1031,16 +1031,16 @@ fn is_request_from_ui(headers: &HeaderMap, config: &crate::config::ServerConfig)
     }
 
     // Check Referer header (fallback)
-    if let Some(referer) = headers.get(header::REFERER).and_then(|h| h.to_str().ok()) {
-        if let Some(after) = referer.split("://").nth(1) {
-            let authority = after.split('/').next().unwrap_or("");
-            if authority == host_port
-                || authority == localhost
-                || authority == localhost6
-                || authority == localhost_name
-            {
-                return true;
-            }
+    if let Some(referer) = headers.get(header::REFERER).and_then(|h| h.to_str().ok())
+        && let Some(after) = referer.split("://").nth(1)
+    {
+        let authority = after.split('/').next().unwrap_or("");
+        if authority == host_port
+            || authority == localhost
+            || authority == localhost6
+            || authority == localhost_name
+        {
+            return true;
         }
     }
 

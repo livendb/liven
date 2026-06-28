@@ -7,7 +7,8 @@
     clippy::should_implement_trait,
     clippy::too_many_arguments,
     clippy::ptr_arg,
-    clippy::vec_init_then_push
+    clippy::vec_init_then_push,
+    clippy::collapsible_if
 )]
 
 mod cli;

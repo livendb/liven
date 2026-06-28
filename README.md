@@ -139,8 +139,12 @@ cargo build --release
 ./target/release/liven start
 ```
 
-> The build script automatically compiles the Web UI. If npm is not available,
-> the server binary will still work — only the embedded dashboard will be absent.
+> Before building with the `server` feature, build the Web UI first:
+> ```bash
+> cd ui && npm ci --legacy-peer-deps && npm run build && cd ..
+> ```
+> Or skip the dashboard entirely: `cargo build --no-default-features`
+
 
 ### Docker
 

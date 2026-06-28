@@ -43,9 +43,12 @@ cargo publish --dry-run
 cargo publish
 ```
 
-The `build.rs` will build the Web UI automatically before compilation.
-If npm is not available, the server binary will compile without the
-embedded dashboard (a warning is printed).
+> **Note:** The `server` feature embeds a Web UI via `rust-embed`.
+> Before publishing, ensure `ui/dist/` is built:
+> ```bash
+> cd ui && npm ci --legacy-peer-deps && npm run build && cd ..
+> ```
+> Or publish with `--no-default-features` if the dashboard is not needed.
 
 ## Step 4: Build distribution packages
 

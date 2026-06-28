@@ -475,7 +475,7 @@ proptest! {
         keys in prop::collection::vec("[a-z]{1,15}", 5..30)
     ) {
         let dir = tempdir().expect("tempdir");
-        let engine = StorageEngine::new(dir.path(), 1 * 1024 * 1024)
+        let engine = StorageEngine::new(dir.path(), 1024 * 1024)
             .expect("StorageEngine::new");
 
         let mut live_keys: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -538,11 +538,10 @@ proptest! {
     #[test]
     fn fuzz_datavalue_json_round_trip(value in arbitrary_datavalue()) {
         // Skip NaN floats — JSON does not support NaN and round-trip is undefined
-        if let DataValue::Float(f) = &value {
-            if f.is_nan() {
+        if let DataValue::Float(f) = &value
+            && f.is_nan() {
                 return Ok(());
             }
-        }
 
         let json = serde_json::to_value(&value);
         prop_assert!(

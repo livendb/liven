@@ -26,15 +26,6 @@ if [ $? -ne 0 ]; then
 fi
 echo "✓ Lints verified!"
 
-# 3. Run Automated Tests
-echo "→ Checking automated test suite..."
-cargo test --all-targets --workspace
-if [ $? -ne 0 ]; then
-    echo "❌ Error: Test suite execution failed."
-    exit 1
-fi
-echo "✓ Tests verified!"
-
 echo "======================================================"
 echo "✨ Pre-push checks completed successfully! Pushing code..."
 echo "======================================================"

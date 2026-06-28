@@ -24,7 +24,6 @@ pub mod timestamp_index;
 /// - Unsafe slices are immediately copied into owned allocations and do not escape
 /// - All pointer arithmetic is bounds-checked against the original buffer length
 /// - The resulting DataValue variants do not borrow from the original payload
-
 pub trait PositionalReader {
     fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> std::io::Result<()>;
 }

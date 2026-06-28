@@ -16,7 +16,6 @@ COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 COPY benches ./benches
 COPY tests ./tests
-COPY build.rs ./
 
 # Copy pre-built UI assets
 COPY --from=ui-builder /ui/dist ./ui/dist

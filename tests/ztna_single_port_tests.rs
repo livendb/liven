@@ -209,8 +209,7 @@ async fn test_ztna_development_mode() {
         storage: StorageConfig {
             data_directory: test_dir.to_string_lossy().to_string(),
             max_segment_size_mb: 10,
-            
-            
+
             sync_mode: "always".to_string(),
             sync_interval_ms: 10,
         },
@@ -220,9 +219,6 @@ async fn test_ztna_development_mode() {
             max_index_ram_mb: 10,
             max_segment_size_mb: 10,
             max_scan_results: 100_000,
-            
-            
-            
         },
         security: SecurityConfig {
             mode: "none".to_string(),
@@ -290,8 +286,7 @@ async fn test_ztna_production_mode_cleartext_rejected() {
         storage: StorageConfig {
             data_directory: test_dir.to_string_lossy().to_string(),
             max_segment_size_mb: 10,
-            
-            
+
             sync_mode: "always".to_string(),
             sync_interval_ms: 10,
         },
@@ -301,9 +296,6 @@ async fn test_ztna_production_mode_cleartext_rejected() {
             max_index_ram_mb: 10,
             max_segment_size_mb: 10,
             max_scan_results: 100_000,
-            
-            
-            
         },
         security: SecurityConfig {
             mode: "none".to_string(),
@@ -411,8 +403,7 @@ async fn test_ztna_production_mode_mtls_success_with_filtering() {
         storage: StorageConfig {
             data_directory: test_dir.to_string_lossy().to_string(),
             max_segment_size_mb: 10,
-            
-            
+
             sync_mode: "always".to_string(),
             sync_interval_ms: 10,
         },
@@ -422,9 +413,6 @@ async fn test_ztna_production_mode_mtls_success_with_filtering() {
             max_index_ram_mb: 10,
             max_segment_size_mb: 10,
             max_scan_results: 100_000,
-            
-            
-            
         },
         security: SecurityConfig {
             mode: "none".to_string(),

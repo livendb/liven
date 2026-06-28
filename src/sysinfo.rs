@@ -1,4 +1,4 @@
-/// System information detection for auto-configuration
+//! System information detection for auto-configuration
 
 /// Detects total system RAM in megabytes
 /// Returns None if detection fails, in which case fallback values are used
@@ -94,7 +94,7 @@ pub fn calculate_auto_budget(system_ram_mb: u64) -> u64 {
 /// Estimates key capacity based on RAM budget
 /// Formula: budget_mb * 1024 * 1024 / 84 bytes per key
 pub fn estimate_key_capacity(budget_mb: u64) -> u64 {
-    (budget_mb * 1024 * 1024 + 83) / 84 // Add 83 for rounding
+    (budget_mb * 1024 * 1024).div_ceil(84)
 }
 
 #[cfg(test)]

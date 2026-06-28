@@ -94,7 +94,7 @@ fn test_key_validation_on_all_write_operations() {
 
     let batch_query = Query::InsertBatch {
         stream_name: "test_stream".to_string(),
-        batch: batch,
+        batch,
     };
 
     let result = execute_query(&engine, &batch_query);
@@ -115,7 +115,7 @@ fn test_key_validation_on_all_write_operations() {
 
     let batch_query = Query::UpsertBatch {
         stream_name: "test_stream".to_string(),
-        batch: batch,
+        batch,
     };
 
     let result = execute_query(&engine, &batch_query);
