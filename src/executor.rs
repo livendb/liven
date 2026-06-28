@@ -649,11 +649,9 @@ pub fn execute_explain(engine: &StorageEngine, query: &Query) -> Vec<Record> {
                 ));
             }
 
-            let mut step_idx = 1usize;
-            for stage in stages {
+            for (step_idx, stage) in stages.iter().enumerate() {
                 let (stage_name, cost, note) = describe_stage(stage, engine);
-                steps.push(make_step(step_idx, &stage_name, &cost, &note));
-                step_idx += 1;
+                steps.push(make_step(step_idx + 1, &stage_name, &cost, &note));
             }
         }
 
