@@ -364,7 +364,7 @@ jobs:
         run: |
           set -e
           echo "==== Packaging Windows Distribution Assets ===="
-          cargo wix --no-build --target ${{ matrix.target }}
+          cargo wix --no-build --target ${{ matrix.target }} --nocapture
           powershell -Command "Compress-Archive -Path target/${{ matrix.target }}/release/liven.exe, target/${{ matrix.target }}/release/liven.toml -DestinationPath liven-windows-${{ matrix.arch }}.zip"
           mkdir -p dist
           mv target/${{ matrix.target }}/wix/*.msi dist/
