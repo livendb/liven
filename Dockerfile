@@ -1,5 +1,5 @@
 # ── Build stage ──
-FROM node:20-bookworm AS ui-builder
+FROM node:24-bookworm AS ui-builder
 
 WORKDIR /ui
 COPY ui/package.json ui/package-lock.json ./

@@ -109,6 +109,10 @@ jobs:
       - name: Build release binary
         run: cargo build --release
 
+      - name: Stage runtime config alongside binary
+        shell: bash
+        run: cp liven.toml target/release/liven.toml
+
       # ── Installation tests ──
       - name: Run Installation Tests (Linux)
         if: matrix.os == 'ubuntu-latest'
@@ -193,7 +197,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: liven-${{ matrix.os }}
-          path: target/release/liven
+          path: |
+            target/release/liven
+            target/release/liven.toml
           if-no-files-found: error
 
       - name: Upload compiled executable (Windows)
@@ -201,7 +207,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: liven-${{ matrix.os }}
-          path: target/release/liven.exe
+          path: |
+            target/release/liven.exe
+            target/release/liven.toml
           if-no-files-found: error
 
   # ── Packaging: depends on build artifacts ──
@@ -247,8 +255,7 @@ jobs:
         run: |
           chmod +x target/release/liven
           cargo deb --no-build || echo "Warning: cargo deb failed, skipping .deb"
-          cargo generate-rpm || echo "Warning: cargo generate-rpm failed, skipping .rpm"
-          cp liven.toml target/release/
+          cargo generate-rpm --no-build || echo "Warning: cargo generate-rpm failed, skipping .rpm"
           tar -czvf liven-linux-amd64.tar.gz -C target/release liven liven.toml
           mkdir -p dist
           mv target/debian/*.deb dist/ || true
@@ -266,21 +273,13 @@ jobs:
           mv target/wix/*.msi dist/ || true
           mv liven-windows-amd64.zip dist/
 
-      - name: Package macOS (.dmg, .tar.gz)
+      - name: Package macOS (.tar.gz)
         if: matrix.os == 'macos-latest'
         run: |
           echo "==== Packaging macOS Distribution Assets ===="
-          chmod +x target/release/liven
-          mkdir -p assets
-          touch assets/liven.icns
-          touch assets/dmg_background.png
-          if npm install -g appdmg 2>&1; then
-            appdmg appdmg.json dist/liven-macos.dmg || echo "Warning: appdmg failed, skipping .dmg"
-          else
-            echo "Warning: appdmg install failed, skipping .dmg"
-          fi
-          tar -czvf liven-macos-x64.tar.gz -C target/release liven liven.toml
           mkdir -p dist
+          chmod +x target/release/liven
+          tar -czvf liven-macos-x64.tar.gz -C target/release liven liven.toml
           mv liven-macos-x64.tar.gz dist/
 
       - name: Upload Packaged Installers
