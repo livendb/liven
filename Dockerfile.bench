@@ -8,7 +8,7 @@
 # CPU features are pinned to x86-64-v2 (circa 2010) to ensure
 # consistent results across different hardware.
 
-FROM rust:1.85-bookworm
+FROM rust:1.88-bookworm
 
 WORKDIR /app
 
