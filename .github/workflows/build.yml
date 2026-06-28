@@ -3,6 +3,7 @@ name: Build & Verify Liven
 on:
   push:
     branches: [main]
+    tags: ["v*.*.*"]
   pull_request:
     branches: [main]
 
@@ -60,9 +61,9 @@ jobs:
           cargo install cargo-audit --locked 2>&1 || true
           cargo audit
 
-  # ── Full build: cross-platform, release, install tests, packaging ──
+  # ── Full build: per-target cross-platform matrix ──
   build:
-    name: Full Build (${{ matrix.os }} ${{ matrix.target }})
+    name: Build (${{ matrix.target }})
     if: github.event_name == 'push'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
@@ -70,31 +71,49 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Linux x86_64
+          # ── Linux amd64 (native) ──
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
+            native: true
+            platform: linux
             arch: amd64
-            pkg_ext: ""
-          # Linux ARM64
-          - os: ubuntu-24.04-arm
+          # ── Linux arm64 (cross-compiled) ──
+          # NOTE: requires the gcc-aarch64-linux-gnu cross toolchain, installed below.
+          # Install/boot tests are skipped here since this binary can't run on the
+          # x86_64 runner without QEMU emulation.
+          - os: ubuntu-latest
             target: aarch64-unknown-linux-gnu
+            native: false
+            platform: linux
             arch: arm64
-            pkg_ext: ""
-          # macOS Intel
-          - os: macos-13
-            target: x86_64-apple-darwin
-            arch: x64
-            pkg_ext: ""
-          # macOS Apple Silicon
-          - os: macos-14
+          # ── macOS Apple Silicon (native — GitHub's macos-latest runners are arm64) ──
+          - os: macos-latest
             target: aarch64-apple-darwin
+            native: true
+            platform: macos
             arch: arm64
-            pkg_ext: ""
-          # Windows x86_64
+          # ── macOS Intel (cross-compiled via Xcode's multi-arch clang) ──
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            native: false
+            platform: macos
+            arch: amd64
+          # ── Windows amd64 (native) ──
           - os: windows-latest
             target: x86_64-pc-windows-msvc
+            native: true
+            platform: windows
             arch: amd64
-            pkg_ext: ".exe"
+          # ── Windows arm64 (cross-compiled) ──
+          # NOTE: assumes the hosted windows-latest runner's MSVC toolset includes
+          # the ARM64 build component. If this leg fails on the linker step, the
+          # runner image needs the "VS.Component.VC.Tools.ARM64" workload added
+          # explicitly via a setup step before `rustup target add` will succeed.
+          - os: windows-latest
+            target: aarch64-pc-windows-msvc
+            native: false
+            platform: windows
+            arch: arm64
 
     steps:
       - name: Checkout repository
@@ -122,36 +141,40 @@ jobs:
 
       - name: Cache Cargo dependencies
         uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
 
-      # ── Use mold linker on Linux for ~5x faster LTO linking ──
-      - name: Install mold linker (Linux x86_64)
-        if: matrix.os == 'ubuntu-latest'
+      # ── Use mold linker on native Linux amd64 for ~5x faster LTO linking ──
+      - name: Install mold linker (Linux amd64)
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq mold
           echo "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=clang" >> $GITHUB_ENV
           echo "RUSTFLAGS=-C link-arg=-fuse-ld=mold" >> $GITHUB_ENV
 
-      - name: Build release binary for ${{ matrix.target }}
+      # ── Cross toolchain for Linux arm64 ──
+      - name: Install aarch64 cross toolchain (Linux arm64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gcc-aarch64-linux-gnu
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+
+      - name: Build release binary
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Stage runtime config alongside binary
         shell: bash
-        run: |
-          if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            cp liven.toml target/${{ matrix.target }}/release/liven.toml
-          else
-            cp liven.toml target/${{ matrix.target }}/release/liven.toml
-          fi
+        run: cp liven.toml target/${{ matrix.target }}/release/liven.toml
 
-      # ── Installation tests ──
-      - name: Run Installation Tests (Linux x86_64)
-        if: matrix.os == 'ubuntu-latest'
+      # ── Installation tests: only run on the runner's native target ──
+      - name: Run Installation Tests (Linux amd64)
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
         timeout-minutes: 10
         run: |
-          echo "==== Linux x86_64 Installation Tests ===="
+          echo "==== Linux Installation Tests ===="
           chmod +x install.sh
-          export BINARY_PATH="target/${{ matrix.target }}/release/liven"
 
           # 1. Production install
           sudo ./install.sh --env production
@@ -169,9 +192,9 @@ jobs:
           docker run --rm -v ${{ github.workspace }}:/workspace debian:bookworm-slim sh -c "
             cp /workspace/install.sh /install.sh &&
             chmod +x /install.sh &&
-            mkdir -p /target/${{ matrix.target }}/release &&
-            cp /workspace/target/${{ matrix.target }}/release/liven /target/${{ matrix.target }}/release/liven &&
-            chmod +x /target/${{ matrix.target }}/release/liven &&
+            mkdir -p /target/release &&
+            cp /workspace/target/${{ matrix.target }}/release/liven /target/release/liven &&
+            chmod +x /target/release/liven &&
             ./install.sh --env development &&
             test -f /usr/local/bin/liven &&
             test -f /usr/local/bin/liven-entrypoint &&
@@ -185,28 +208,19 @@ jobs:
           DB_PID=$!
           sleep 3
           sudo ss -tlnp | grep -q 43121
+          # --max-time bounds the WHOLE request (not just the TCP connect phase).
+          # Without it, a TCP connection that's accepted but never completes the
+          # TLS handshake leaves curl blocked indefinitely waiting on the socket.
           curl -v --connect-timeout 3 --max-time 8 http://127.0.0.1:43121/api/streams \
             && (echo "FAIL: Cleartext succeeded in production!" && exit 1) \
             || echo "PASS: Cleartext rejected by mTLS shield"
           sudo kill -15 $DB_PID || true
 
-      - name: Run Installation Tests (Linux ARM64)
-        if: matrix.os == 'ubuntu-24.04-arm'
+      - name: Run Installation Tests (macOS arm64)
+        if: matrix.target == 'aarch64-apple-darwin'
         timeout-minutes: 10
         run: |
-          echo "==== Linux ARM64 Installation Tests ===="
-          chmod +x install.sh
-          export BINARY_PATH="target/${{ matrix.target }}/release/liven"
-          sudo ./install.sh --env development
-          grep -q 'environment = "development"' /etc/liven/liven.toml
-          test -f /usr/local/bin/liven
-          echo "PASS: ARM64 installation test passed"
-
-      - name: Run Installation Tests (macOS Intel)
-        if: matrix.os == 'macos-13'
-        timeout-minutes: 10
-        run: |
-          echo "==== macOS Intel Installation Tests ===="
+          echo "==== macOS Installation Tests ===="
           chmod +x install.sh
           sudo ./install.sh --env development
           grep -q 'environment = "development"' /etc/liven/liven.toml
@@ -223,20 +237,8 @@ jobs:
           fi
           sudo kill -15 $DB_PID || true
 
-      - name: Run Installation Tests (macOS Apple Silicon)
-        if: matrix.os == 'macos-14'
-        timeout-minutes: 10
-        run: |
-          echo "==== macOS Apple Silicon Installation Tests ===="
-          chmod +x install.sh
-          sudo ./install.sh --env development
-          grep -q 'environment = "development"' /etc/liven/liven.toml
-          test -f /Library/LaunchDaemons/com.liven.liven.plist
-          test -f /usr/local/bin/liven
-          echo "PASS: Apple Silicon installation test passed"
-
-      - name: Run Installation Tests (Windows)
-        if: matrix.os == 'windows-latest'
+      - name: Run Installation Tests (Windows amd64)
+        if: matrix.target == 'x86_64-pc-windows-msvc'
         shell: bash
         timeout-minutes: 10
         run: |
@@ -246,28 +248,28 @@ jobs:
           echo "PASS: Windows instructions successfully returned"
 
       - name: Upload compiled executable (Unix)
-        if: matrix.os != 'windows-latest'
+        if: matrix.platform != 'windows'
         uses: actions/upload-artifact@v7
         with:
-          name: liven-${{ matrix.os }}-${{ matrix.arch }}
+          name: liven-${{ matrix.target }}
           path: |
             target/${{ matrix.target }}/release/liven
             target/${{ matrix.target }}/release/liven.toml
           if-no-files-found: error
 
       - name: Upload compiled executable (Windows)
-        if: matrix.os == 'windows-latest'
+        if: matrix.platform == 'windows'
         uses: actions/upload-artifact@v7
         with:
-          name: liven-${{ matrix.os }}-${{ matrix.arch }}
+          name: liven-${{ matrix.target }}
           path: |
             target/${{ matrix.target }}/release/liven.exe
             target/${{ matrix.target }}/release/liven.toml
           if-no-files-found: error
 
-  # ── Packaging: depends on build artifacts ──
+  # ── Packaging: depends on build artifacts, one leg per target ──
   package:
-    name: Package Distribution (${{ matrix.os }} ${{ matrix.arch }})
+    name: Package (${{ matrix.target }})
     if: github.event_name == 'push'
     needs: build
     runs-on: ${{ matrix.os }}
@@ -277,20 +279,29 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            arch: amd64
             target: x86_64-unknown-linux-gnu
-          - os: ubuntu-24.04-arm
-            arch: arm64
-            target: aarch64-unknown-linux-gnu
-          - os: macos-13
-            arch: x64
-            target: x86_64-apple-darwin
-          - os: macos-14
-            arch: arm64
-            target: aarch64-apple-darwin
-          - os: windows-latest
+            platform: linux
             arch: amd64
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            platform: linux
+            arch: arm64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            platform: macos
+            arch: arm64
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            platform: macos
+            arch: amd64
+          - os: windows-latest
             target: x86_64-pc-windows-msvc
+            platform: windows
+            arch: amd64
+          - os: windows-latest
+            target: aarch64-pc-windows-msvc
+            platform: windows
+            arch: arm64
 
     steps:
       - name: Checkout repository
@@ -303,11 +314,13 @@ jobs:
 
       - name: Cache Cargo dependencies
         uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
 
       - name: Download compiled executable
         uses: actions/download-artifact@v8
         with:
-          name: liven-${{ matrix.os }}-${{ matrix.arch }}
+          name: liven-${{ matrix.target }}
           path: target/${{ matrix.target }}/release
 
       - name: Install cargo-binstall (pre-built binary installer)
@@ -315,59 +328,78 @@ jobs:
           curl -fsSL https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
 
       - name: Install packaging tools via binstall (skip compilation)
-        run: |
-          cargo binstall cargo-deb --no-confirm --locked 2>&1 || echo "Warning: cargo-deb install failed"
-          cargo binstall cargo-generate-rpm --no-confirm --locked 2>&1 || echo "Warning: cargo-generate-rpm install failed"
-          cargo binstall cargo-wix --no-confirm --locked 2>&1 || echo "Warning: cargo-wix install failed"
-
-      - name: Package Linux (.deb, .rpm, .tar.gz)
-        if: matrix.os == 'ubuntu-latest' || matrix.os == 'ubuntu-24.04-arm'
-        run: |
-          chmod +x target/${{ matrix.target }}/release/liven
-          # Build .deb
-          cargo deb --target ${{ matrix.target }} --no-build || echo "Warning: cargo deb failed, skipping .deb"
-          # Build .rpm
-          cargo generate-rpm --target ${{ matrix.target }} --no-build || echo "Warning: cargo generate-rpm failed, skipping .rpm"
-          # Create tarball
-          if [ "${{ matrix.arch }}" = "amd64" ]; then
-            TAR_NAME="liven-linux-amd64.tar.gz"
-          else
-            TAR_NAME="liven-linux-arm64.tar.gz"
-          fi
-          tar -czvf $TAR_NAME -C target/${{ matrix.target }}/release liven liven.toml
-          mkdir -p dist
-          mv target/${{ matrix.target }}/debian/*.deb dist/ 2>/dev/null || true
-          mv target/${{ matrix.target }}/generate-rpm/*.rpm dist/ 2>/dev/null || true
-          mv $TAR_NAME dist/
-
-      - name: Package Windows (.msi, .zip)
-        if: matrix.os == 'windows-latest'
         shell: bash
         run: |
-          echo "==== Packaging Windows Distribution Assets ===="
-          cargo wix --target ${{ matrix.target }} --no-build || echo "Warning: cargo wix failed, skipping .msi"
-          powershell -Command "Compress-Archive -Path target/${{ matrix.target }}/release/liven.exe, liven.toml -DestinationPath liven-windows-amd64.zip"
+          cargo binstall cargo-deb --no-confirm --locked
+          cargo binstall cargo-generate-rpm --no-confirm --locked
+          cargo binstall cargo-wix --no-confirm --locked
+
+      - name: Package Linux (.deb, .rpm, .tar.gz)
+        if: matrix.platform == 'linux'
+        run: |
+          set -e
+          chmod +x target/${{ matrix.target }}/release/liven
+          cargo deb --no-build --target ${{ matrix.target }}
+          cargo generate-rpm --target ${{ matrix.target }}
+          tar -czvf liven-linux-${{ matrix.arch }}.tar.gz -C target/${{ matrix.target }}/release liven liven.toml
           mkdir -p dist
-          mv target/${{ matrix.target }}/wix/*.msi dist/ 2>/dev/null || true
-          mv liven-windows-amd64.zip dist/
+          mv target/${{ matrix.target }}/debian/*.deb dist/
+          mv target/${{ matrix.target }}/generate-rpm/*.rpm dist/
+          mv liven-linux-${{ matrix.arch }}.tar.gz dist/
+
+      - name: Package Windows (.msi, .zip)
+        if: matrix.platform == 'windows'
+        shell: bash
+        run: |
+          set -e
+          echo "==== Packaging Windows Distribution Assets ===="
+          cargo wix --no-build --target ${{ matrix.target }}
+          powershell -Command "Compress-Archive -Path target/${{ matrix.target }}/release/liven.exe, target/${{ matrix.target }}/release/liven.toml -DestinationPath liven-windows-${{ matrix.arch }}.zip"
+          mkdir -p dist
+          mv target/${{ matrix.target }}/wix/*.msi dist/
+          mv liven-windows-${{ matrix.arch }}.zip dist/
 
       - name: Package macOS (.tar.gz)
-        if: matrix.os == 'macos-13' || matrix.os == 'macos-14'
+        if: matrix.platform == 'macos'
         run: |
+          set -e
           echo "==== Packaging macOS Distribution Assets ===="
           mkdir -p dist
           chmod +x target/${{ matrix.target }}/release/liven
-          if [ "${{ matrix.arch }}" = "x64" ]; then
-            TAR_NAME="liven-macos-x64.tar.gz"
-          else
-            TAR_NAME="liven-macos-arm64.tar.gz"
-          fi
-          tar -czvf $TAR_NAME -C target/${{ matrix.target }}/release liven liven.toml
-          mv $TAR_NAME dist/
+          tar -czvf liven-macos-${{ matrix.arch }}.tar.gz -C target/${{ matrix.target }}/release liven liven.toml
+          mv liven-macos-${{ matrix.arch }}.tar.gz dist/
 
       - name: Upload Packaged Installers
         uses: actions/upload-artifact@v7
         with:
-          name: liven-installers-${{ matrix.os }}-${{ matrix.arch }}
+          name: liven-installers-${{ matrix.target }}
           path: dist/*
-          if-no-files-found: ignore
+          if-no-files-found: error
+
+  # ── Release: only runs when a vX.Y.Z tag is pushed ──
+  release:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: package
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download all installer artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: liven-installers-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: List release assets
+        run: ls -la release-assets
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*
+          generate_release_notes: true
+          draft: false
+          prerelease: false
