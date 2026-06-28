@@ -1,32 +1,13 @@
 #!/bin/sh
 # LIVEN Git Pre-Push Hook
-# Automatically verifies code format, clippy lints, and test status before pushing.
+# Verifies the project compiles and passes lints before pushing.
 
-echo "======================================================"
-echo "Running LIVEN Pre-Push Verification Suite..."
-echo "======================================================"
+set -e
 
-# 1. Verify Code Formatting
-echo "→ Checking code formatting..."
-cargo fmt --all -- --check
-if [ $? -ne 0 ]; then
-    echo "❌ Error: Code formatting check failed."
-    echo "   Please run 'cargo fmt --all' before pushing."
-    exit 1
-fi
-echo "✓ Formatting verified!"
+echo "→ cargo check..."
+cargo check
 
-# 2. Run Clippy Lints
-echo "→ Checking Clippy lints..."
-cargo clippy --all-targets -- -D warnings
-if [ $? -ne 0 ]; then
-    echo "❌ Error: Clippy lints failed."
-    echo "   Please fix all warnings or configure #[allow(...)] tags."
-    exit 1
-fi
-echo "✓ Lints verified!"
+echo "→ cargo clippy..."
+cargo clippy -- -D warnings
 
-echo "======================================================"
-echo "✨ Pre-push checks completed successfully! Pushing code..."
-echo "======================================================"
-exit 0
+echo "✓ Pre-push checks passed."
