@@ -20,13 +20,6 @@
   <a href="https://crates.io/crates/liven">
     <img src="https://img.shields.io/crates/d/liven?logo=rust&label=downloads" alt="downloads">
   </a>
-  <br/>
-  <a href="https://docs.rs/liven">
-    <img src="https://img.shields.io/docsrs/liven?logo=docsdotrs&label=docs.rs" alt="docs.rs">
-  </a>
-  <a href="https://github.com/livendb/liven/blob/main/LICENSE-SSPL">
-    <img src="https://img.shields.io/badge/license-SSPL%201.0%20" alt="License">
-  </a>
 </p>
 
 ---
@@ -110,18 +103,21 @@ let results = db.query(r#"from("events") | filter(type == "click")"#)?;
 
 ## How It Works (at a glance)
 
-```
-Client → Pipeline Query Engine → Append-Only Storage
-                                  ↑
-                             In-Memory Index
-                       (SkipMap + broadcast channel)
+```mermaid
+flowchart LR
+    Client -->|query / subscribe| Query[Pipeline Query<br/>Engine]
+    Query -->|write| Storage[Append-Only<br/>Storage]
+    Query -->|read| Index[In-Memory Index]
+    Storage -->|flusher updates| Index
+    Index -->|point lookup| Query
+    Index -->|broadcast| Subscriber[Live Subscribers]
 ```
 
 - **Writes** are appended to segment files. A background flusher batches them for throughput without sacrificing durability.
 - **Reads** go through a lock-free in-memory index. Point lookups resolve in microseconds.
 - **Subscriptions** broadcast every write to all listeners. The server evaluates pipeline filters before delivery.
 - **Compaction** reclaims space from deleted records automatically.
-- **Recovery** replays segments on startup. CRC32 checksums catch corruption.
+- **Recovery** replays segments on startup. Checksums catch corruption.
 
 ---
 
@@ -214,11 +210,11 @@ Stored in `./liven.key` (mode 0600). Override with `LIVEN_SECURITY_MASTER_KEY` e
 
 Liven uses Cargo feature flags to control the binary size. The `default` feature includes everything:
 
-| Feature | Dependencies | Size impact |
+| Feature |  Size impact |
 |---------|-------------|-------------|
-| `server` | axum, tower-http, rust-embed | ~+3 MB (web UI + REST API) |
-| `tui` | ratatui, crossterm | ~+1 MB (interactive terminal) |
-| `tls` | tokio-rustls, x509-parser | ~+500 KB (mTLS support) |
+| `server` |  ~+3 MB (web UI + REST API) |
+| `tui` |  ~+1 MB (interactive terminal) |
+| `tls` |  ~+500 KB (mTLS support) |
 
 ```sh
 # Minimal embedded build (no server, no TUI, no TLS)

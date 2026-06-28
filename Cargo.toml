@@ -12,7 +12,6 @@ keywords = [
     "database",
     "storage",
     "streaming",
-    "real-time",
     "embedded",
     "vector-search"
 ]
@@ -20,6 +19,7 @@ categories = [
     "database-implementations",
     "embedded",
     "data-structures",
+    "concurrency"
 ]
 [lib]
 name = "liven"
