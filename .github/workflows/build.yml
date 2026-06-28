@@ -247,7 +247,8 @@ jobs:
         run: |
           chmod +x target/release/liven
           cargo deb --no-build || echo "Warning: cargo deb failed, skipping .deb"
-          cargo generate-rpm --no-build || echo "Warning: cargo generate-rpm failed, skipping .rpm"
+          cargo generate-rpm || echo "Warning: cargo generate-rpm failed, skipping .rpm"
+          cp liven.toml target/release/
           tar -czvf liven-linux-amd64.tar.gz -C target/release liven liven.toml
           mkdir -p dist
           mv target/debian/*.deb dist/ || true

@@ -107,7 +107,6 @@ harness = false
 [package.metadata.deb]
 maintainer = "LIVEN Maintainers <team@livendb.com>"
 copyright = "2026, LIVEN Maintainers <team@livendb.com>"
-license = "SSPL-1.0"
 section = "database"
 priority = "optional"
 assets = [
@@ -120,22 +119,22 @@ maintainer-scripts = "debian"
 
 [package.metadata.generate-rpm]
 summary = "LIVEN High-Performance Storage Engine"
-
-[package.metadata.docs.rs]
-features = ["server", "tui", "tls"]
-rustdoc-args = ["--cfg", "docsrs"]
 description = "High-performance storage engine with ZTNA and mTLS support"
 license = "SSPL-1.0"
 release = "1"
 packager = "LIVEN Maintainers <team@livendb.com>"
-doc-files = ["README.md"]
 assets = [
     { source = "target/release/liven", dest = "/usr/local/bin/liven", mode = "755" },
     { source = "liven.toml", dest = "/etc/liven/liven.toml", mode = "644", config = true },
     { source = "liven.service", dest = "/usr/lib/systemd/system/liven.service", mode = "644" }
 ]
 conf-files = ["/etc/liven/liven.toml"]
-post_install = """
+
+[package.metadata.docs.rs]
+features = ["server", "tui", "tls"]
+rustdoc-args = ["--cfg", "docsrs"]
+
+[package.metadata.generate-rpm.post_install]
 # RPM %post installation script
 if [ ! -d /var/lib/liven ]; then
     echo "Creating LIVEN data directory with secure permissions (700)..."
