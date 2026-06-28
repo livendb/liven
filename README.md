@@ -208,13 +208,16 @@ Stored in `./liven.key` (mode 0600). Override with `LIVEN_SECURITY_MASTER_KEY` e
 
 ## Feature flags
 
-Liven uses Cargo feature flags to control the binary size. The `default` feature includes everything:
+Liven uses Cargo feature flags for modular builds.
 
-| Feature |  Size impact |
-|---------|-------------|-------------|
-| `server` |  ~+3 MB (web UI + REST API) |
-| `tui` |  ~+1 MB (interactive terminal) |
-| `tls` |  ~+500 KB (mTLS support) |
+The `default` feature enables everything by pulling in `full`, which bundles all three optional capabilities.
+
+| Feature  | What's included                                 |
+|----------|-------------------------------------------------|
+| `full`   | All features below (enabled by default)          |
+| `server` | REST API + WebSocket + embedded Web UI           |
+| `tui`    | Interactive terminal dashboard                   |
+| `tls`    | mTLS support with X.509 certificates             |
 
 ```sh
 # Minimal embedded build (no server, no TUI, no TLS)
