@@ -22,7 +22,7 @@ COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 COPY benches ./benches
 COPY tests ./tests
-COPY build.rs ./
+
 
 # Disable CPU-specific optimizations for reproducibility.
 # -C target-cpu=x86-64 generates code compatible with any x86-64 CPU.
