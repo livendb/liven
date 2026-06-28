@@ -62,14 +62,39 @@ jobs:
 
   # ── Full build: cross-platform, release, install tests, packaging ──
   build:
-    name: Full Build (${{ matrix.os }})
+    name: Full Build (${{ matrix.os }} ${{ matrix.target }})
     if: github.event_name == 'push'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          # Linux x86_64
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            arch: amd64
+            pkg_ext: ""
+          # Linux ARM64
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            arch: arm64
+            pkg_ext: ""
+          # macOS Intel
+          - os: macos-13
+            target: x86_64-apple-darwin
+            arch: x64
+            pkg_ext: ""
+          # macOS Apple Silicon
+          - os: macos-14
+            target: aarch64-apple-darwin
+            arch: arm64
+            pkg_ext: ""
+          # Windows x86_64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            arch: amd64
+            pkg_ext: ".exe"
 
     steps:
       - name: Checkout repository
@@ -93,12 +118,13 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+          targets: ${{ matrix.target }}
 
       - name: Cache Cargo dependencies
         uses: Swatinem/rust-cache@v2
 
       # ── Use mold linker on Linux for ~5x faster LTO linking ──
-      - name: Install mold linker (Linux)
+      - name: Install mold linker (Linux x86_64)
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update -qq
@@ -106,20 +132,26 @@ jobs:
           echo "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=clang" >> $GITHUB_ENV
           echo "RUSTFLAGS=-C link-arg=-fuse-ld=mold" >> $GITHUB_ENV
 
-      - name: Build release binary
-        run: cargo build --release
+      - name: Build release binary for ${{ matrix.target }}
+        run: cargo build --release --target ${{ matrix.target }}
 
       - name: Stage runtime config alongside binary
         shell: bash
-        run: cp liven.toml target/release/liven.toml
+        run: |
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            cp liven.toml target/${{ matrix.target }}/release/liven.toml
+          else
+            cp liven.toml target/${{ matrix.target }}/release/liven.toml
+          fi
 
       # ── Installation tests ──
-      - name: Run Installation Tests (Linux)
+      - name: Run Installation Tests (Linux x86_64)
         if: matrix.os == 'ubuntu-latest'
         timeout-minutes: 10
         run: |
-          echo "==== Linux Installation Tests ===="
+          echo "==== Linux x86_64 Installation Tests ===="
           chmod +x install.sh
+          export BINARY_PATH="target/${{ matrix.target }}/release/liven"
 
           # 1. Production install
           sudo ./install.sh --env production
@@ -137,9 +169,9 @@ jobs:
           docker run --rm -v ${{ github.workspace }}:/workspace debian:bookworm-slim sh -c "
             cp /workspace/install.sh /install.sh &&
             chmod +x /install.sh &&
-            mkdir -p /target/release &&
-            cp /workspace/target/release/liven /target/release/liven &&
-            chmod +x /target/release/liven &&
+            mkdir -p /target/${{ matrix.target }}/release &&
+            cp /workspace/target/${{ matrix.target }}/release/liven /target/${{ matrix.target }}/release/liven &&
+            chmod +x /target/${{ matrix.target }}/release/liven &&
             ./install.sh --env development &&
             test -f /usr/local/bin/liven &&
             test -f /usr/local/bin/liven-entrypoint &&
@@ -153,19 +185,28 @@ jobs:
           DB_PID=$!
           sleep 3
           sudo ss -tlnp | grep -q 43121
-          # --max-time bounds the WHOLE request (not just the TCP connect phase).
-          # Without it, a TCP connection that's accepted but never completes the
-          # TLS handshake leaves curl blocked indefinitely waiting on the socket.
           curl -v --connect-timeout 3 --max-time 8 http://127.0.0.1:43121/api/streams \
             && (echo "FAIL: Cleartext succeeded in production!" && exit 1) \
             || echo "PASS: Cleartext rejected by mTLS shield"
           sudo kill -15 $DB_PID || true
 
-      - name: Run Installation Tests (macOS)
-        if: matrix.os == 'macos-latest'
+      - name: Run Installation Tests (Linux ARM64)
+        if: matrix.os == 'ubuntu-24.04-arm'
         timeout-minutes: 10
         run: |
-          echo "==== macOS Installation Tests ===="
+          echo "==== Linux ARM64 Installation Tests ===="
+          chmod +x install.sh
+          export BINARY_PATH="target/${{ matrix.target }}/release/liven"
+          sudo ./install.sh --env development
+          grep -q 'environment = "development"' /etc/liven/liven.toml
+          test -f /usr/local/bin/liven
+          echo "PASS: ARM64 installation test passed"
+
+      - name: Run Installation Tests (macOS Intel)
+        if: matrix.os == 'macos-13'
+        timeout-minutes: 10
+        run: |
+          echo "==== macOS Intel Installation Tests ===="
           chmod +x install.sh
           sudo ./install.sh --env development
           grep -q 'environment = "development"' /etc/liven/liven.toml
@@ -182,6 +223,18 @@ jobs:
           fi
           sudo kill -15 $DB_PID || true
 
+      - name: Run Installation Tests (macOS Apple Silicon)
+        if: matrix.os == 'macos-14'
+        timeout-minutes: 10
+        run: |
+          echo "==== macOS Apple Silicon Installation Tests ===="
+          chmod +x install.sh
+          sudo ./install.sh --env development
+          grep -q 'environment = "development"' /etc/liven/liven.toml
+          test -f /Library/LaunchDaemons/com.liven.liven.plist
+          test -f /usr/local/bin/liven
+          echo "PASS: Apple Silicon installation test passed"
+
       - name: Run Installation Tests (Windows)
         if: matrix.os == 'windows-latest'
         shell: bash
@@ -196,25 +249,25 @@ jobs:
         if: matrix.os != 'windows-latest'
         uses: actions/upload-artifact@v7
         with:
-          name: liven-${{ matrix.os }}
+          name: liven-${{ matrix.os }}-${{ matrix.arch }}
           path: |
-            target/release/liven
-            target/release/liven.toml
+            target/${{ matrix.target }}/release/liven
+            target/${{ matrix.target }}/release/liven.toml
           if-no-files-found: error
 
       - name: Upload compiled executable (Windows)
         if: matrix.os == 'windows-latest'
         uses: actions/upload-artifact@v7
         with:
-          name: liven-${{ matrix.os }}
+          name: liven-${{ matrix.os }}-${{ matrix.arch }}
           path: |
-            target/release/liven.exe
-            target/release/liven.toml
+            target/${{ matrix.target }}/release/liven.exe
+            target/${{ matrix.target }}/release/liven.toml
           if-no-files-found: error
 
   # ── Packaging: depends on build artifacts ──
   package:
-    name: Package Distribution (${{ matrix.os }})
+    name: Package Distribution (${{ matrix.os }} ${{ matrix.arch }})
     if: github.event_name == 'push'
     needs: build
     runs-on: ${{ matrix.os }}
@@ -222,7 +275,22 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            arch: amd64
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm
+            arch: arm64
+            target: aarch64-unknown-linux-gnu
+          - os: macos-13
+            arch: x64
+            target: x86_64-apple-darwin
+          - os: macos-14
+            arch: arm64
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            arch: amd64
+            target: x86_64-pc-windows-msvc
 
     steps:
       - name: Checkout repository
@@ -230,6 +298,8 @@ jobs:
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
 
       - name: Cache Cargo dependencies
         uses: Swatinem/rust-cache@v2
@@ -237,8 +307,8 @@ jobs:
       - name: Download compiled executable
         uses: actions/download-artifact@v8
         with:
-          name: liven-${{ matrix.os }}
-          path: target/release
+          name: liven-${{ matrix.os }}-${{ matrix.arch }}
+          path: target/${{ matrix.target }}/release
 
       - name: Install cargo-binstall (pre-built binary installer)
         run: |
@@ -251,40 +321,53 @@ jobs:
           cargo binstall cargo-wix --no-confirm --locked 2>&1 || echo "Warning: cargo-wix install failed"
 
       - name: Package Linux (.deb, .rpm, .tar.gz)
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-latest' || matrix.os == 'ubuntu-24.04-arm'
         run: |
-          chmod +x target/release/liven
-          cargo deb --no-build || echo "Warning: cargo deb failed, skipping .deb"
-          cargo generate-rpm --no-build || echo "Warning: cargo generate-rpm failed, skipping .rpm"
-          tar -czvf liven-linux-amd64.tar.gz -C target/release liven liven.toml
+          chmod +x target/${{ matrix.target }}/release/liven
+          # Build .deb
+          cargo deb --target ${{ matrix.target }} --no-build || echo "Warning: cargo deb failed, skipping .deb"
+          # Build .rpm
+          cargo generate-rpm --target ${{ matrix.target }} --no-build || echo "Warning: cargo generate-rpm failed, skipping .rpm"
+          # Create tarball
+          if [ "${{ matrix.arch }}" = "amd64" ]; then
+            TAR_NAME="liven-linux-amd64.tar.gz"
+          else
+            TAR_NAME="liven-linux-arm64.tar.gz"
+          fi
+          tar -czvf $TAR_NAME -C target/${{ matrix.target }}/release liven liven.toml
           mkdir -p dist
-          mv target/debian/*.deb dist/ || true
-          mv target/generate-rpm/*.rpm dist/ || true
-          mv liven-linux-amd64.tar.gz dist/
+          mv target/${{ matrix.target }}/debian/*.deb dist/ 2>/dev/null || true
+          mv target/${{ matrix.target }}/generate-rpm/*.rpm dist/ 2>/dev/null || true
+          mv $TAR_NAME dist/
 
       - name: Package Windows (.msi, .zip)
         if: matrix.os == 'windows-latest'
         shell: bash
         run: |
           echo "==== Packaging Windows Distribution Assets ===="
-          cargo wix --no-build || echo "Warning: cargo wix failed, skipping .msi"
-          powershell -Command "Compress-Archive -Path target/release/liven.exe, liven.toml -DestinationPath liven-windows-amd64.zip"
+          cargo wix --target ${{ matrix.target }} --no-build || echo "Warning: cargo wix failed, skipping .msi"
+          powershell -Command "Compress-Archive -Path target/${{ matrix.target }}/release/liven.exe, liven.toml -DestinationPath liven-windows-amd64.zip"
           mkdir -p dist
-          mv target/wix/*.msi dist/ || true
+          mv target/${{ matrix.target }}/wix/*.msi dist/ 2>/dev/null || true
           mv liven-windows-amd64.zip dist/
 
       - name: Package macOS (.tar.gz)
-        if: matrix.os == 'macos-latest'
+        if: matrix.os == 'macos-13' || matrix.os == 'macos-14'
         run: |
           echo "==== Packaging macOS Distribution Assets ===="
           mkdir -p dist
-          chmod +x target/release/liven
-          tar -czvf liven-macos-x64.tar.gz -C target/release liven liven.toml
-          mv liven-macos-x64.tar.gz dist/
+          chmod +x target/${{ matrix.target }}/release/liven
+          if [ "${{ matrix.arch }}" = "x64" ]; then
+            TAR_NAME="liven-macos-x64.tar.gz"
+          else
+            TAR_NAME="liven-macos-arm64.tar.gz"
+          fi
+          tar -czvf $TAR_NAME -C target/${{ matrix.target }}/release liven liven.toml
+          mv $TAR_NAME dist/
 
       - name: Upload Packaged Installers
         uses: actions/upload-artifact@v7
         with:
-          name: liven-installers-${{ matrix.os }}
+          name: liven-installers-${{ matrix.os }}-${{ matrix.arch }}
           path: dist/*
           if-no-files-found: ignore
