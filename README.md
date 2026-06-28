@@ -9,20 +9,23 @@
 
 <p align="center">
   <a href="https://github.com/livendb/liven/actions/workflows/build.yml">
-    <img src="https://img.shields.io/github/actions/workflow/status/livendb/liven/build.yml?branch=main&label=CI&logo=github" alt="CI">
+    <img src="https://img.shields.io/github/actions/workflow/status/livendb/liven/build.yml?branch=main&label=Build&logo=github" alt="Build">
   </a>
-  <a href="https://hub.docker.com/r/liven/liven">
-    <img src="https://img.shields.io/docker/pulls/liven/liven?logo=docker&label=Docker" alt="Docker">
+  <a href="https://github.com/livendb/liven/pkgs/container/liven">
+    <img src="https://img.shields.io/badge/ghcr.io-liven-blue?logo=docker" alt="GHCR">
   </a>
   <a href="https://crates.io/crates/liven">
     <img src="https://img.shields.io/crates/v/liven?logo=rust&label=crates.io" alt="crates.io">
+  </a>
+  <a href="https://crates.io/crates/liven">
+    <img src="https://img.shields.io/crates/d/liven?logo=rust&label=downloads" alt="downloads">
   </a>
   <br/>
   <a href="https://docs.rs/liven">
     <img src="https://img.shields.io/docsrs/liven?logo=docsdotrs&label=docs.rs" alt="docs.rs">
   </a>
   <a href="https://github.com/livendb/liven/blob/main/LICENSE-SSPL">
-    <img src="https://img.shields.io/badge/license-SSPL%201.0%20OR%20Commercial-blue" alt="License">
+    <img src="https://img.shields.io/badge/license-SSPL%201.0%20" alt="License">
   </a>
 </p>
 
@@ -237,3 +240,9 @@ cargo build --release --no-default-features --features tls
 Contact `team@livendb.com` for commercial licensing.
 
 [**Full license &rarr;**](./LICENSE-SSPL)
+
+## Contributing
+
+Contributions are welcome! See [CONTRIBUTING.md](./CONTRIBUTING.md) for guidelines on submitting pull requests, code style, and development setup.
+
+All contributors are expected to follow our [Code of Conduct](./CODE_OF_CONDUCT.md).

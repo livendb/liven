@@ -1,26 +1,26 @@
 [package]
 name = "liven"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2024"
-license = "SSPL-1.0 OR Commercial"
-description = "High-velocity embedded database with streaming pipelines, vector search, and real-time subscriptions"
-homepage = "https://liven.db"
+license = "SSPL-1.0"
+description = "LIVEN is a fast, lightweight database built to capture, store, and stream data in real time."
+homepage = "https://livendb.com"
+documentation = "https://livendb.com/docs"
 repository = "https://github.com/livendb/liven"
 readme = "README.md"
 keywords = [
     "database",
+    "storage",
     "streaming",
+    "real-time",
     "embedded",
-    "time-series",
-    "vector-search",
-    "pipeline",
+    "vector-search"
 ]
 categories = [
-    "database",
     "database-implementations",
+    "embedded",
     "data-structures",
 ]
-
 [lib]
 name = "liven"
 path = "src/lib.rs"

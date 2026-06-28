@@ -2,6 +2,9 @@
 data*
 node_modules
 dist
+!ui/dist/
+ui/dist/*
+!ui/dist/index.html
 certs
 auth_*
 .env

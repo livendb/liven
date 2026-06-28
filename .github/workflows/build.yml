@@ -2,9 +2,9 @@ name: Build & Verify Liven
 
 on:
   push:
-    branches: [main, master]
+    branches: [main]
   pull_request:
-    branches: [main, master]
+    branches: [main]
 
 # Ensure only one workflow runs per branch at a time to optimize resources
 concurrency:
@@ -19,7 +19,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -73,7 +73,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -194,7 +194,7 @@ jobs:
 
       - name: Upload compiled executable (Unix)
         if: matrix.os != 'windows-latest'
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: liven-${{ matrix.os }}
           path: |
@@ -204,7 +204,7 @@ jobs:
 
       - name: Upload compiled executable (Windows)
         if: matrix.os == 'windows-latest'
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: liven-${{ matrix.os }}
           path: |
@@ -226,7 +226,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -235,7 +235,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Download compiled executable
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v8
         with:
           name: liven-${{ matrix.os }}
           path: target/release
@@ -283,7 +283,7 @@ jobs:
           mv liven-macos-x64.tar.gz dist/
 
       - name: Upload Packaged Installers
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: liven-installers-${{ matrix.os }}
           path: dist/*
