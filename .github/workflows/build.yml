@@ -176,6 +176,11 @@ jobs:
           echo "==== Linux Installation Tests ===="
           chmod +x install.sh
 
+          # install.sh expects the binary at target/release/, not the
+          # target-triple-scoped path cargo writes to with --target.
+          mkdir -p target/release
+          cp target/${{ matrix.target }}/release/liven target/release/liven
+
           # 1. Production install
           sudo ./install.sh --env production
 
@@ -222,6 +227,12 @@ jobs:
         run: |
           echo "==== macOS Installation Tests ===="
           chmod +x install.sh
+
+          # install.sh expects the binary at target/release/, not the
+          # target-triple-scoped path cargo writes to with --target.
+          mkdir -p target/release
+          cp target/${{ matrix.target }}/release/liven target/release/liven
+
           sudo ./install.sh --env development
           grep -q 'environment = "development"' /etc/liven/liven.toml
           test -f /Library/LaunchDaemons/com.liven.liven.plist
