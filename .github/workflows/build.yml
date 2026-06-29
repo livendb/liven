@@ -174,15 +174,15 @@ jobs:
         timeout-minutes: 10
         run: |
           echo "==== Linux Installation Tests ===="
-          chmod +x install.sh
+          chmod +x setup.sh
 
-          # install.sh expects the binary at target/release/, not the
+          # setup.sh expects the binary at target/release/, not the
           # target-triple-scoped path cargo writes to with --target.
           mkdir -p target/release
           cp target/${{ matrix.target }}/release/liven target/release/liven
 
           # 1. Production install
-          sudo ./install.sh --env production
+          sudo ./setup.sh --env production
 
           grep -q 'environment = "production"' /etc/liven/liven.toml
           test -f /etc/liven/certs/ca.crt
@@ -195,12 +195,12 @@ jobs:
 
           # 2. Container fallback (Debian)
           docker run --rm -v ${{ github.workspace }}:/workspace debian:bookworm-slim sh -c "
-            cp /workspace/install.sh /install.sh &&
-            chmod +x /install.sh &&
+            cp /workspace/setup.sh /setup.sh &&
+            chmod +x /setup.sh &&
             mkdir -p /target/release &&
             cp /workspace/target/${{ matrix.target }}/release/liven /target/release/liven &&
             chmod +x /target/release/liven &&
-            ./install.sh --env development &&
+            ./setup.sh --env development &&
             test -f /usr/local/bin/liven &&
             test -f /usr/local/bin/liven-entrypoint &&
             ! test -f /etc/systemd/system/liven.service &&
@@ -226,14 +226,14 @@ jobs:
         timeout-minutes: 10
         run: |
           echo "==== macOS Installation Tests ===="
-          chmod +x install.sh
+          chmod +x setup.sh
 
-          # install.sh expects the binary at target/release/, not the
+          # setup.sh expects the binary at target/release/, not the
           # target-triple-scoped path cargo writes to with --target.
           mkdir -p target/release
           cp target/${{ matrix.target }}/release/liven target/release/liven
 
-          sudo ./install.sh --env development
+          sudo ./setup.sh --env development
           grep -q 'environment = "development"' /etc/liven/liven.toml
           test -f /Library/LaunchDaemons/com.liven.liven.plist
           test -f /usr/local/bin/liven
@@ -254,7 +254,7 @@ jobs:
         timeout-minutes: 10
         run: |
           echo "==== Windows Installation Tests ===="
-          INSTALL_OUTPUT=$(./install.sh)
+          INSTALL_OUTPUT=$(./setup.sh)
           echo "$INSTALL_OUTPUT" | grep -q "Windows Deployment Instructions"
           echo "PASS: Windows instructions successfully returned"
 
