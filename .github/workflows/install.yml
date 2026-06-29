@@ -11,8 +11,11 @@ on:
     paths:
       - "install.sh"
       - ".github/workflows/install.yml"
+  release:
+    types: [published]
   schedule:
-    # Weekly: ensure install.sh still works against the latest release
+    # Weekly safety net: catches drift even when nothing in this repo changed
+    # (e.g. GitHub API shape changes, certs expiring, external dependency breaks)
     - cron: "0 6 * * 1"
   workflow_dispatch:
 
@@ -37,7 +40,7 @@ jobs:
           scandir: "."
           severity: warning
 
-  # ── Detection-only test (no download, no sudo) ──
+  # ── Detection-only test (no download, no sudo, no network side effects) ──
   detect:
     name: Detection (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -50,34 +53,19 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Run detection phase (Unix)
-        if: runner.os != 'Windows'
+      - name: Run detection phase
         shell: bash
         run: |
           echo "==== OS/Arch Detection Test ===="
-          # Source the script in dry mode: extract detection logic
-          OUTPUT=$(sh ./install.sh 2>&1 || true)
+          OUTPUT=$(sh ./install.sh --detect-only 2>&1)
           echo "$OUTPUT"
 
-          # Verify detection output
           echo "$OUTPUT" | grep -q "Detected OS:"
           echo "$OUTPUT" | grep -q "Detected Arch:"
-          echo "$OUTPUT" | grep -q "Version:       v0.0.2"
+          echo "$OUTPUT" | grep -q "Resolved archive:"
+          echo "$OUTPUT" | grep -q "PASS: detection-only mode"
 
           echo "PASS: Detection test passed on ${{ runner.os }}"
-
-      - name: Run detection phase (Windows)
-        if: runner.os == 'Windows'
-        shell: bash
-        run: |
-          echo "==== Windows Detection Test ===="
-          OUTPUT=$(sh ./install.sh 2>&1 || true)
-          echo "$OUTPUT"
-
-          echo "$OUTPUT" | grep -q "Detected OS:"
-          echo "$OUTPUT" | grep -q "Detected Arch:"
-
-          echo "PASS: Detection test passed on Windows"
 
   # ── Full install test (Linux x86_64) ──
   install-linux:
@@ -269,10 +257,11 @@ jobs:
       - name: Verify binary was downloaded
         run: |
           echo "==== Binary Download Verification ===="
-          # The script downloads the archive to the current directory
-          if ls liven-*.zip 1>/dev/null 2>&1; then
+          # The script downloads the archive (liven-windows-{amd64,arm64}.zip)
+          # to the current directory
+          if ls liven-windows-*.zip 1>/dev/null 2>&1; then
             echo "PASS: Archive downloaded"
-            ls -la liven-*.zip
+            ls -la liven-windows-*.zip
           else
             echo "FAIL: No archive downloaded"
             exit 1
@@ -283,9 +272,6 @@ jobs:
           echo "==== Extracted Binary Verification ===="
           if [ -f "liven.exe" ]; then
             echo "PASS: Binary found at ./liven.exe"
-            ls -la liven.exe
-          elif [ -f "./liven.exe" ]; then
-            echo "PASS: Binary found at liven.exe"
             ls -la liven.exe
           else
             echo "FAIL: liven.exe not found after extraction"
