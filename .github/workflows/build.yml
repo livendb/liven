@@ -278,137 +278,20 @@ jobs:
             target/${{ matrix.target }}/release/liven.toml
           if-no-files-found: error
 
-  # ── Packaging: depends on build artifacts, one leg per target ──
-  package:
-    name: Package (${{ matrix.target }})
-    if: github.event_name == 'push'
-    needs: build
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            platform: linux
-            arch: amd64
-          - os: ubuntu-latest
-            target: aarch64-unknown-linux-gnu
-            platform: linux
-            arch: arm64
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            platform: macos
-            arch: arm64
-          - os: macos-latest
-            target: x86_64-apple-darwin
-            platform: macos
-            arch: amd64
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            platform: windows
-            arch: amd64
-          - os: windows-latest
-            target: aarch64-pc-windows-msvc
-            platform: windows
-            arch: arm64
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-
-      - name: Cache Cargo dependencies
-        uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{ matrix.target }}
-
-      - name: Download compiled executable
-        uses: actions/download-artifact@v8
-        with:
-          name: liven-${{ matrix.target }}
-          path: target/${{ matrix.target }}/release
-
-      - name: Install cargo-binstall (pre-built binary installer)
-        run: |
-          curl -fsSL https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
-
-      - name: Install Linux packaging tools
-        if: matrix.platform == 'linux'
-        shell: bash
-        run: |
-          set -e
-          cargo install cargo-deb --locked
-          cargo install cargo-generate-rpm --locked
-
-      - name: Install Windows packaging tools
-        if: matrix.platform == 'windows'
-        shell: bash
-        run: |
-          set -e
-          cargo binstall cargo-wix --no-confirm --locked
-
-      - name: Package Linux (.deb, .rpm, .tar.gz)
-        if: matrix.platform == 'linux'
-        run: |
-          set -e
-          chmod +x target/${{ matrix.target }}/release/liven
-          cargo deb --no-build --target ${{ matrix.target }}
-          cargo generate-rpm --target ${{ matrix.target }}
-          tar -czvf liven-linux-${{ matrix.arch }}.tar.gz -C target/${{ matrix.target }}/release liven liven.toml
-          mkdir -p dist
-          mv target/${{ matrix.target }}/debian/*.deb dist/
-          mv target/${{ matrix.target }}/generate-rpm/*.rpm dist/
-          mv liven-linux-${{ matrix.arch }}.tar.gz dist/
-
-      - name: Package Windows (.msi, .zip)
-        if: matrix.platform == 'windows'
-        shell: bash
-        run: |
-          set -e
-          echo "==== Packaging Windows Distribution Assets ===="
-          cargo wix --no-build --target ${{ matrix.target }} --nocapture
-          powershell -Command "Compress-Archive -Path target/${{ matrix.target }}/release/liven.exe, target/${{ matrix.target }}/release/liven.toml -DestinationPath liven-windows-${{ matrix.arch }}.zip"
-          mkdir -p dist
-          mv target/${{ matrix.target }}/wix/*.msi dist/
-          mv liven-windows-${{ matrix.arch }}.zip dist/
-
-      - name: Package macOS (.tar.gz)
-        if: matrix.platform == 'macos'
-        run: |
-          set -e
-          echo "==== Packaging macOS Distribution Assets ===="
-          mkdir -p dist
-          chmod +x target/${{ matrix.target }}/release/liven
-          tar -czvf liven-macos-${{ matrix.arch }}.tar.gz -C target/${{ matrix.target }}/release liven liven.toml
-          mv liven-macos-${{ matrix.arch }}.tar.gz dist/
-
-      - name: Upload Packaged Installers
-        uses: actions/upload-artifact@v7
-        with:
-          name: liven-installers-${{ matrix.target }}
-          path: dist/*
-          if-no-files-found: error
-
   # ── Release: only runs when a vX.Y.Z tag is pushed ──
   release:
     name: Publish GitHub Release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: package
+    needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: write
     steps:
-      - name: Download all installer artifacts
+      - name: Download all binary artifacts
         uses: actions/download-artifact@v8
         with:
-          pattern: liven-installers-*
+          pattern: liven-*
           path: release-assets
           merge-multiple: true
 
