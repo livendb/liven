@@ -55,14 +55,14 @@ jobs:
         shell: bash
         run: |
           echo "==== OS/Arch Detection Test ===="
-          # Source the script in dry mode: extract detection logic
-          OUTPUT=$(sh ./install.sh 2>&1 || true)
+          OUTPUT=$(sh ./install.sh --detect-only 2>&1 || true)
           echo "$OUTPUT"
 
           # Verify detection output
           echo "$OUTPUT" | grep -q "Detected OS:"
           echo "$OUTPUT" | grep -q "Detected Arch:"
-          echo "$OUTPUT" | grep -q "Version:       v0.0.2"
+          echo "$OUTPUT" | grep -qE "Version:       (v[0-9]|latest)"
+          echo "$OUTPUT" | grep -q "PASS: detection-only mode"
 
           echo "PASS: Detection test passed on ${{ runner.os }}"
 
@@ -71,11 +71,12 @@ jobs:
         shell: bash
         run: |
           echo "==== Windows Detection Test ===="
-          OUTPUT=$(sh ./install.sh 2>&1 || true)
+          OUTPUT=$(bash ./install.sh --detect-only 2>&1 || true)
           echo "$OUTPUT"
 
           echo "$OUTPUT" | grep -q "Detected OS:"
           echo "$OUTPUT" | grep -q "Detected Arch:"
+          echo "$OUTPUT" | grep -q "PASS: detection-only mode"
 
           echo "PASS: Detection test passed on Windows"
 
@@ -262,7 +263,7 @@ jobs:
           # Verify detection
           echo "$OUTPUT" | grep -q "Detected OS:"
           echo "$OUTPUT" | grep -q "Detected Arch:"
-          echo "$OUTPUT" | grep -q "Windows Installation"
+          echo "$OUTPUT" | grep -q -E "(Windows Installation|detection-only)"
 
           echo "PASS: Windows detection and instructions verified"
 

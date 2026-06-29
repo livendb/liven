@@ -69,20 +69,25 @@ case "$ARCH" in
 esac
 
 # ---- Resolve version: explicit --version, else latest GitHub release ----
+# On API rate-limit or network failure, fall back to GitHub's
+# /releases/latest/download/ redirect URLs (no version needed).
+LATEST_URL="https://github.com/${REPO}/releases/latest/download"
+
 if [ -z "$VERSION" ]; then
   if command -v curl >/dev/null 2>&1; then
     VERSION="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null | grep -m1 '"tag_name"' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')"
   elif command -v wget >/dev/null 2>&1; then
     VERSION="$(wget -qO- "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null | grep -m1 '"tag_name"' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')"
   fi
-  if [ -z "$VERSION" ]; then
-    echo "Error: could not determine latest release version automatically."
-    echo "Pass an explicit version with --version vX.Y.Z"
-    exit 1
-  fi
 fi
 
-BASE_URL="https://github.com/${REPO}/releases/download/${VERSION}"
+if [ -n "$VERSION" ]; then
+  BASE_URL="https://github.com/${REPO}/releases/download/${VERSION}"
+else
+  VERSION="latest"
+  BASE_URL="${LATEST_URL}"
+  echo "Note: could not determine latest version from API, using latest release."
+fi
 
 echo "Detected OS:   $OS_NORMALIZED"
 echo "Detected Arch: $ARCH_NORMALIZED"
