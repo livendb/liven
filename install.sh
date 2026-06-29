@@ -165,6 +165,39 @@ if [ "$OS_NORMALIZED" = "Windows" ]; then
 fi
 
 # ---- Unix / macOS: download, extract (.zip), install, configure ----
+# Use system paths only if /usr/local/bin is user-writable (brew on macOS).
+# Otherwise install to ~/.liven/bin — no sudo needed, no password prompts.
+
+if [ -w /usr/local/bin ] 2>/dev/null; then
+  INSTALL_DIR="/usr/local/bin"
+  CONFIG_DIR="/etc/liven"
+  DATA_DIR="/var/lib/liven"
+  LOG_DIR="/var/log/liven"
+  USE_SUDO=""
+  SYSTEM_WIDE=true
+else
+  # User-local install — no sudo needed
+  INSTALL_DIR="${HOME}/.liven/bin"
+  CONFIG_DIR="${HOME}/.liven"
+  DATA_DIR="${HOME}/.liven/data"
+  LOG_DIR="${HOME}/.liven/logs"
+  USE_SUDO=""
+  SYSTEM_WIDE=false
+fi
+
+# Check if already installed
+CURRENT_VERSION=""
+if command -v "$INSTALL_DIR/liven" >/dev/null 2>&1; then
+  CURRENT_VERSION="$("$INSTALL_DIR/liven" --version 2>/dev/null || true)"
+  if [ -n "$CURRENT_VERSION" ]; then
+    echo "Liven already installed: $CURRENT_VERSION"
+    echo "Upgrading to:           v$VERSION"
+  else
+    echo "Liven already installed. Upgrading to v$VERSION..."
+  fi
+  echo ""
+fi
+
 echo "Downloading ${ARCHIVE_NAME} from ${ARCHIVE_URL} ..."
 $DOWNLOAD_CMD "/tmp/${ARCHIVE_NAME}" "$ARCHIVE_URL"
 
@@ -174,17 +207,17 @@ unzip -oq "/tmp/${ARCHIVE_NAME}" -d "/tmp/"
 BINARY_PATH="/tmp/${BINARY_NAME}"
 chmod +x "$BINARY_PATH"
 
-# Ensure directories exist with secure permissions
-sudo mkdir -p /usr/local/bin
-sudo mkdir -p /etc/liven
-sudo mkdir -p /var/log/liven
-sudo chmod 700 /var/log/liven
-sudo mkdir -p /var/lib/liven
-sudo chmod 700 /var/lib/liven
+# Ensure directories exist
+$USE_SUDO mkdir -p "$INSTALL_DIR"
+$USE_SUDO mkdir -p "$CONFIG_DIR"
+$USE_SUDO mkdir -p "$LOG_DIR"
+$USE_SUDO chmod 700 "$LOG_DIR"
+$USE_SUDO mkdir -p "$DATA_DIR"
+$USE_SUDO chmod 700 "$DATA_DIR"
 
 # Install binary
-sudo cp "$BINARY_PATH" /usr/local/bin/liven
-sudo chmod +x /usr/local/bin/liven
+$USE_SUDO cp "$BINARY_PATH" "$INSTALL_DIR/liven"
+$USE_SUDO chmod +x "$INSTALL_DIR/liven"
 
 # Clean up downloaded artifacts
 rm -f "/tmp/${ARCHIVE_NAME}"
@@ -192,8 +225,7 @@ rm -f "$BINARY_PATH"
 
 # ---- Setup Configuration ----
 if [ "$ENV" = "production" ]; then
-  # Production enforces ZTNA and mTLS
-  sudo tee /etc/liven/liven.toml > /dev/null << 'TOML'
+  $USE_SUDO tee "$CONFIG_DIR/liven.toml" > /dev/null << TOML
 [server]
 environment = "production"
 host = "0.0.0.0"
@@ -201,49 +233,48 @@ db_port = 43121
 webui_port = 43120
 
 [storage]
-data_directory = "/var/lib/liven"
+data_directory = "$DATA_DIR"
 
 [security]
 mode = "auth_key"
 
 [security.ztna]
 enabled = true
-cert_path = "/etc/liven/certs/server.crt"
-key_path = "/etc/liven/certs/server.key"
-client_ca_path = "/etc/liven/certs/ca.crt"
+cert_path = "$CONFIG_DIR/certs/server.crt"
+key_path = "$CONFIG_DIR/certs/server.key"
+client_ca_path = "$CONFIG_DIR/certs/ca.crt"
 TOML
 
   # Provision TLS Certificates
-  sudo mkdir -p /etc/liven/certs
+  $USE_SUDO mkdir -p "$CONFIG_DIR/certs"
   if command -v openssl >/dev/null; then
     echo "Provisioning self-signed production CA and Server certificates..."
-    sudo openssl genrsa -out /etc/liven/certs/ca.key 2048 2>/dev/null
-    sudo openssl req -x509 -new -nodes -key /etc/liven/certs/ca.key -sha256 -days 365 \
-      -out /etc/liven/certs/ca.crt -subj "/CN=MyLIVENCA" 2>/dev/null
+    $USE_SUDO openssl genrsa -out "$CONFIG_DIR/certs/ca.key" 2048 2>/dev/null
+    $USE_SUDO openssl req -x509 -new -nodes -key "$CONFIG_DIR/certs/ca.key" -sha256 -days 365 \
+      -out "$CONFIG_DIR/certs/ca.crt" -subj "/CN=MyLIVENCA" 2>/dev/null
 
-    sudo openssl genrsa -out /etc/liven/certs/server.key 2048 2>/dev/null
-    sudo openssl req -new -key /etc/liven/certs/server.key -out /etc/liven/certs/server.csr \
+    $USE_SUDO openssl genrsa -out "$CONFIG_DIR/certs/server.key" 2048 2>/dev/null
+    $USE_SUDO openssl req -new -key "$CONFIG_DIR/certs/server.key" -out "$CONFIG_DIR/certs/server.csr" \
       -subj "/CN=127.0.0.1" 2>/dev/null
-    sudo openssl x509 -req -in /etc/liven/certs/server.csr \
-      -CA /etc/liven/certs/ca.crt -CAkey /etc/liven/certs/ca.key -CAcreateserial \
-      -out /etc/liven/certs/server.crt -days 365 -sha256 2>/dev/null
+    $USE_SUDO openssl x509 -req -in "$CONFIG_DIR/certs/server.csr" \
+      -CA "$CONFIG_DIR/certs/ca.crt" -CAkey "$CONFIG_DIR/certs/ca.key" -CAcreateserial \
+      -out "$CONFIG_DIR/certs/server.crt" -days 365 -sha256 2>/dev/null
 
-    sudo chmod 600 /etc/liven/certs/ca.key
-    sudo chmod 600 /etc/liven/certs/server.key
-    sudo chmod 644 /etc/liven/certs/ca.crt
-    sudo chmod 644 /etc/liven/certs/server.crt
+    $USE_SUDO chmod 600 "$CONFIG_DIR/certs/ca.key"
+    $USE_SUDO chmod 600 "$CONFIG_DIR/certs/server.key"
+    $USE_SUDO chmod 644 "$CONFIG_DIR/certs/ca.crt"
+    $USE_SUDO chmod 644 "$CONFIG_DIR/certs/server.crt"
   else
     echo "Warning: openssl not found, writing placeholder certs"
-    sudo touch /etc/liven/certs/ca.crt
-    sudo touch /etc/liven/certs/ca.key
-    sudo touch /etc/liven/certs/server.crt
-    sudo touch /etc/liven/certs/server.key
-    sudo chmod 600 /etc/liven/certs/ca.key
-    sudo chmod 600 /etc/liven/certs/server.key
+    $USE_SUDO touch "$CONFIG_DIR/certs/ca.crt"
+    $USE_SUDO touch "$CONFIG_DIR/certs/ca.key"
+    $USE_SUDO touch "$CONFIG_DIR/certs/server.crt"
+    $USE_SUDO touch "$CONFIG_DIR/certs/server.key"
+    $USE_SUDO chmod 600 "$CONFIG_DIR/certs/ca.key"
+    $USE_SUDO chmod 600 "$CONFIG_DIR/certs/server.key"
   fi
 else
-  # Development mode configuration (bypasses mTLS)
-  sudo tee /etc/liven/liven.toml > /dev/null << 'TOML'
+  $USE_SUDO tee "$CONFIG_DIR/liven.toml" > /dev/null << TOML
 [server]
 environment = "development"
 host = "127.0.0.1"
@@ -251,19 +282,20 @@ db_port = 43121
 webui_port = 43120
 
 [storage]
-data_directory = "/var/lib/liven"
+data_directory = "$DATA_DIR"
 
 [security]
 mode = "none"
 TOML
 fi
 
-# ---- Setup OS-specific launch service ----
-if [ "$OS_NORMALIZED" = "Linux" ]; then
-  # Check if systemd is running
-  if [ -d /run/systemd/system ] || ( command -v systemctl >/dev/null 2>&1 && systemctl is-system-running >/dev/null 2>&1 ); then
-    echo "Systemd detected. Configuring systemd service unit..."
-    sudo tee /etc/systemd/system/liven.service > /dev/null << 'SERVICE'
+# ---- Setup OS-specific launch service (system-wide only) ----
+if [ "$SYSTEM_WIDE" = true ]; then
+  if [ "$OS_NORMALIZED" = "Linux" ]; then
+    # Check if systemd is running
+    if [ -d /run/systemd/system ] || ( command -v systemctl >/dev/null 2>&1 && systemctl is-system-running >/dev/null 2>&1 ); then
+      echo "Systemd detected. Configuring systemd service unit..."
+      $USE_SUDO tee /etc/systemd/system/liven.service > /dev/null << 'SERVICE'
 [Unit]
 Description=LIVEN High-Performance Storage Engine
 After=network.target
@@ -279,21 +311,21 @@ StandardError=append:/var/log/liven/error.log
 [Install]
 WantedBy=multi-user.target
 SERVICE
-    if command -v systemctl >/dev/null; then
-      sudo systemctl daemon-reload || true
-    fi
-  else
-    echo "Non-Systemd/Container environment detected. Installing POSIX entrypoint shell script..."
-    sudo tee /usr/local/bin/liven-entrypoint > /dev/null << 'SCRIPT'
+      if command -v systemctl >/dev/null; then
+        $USE_SUDO systemctl daemon-reload || true
+      fi
+    else
+      echo "Non-Systemd/Container environment detected. Installing POSIX entrypoint shell script..."
+      $USE_SUDO tee /usr/local/bin/liven-entrypoint > /dev/null << 'SCRIPT'
 #!/bin/sh
 exec /usr/local/bin/liven start --config /etc/liven/liven.toml
 SCRIPT
-    sudo chmod +x /usr/local/bin/liven-entrypoint
-  fi
-elif [ "$OS_NORMALIZED" = "Darwin" ]; then
-  echo "macOS detected. Configuring launchd plist..."
-  sudo mkdir -p /Library/LaunchDaemons
-  sudo tee /Library/LaunchDaemons/com.liven.liven.plist > /dev/null << 'PLIST'
+      $USE_SUDO chmod +x /usr/local/bin/liven-entrypoint
+    fi
+  elif [ "$OS_NORMALIZED" = "Darwin" ]; then
+    echo "macOS detected. Configuring launchd plist..."
+    $USE_SUDO mkdir -p /Library/LaunchDaemons
+    $USE_SUDO tee /Library/LaunchDaemons/com.liven.liven.plist > /dev/null << 'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -314,8 +346,46 @@ elif [ "$OS_NORMALIZED" = "Darwin" ]; then
 </dict>
 </plist>
 PLIST
+  fi
+fi
+
+# ---- Ensure install directory is in PATH (user-local only) ----
+if [ "$SYSTEM_WIDE" = false ]; then
+  case ":$PATH:" in
+    *":$INSTALL_DIR:"*) : ;; # already in PATH
+    *)
+      echo "Adding $INSTALL_DIR to PATH in shell configuration..."
+      for rc in "${HOME}/.bashrc" "${HOME}/.zshrc" "${HOME}/.profile"; do
+        if [ -f "$rc" ]; then
+          if ! grep -q "export PATH=.*\$HOME/\.liven/bin" "$rc"; then
+            echo "" >> "$rc"
+            echo "# Added by Liven installer" >> "$rc"
+            echo "export PATH=\"\$HOME/.liven/bin:\$PATH\"" >> "$rc"
+          fi
+        fi
+      done
+      # Also try a more generic approach for other shells (fish, etc.)
+      if command -v fish >/dev/null 2>&1; then
+        fish_conf="${HOME}/.config/fish/config.fish"
+        mkdir -p "$(dirname "$fish_conf")"
+        if ! grep -q "fish_add_path.*local/bin" "$fish_conf" 2>/dev/null; then
+          echo "" >> "$fish_conf"
+          echo "# Added by Liven installer" >> "$fish_conf"
+          echo "fish_add_path \$HOME/.liven/bin" >> "$fish_conf"
+        fi
+      fi
+      export PATH="$INSTALL_DIR:$PATH"
+      echo "  ✓ Added to PATH for current and future shell sessions."
+      ;;
+  esac
 fi
 
 echo "✨ LIVEN ${VERSION} installation completed successfully!"
-echo "   Binary: /usr/local/bin/liven"
-echo "   Config: /etc/liven/liven.toml"
+echo "   Binary: $INSTALL_DIR/liven"
+echo "   Config: $CONFIG_DIR/liven.toml"
+
+if [ "$SYSTEM_WIDE" = false ]; then
+  echo ""
+  echo "   Open a new terminal or run: source ~/.bashrc (or ~/.zshrc)"
+  echo "   Then: liven start"
+fi

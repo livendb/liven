@@ -100,23 +100,23 @@ Add the dependency with the features you need:
 
 ```toml
 [dependencies]
-liven = "0.0.4"                        # full build (server, TUI, TLS)
+liven = "0.0.5"                        # full build (server, TUI, TLS)
 ```
 
 For a minimal embedded build with no server, TUI, or TLS:
 
 ```toml
 [dependencies]
-liven = { version = "0.0.4", default-features = false }      # core only
+liven = { version = "0.0.5", default-features = false }      # core only
 ```
 
 Select individual features:
 
 ```toml
 [dependencies]
-liven = { version = "0.0.4", default-features = false, features = ["tls"] }   # core + TLS
-liven = { version = "0.0.4", default-features = false, features = ["server", "tls"] }  # core + server + TLS
-liven = { version = "0.0.4", features = ["tui"] }  # full + TUI (already included)
+liven = { version = "0.0.5", default-features = false, features = ["tls"] }   # core + TLS
+liven = { version = "0.0.5", default-features = false, features = ["server", "tls"] }  # core + server + TLS
+liven = { version = "0.0.5", features = ["tui"] }  # full + TUI (already included)
 ```
 
 ---
