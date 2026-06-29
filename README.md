@@ -32,7 +32,7 @@ Liven is a database built for data that moves. It ingests streaming data, transf
 # Install via crates.io
 cargo install liven
 
-# One-liner install (Linux & macOS)
+# One-liner install 
 curl --proto '=https' --tlsv1.2 -sSfL https://livendb.com/install | sh
 
 # Install via Docker
@@ -70,18 +70,28 @@ Databases today make you choose: batch or stream? Historical or real-time? Key-v
 ## Quick Start
 
 ```bash
-# Launch the server
+# One-liner install 
+curl --proto '=https' --tlsv1.2 -sSfL https://livendb.com/install | sh
+
+# Or via Docker
+docker run -p 43121:43121 -p 43120:43120 ghcr.io/livendb/liven
+
+# Or build from source
 cargo build --release
 ./target/release/liven start
 # → Open http://localhost:43120
 # → Admin auth key printed on first start — save it
 
-# Insert and query
-liven query 'from("events").insert("e1", {type: "click"})'
-liven query 'from("events") | filter(type == "click") | count()'
+# Insert and query via the embedded Web UI at http://localhost:43120
 
-# Live subscription
-liven query 'from("events") | filter(priority == "high") .listen()'
+# Or use the interactive TUI shell
+liven vibe
+
+# Tail a stream in real time
+liven tail events
+
+# List streams
+liven list
 ```
 
 ### Embedded in Rust
@@ -90,14 +100,23 @@ Add the dependency with the features you need:
 
 ```toml
 [dependencies]
-liven = "0.0.3"
+liven = "0.0.4"                        # full build (server, TUI, TLS)
 ```
 
 For a minimal embedded build with no server, TUI, or TLS:
 
 ```toml
 [dependencies]
-liven = { version = "0.0.3", default-features = false }
+liven = { version = "0.0.4", default-features = false }      # core only
+```
+
+Select individual features:
+
+```toml
+[dependencies]
+liven = { version = "0.0.4", default-features = false, features = ["tls"] }   # core + TLS
+liven = { version = "0.0.4", default-features = false, features = ["server", "tls"] }  # core + server + TLS
+liven = { version = "0.0.4", features = ["tui"] }  # full + TUI (already included)
 ```
 
 ---
@@ -342,6 +361,43 @@ flowchart LR
 - **Subscriptions** broadcast every write to all listeners. The server evaluates pipeline filters before delivery.
 - **Compaction** reclaims space from deleted records automatically.
 - **Recovery** replays segments on startup. Checksums catch corruption.
+
+---
+
+## Benchmarks
+
+Reproducible benchmarks run inside a pinned Docker image (`x86-64-v2` CPU features)
+to ensure consistent results across hardware.
+
+| Operation | Performance | Notes |
+|-----------|-------------|-------|
+| **Point lookup** (existing key) | **~2.3 µs** | Microsecond, independent of dataset size |
+| **Point lookup** (missing key) | **~65 ns** | Near-zero cost (hash miss) |
+| **Range index** (timestamp) | **~88 ns** | Billion elements/second |
+| **Full scan** | **~600–700K** elem/s | Linear, predictable throughput |
+| **Scan with limit** | **~67M** elem/s | Short-circuits after limit |
+| **Append** (single) | **~5 ms** | Fsync-bound per operation |
+| **Append** (batch 500) | **~707K** ops/s | **Batch for throughput** |
+| **Upsert** (new key) | **~5.3 ms** | Same cost as append |
+| **Upsert** (existing key) | **~10.7 ms** | Includes tombstone write |
+| **Compaction** | **~500–570 µs** | Sub-linear growth |
+| **Parse** (simple) | **~437 ns** | Not a bottleneck |
+| **Parse** (complex) | **~1.15 µs** | Still sub-microsecond |
+| **Vector lookup** (quantized 512d) | **223 MiB/s** | 9× faster than msgpack |
+| **Wire encode** (16 KB) | **15 GiB/s** | Far beyond network limits |
+
+### Run benchmarks
+
+```sh
+# Local (requires Rust nightly for CPU features)
+cargo bench
+
+# Reproducible Docker (recommended)
+./run-bench.sh
+```
+
+Benchmark source: [`benches/engine_bench.rs`](./benches/engine_bench.rs)
+Docker runner: [`Dockerfile.bench`](./Dockerfile.bench), [`run-bench.sh`](./run-bench.sh)
 
 ---
 

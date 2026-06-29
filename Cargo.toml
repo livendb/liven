@@ -1,6 +1,6 @@
 [package]
 name = "liven"
-version = "0.0.3"
+version = "0.0.4"
 edition = "2024"
 license = "SSPL-1.0"
 description = "LIVEN is a fast, lightweight database built to capture, store, and stream data in real time."

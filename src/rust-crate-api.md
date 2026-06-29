@@ -27,14 +27,23 @@ or as a client over the wire protocol.
 
 ```toml
 [dependencies]
-liven = "0.0.3"
+liven = "0.0.4"                        # full build (server, TUI, TLS)
 ```
 
-For minimal embedded build (no server, TUI, or TLS):
+For a minimal embedded build with no server, TUI, or TLS:
 
 ```toml
 [dependencies]
-liven = { version = "0.0.3", default-features = false }
+liven = { version = "0.0.4", default-features = false }      # core only
+```
+
+Select individual features:
+
+```toml
+[dependencies]
+liven = { version = "0.0.4", default-features = false, features = ["tls"] }   # core + TLS
+liven = { version = "0.0.4", default-features = false, features = ["server", "tls"] }  # core + server + TLS
+liven = { version = "0.0.4", features = ["tui"] }  # full + TUI (already included)
 ```
 
 ---
