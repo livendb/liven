@@ -33,7 +33,7 @@
     clippy::collapsible_if,
     clippy::vec_init_then_push
 )]
-#![doc = include_str!("../rust-crate-api.md")]
+#![doc = include_str!("rust-crate-api.md")]
 
 pub mod client;
 pub mod codec;
