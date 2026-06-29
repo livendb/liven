@@ -3,7 +3,8 @@ name: Build & Verify Liven
 on:
   push:
     branches: [main]
-    tags: ["v*.*.*"]
+    tags-ignore:
+      - "**"
   pull_request:
     branches: [main]
 

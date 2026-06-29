@@ -3,6 +3,8 @@ name: Test install.sh
 on:
   push:
     branches: [main]
+    tags-ignore:
+      - "**"
     paths:
       - "install.sh"
       - ".github/workflows/install.yml"
