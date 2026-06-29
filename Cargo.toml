@@ -1,10 +1,11 @@
 [package]
 name = "liven"
-version = "0.0.5"
+version = "0.0.6"
 edition = "2024"
 license = "SSPL-1.0"
 description = "LIVEN is a fast, lightweight database built to capture, store, and stream data in real time."
 homepage = "https://livendb.com"
+documentation = "https://docs.rs/liven"
 repository = "https://github.com/livendb/liven"
 readme = "README.md"
 keywords = [
