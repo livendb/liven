@@ -33,7 +33,7 @@ Liven is a database built for data that moves. It ingests streaming data, transf
 cargo install liven
 
 # One-liner install (Linux & macOS)
-curl --proto '=https' --tlsv1.2 -sSf https://livendb.com/install | sh
+curl --proto '=https' --tlsv1.2 -sSfL https://livendb.com/install | sh
 
 # Install via Docker
 docker pull ghcr.io/livendb/liven:latest

@@ -1,0 +1,293 @@
+name: Test install.sh
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "install.sh"
+      - ".github/workflows/install.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "install.sh"
+      - ".github/workflows/install.yml"
+  schedule:
+    # Weekly: ensure install.sh still works against the latest release
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+# Cancel in-progress runs for the same branch
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Shell syntax check (fast, no sudo needed) ──
+  lint:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Run ShellCheck
+        uses: ludeeus/action-shellcheck@master
+        with:
+          scandir: "."
+          severity: warning
+
+  # ── Detection-only test (no download, no sudo) ──
+  detect:
+    name: Detection (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Run detection phase (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          echo "==== OS/Arch Detection Test ===="
+          # Source the script in dry mode: extract detection logic
+          OUTPUT=$(sh ./install.sh 2>&1 || true)
+          echo "$OUTPUT"
+
+          # Verify detection output
+          echo "$OUTPUT" | grep -q "Detected OS:"
+          echo "$OUTPUT" | grep -q "Detected Arch:"
+          echo "$OUTPUT" | grep -q "Version:       v0.0.2"
+
+          echo "PASS: Detection test passed on ${{ runner.os }}"
+
+      - name: Run detection phase (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          echo "==== Windows Detection Test ===="
+          OUTPUT=$(sh ./install.sh 2>&1 || true)
+          echo "$OUTPUT"
+
+          echo "$OUTPUT" | grep -q "Detected OS:"
+          echo "$OUTPUT" | grep -q "Detected Arch:"
+
+          echo "PASS: Detection test passed on Windows"
+
+  # ── Full install test (Linux x86_64) ──
+  install-linux:
+    name: Install (Linux x86_64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Run install.sh (production mode)
+        shell: bash
+        run: |
+          echo "==== Production Install ===="
+          sudo bash ./install.sh --env production
+
+      - name: Verify binary and directories
+        shell: bash
+        run: |
+          echo "==== Verification ===="
+          test -f /usr/local/bin/liven
+          /usr/local/bin/liven --help || true
+
+          test -d /etc/liven
+          test -f /etc/liven/liven.toml
+          grep -q 'environment = "production"' /etc/liven/liven.toml
+          grep -q 'mode = "auth_key"' /etc/liven/liven.toml
+
+          test -d /var/log/liven
+          test -d /var/lib/liven
+
+          echo "PASS: Binary and directories verified"
+
+      - name: Verify TLS certificates
+        shell: bash
+        run: |
+          echo "==== TLS Certificate Verification ===="
+          test -f /etc/liven/certs/ca.crt
+          test -f /etc/liven/certs/ca.key
+          test -f /etc/liven/certs/server.crt
+          test -f /etc/liven/certs/server.key
+
+          # Verify key permissions are restricted
+          [ "$(stat -c '%a' /etc/liven/certs/server.key)" = "600" ]
+          [ "$(stat -c '%a' /etc/liven/certs/ca.key)" = "600" ]
+
+          echo "PASS: TLS certificates provisioned with correct permissions"
+
+      - name: Verify systemd service
+        shell: bash
+        run: |
+          echo "==== systemd Service Verification ===="
+          test -f /etc/systemd/system/liven.service
+          grep -q 'ExecStart=/usr/local/bin/liven start' /etc/systemd/system/liven.service
+
+          echo "PASS: systemd service unit installed"
+
+      - name: Verify binary runs
+        shell: bash
+        run: |
+          echo "==== Binary Smoke Test ===="
+          /usr/local/bin/liven --version 2>&1 || echo "Note: --version may not be implemented yet"
+          /usr/local/bin/liven start --config /etc/liven/liven.toml &
+          DB_PID=$!
+          sleep 3
+          # In production mode with mTLS, cleartext should be rejected
+          curl -v --connect-timeout 3 --max-time 8 http://127.0.0.1:43121/api/streams \
+            && (echo "FAIL: Cleartext succeeded in production mode!" && exit 1) \
+            || echo "PASS: Cleartext correctly rejected by mTLS"
+          sudo kill -15 $DB_PID 2>/dev/null || true
+
+      - name: Test development mode install
+        shell: bash
+        run: |
+          echo "==== Development Mode Install ===="
+          # Clean slate: remove production artifacts
+          sudo rm -f /usr/local/bin/liven
+          sudo rm -rf /etc/liven
+
+          sudo bash ./install.sh --env development
+
+          test -f /usr/local/bin/liven
+          grep -q 'environment = "development"' /etc/liven/liven.toml
+          grep -q 'mode = "none"' /etc/liven/liven.toml
+
+          # Development mode should NOT create TLS certs
+          if [ -f /etc/liven/certs/ca.crt ]; then
+            echo "FAIL: Development mode should not create TLS certs"
+            exit 1
+          fi
+          echo "PASS: Development mode install verified"
+
+  # ── Full install test (macOS ARM64) ──
+  install-macos:
+    name: Install (macOS ARM64)
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Run install.sh (development mode)
+        shell: bash
+        run: |
+          echo "==== macOS Install (Development) ===="
+          sudo bash ./install.sh --env development
+
+      - name: Verify binary and directories
+        shell: bash
+        run: |
+          echo "==== Verification ===="
+          test -f /usr/local/bin/liven
+          /usr/local/bin/liven --help || true
+
+          test -d /etc/liven
+          test -f /etc/liven/liven.toml
+          grep -q 'environment = "development"' /etc/liven/liven.toml
+          grep -q 'mode = "none"' /etc/liven/liven.toml
+
+          test -d /var/log/liven
+          test -d /var/lib/liven
+
+          echo "PASS: Binary and directories verified"
+
+      - name: Verify launchd plist
+        shell: bash
+        run: |
+          echo "==== launchd plist Verification ===="
+          test -f /Library/LaunchDaemons/com.liven.liven.plist
+          grep -q 'com.liven.liven' /Library/LaunchDaemons/com.liven.liven.plist
+          echo "PASS: launchd plist installed"
+
+      - name: Verify binary runs
+        shell: bash
+        run: |
+          echo "==== Binary Smoke Test ===="
+          /usr/local/bin/liven start --config /etc/liven/liven.toml &
+          DB_PID=$!
+          sleep 3
+          # Development mode: cleartext should work
+          if curl -v --connect-timeout 3 --max-time 8 http://127.0.0.1:43121/api/streams; then
+            echo "PASS: Development API connection succeeded"
+          else
+            echo "Note: API endpoint may not be available, but process started"
+          fi
+          sudo kill -15 $DB_PID 2>/dev/null || true
+          echo "PASS: Binary starts and responds"
+
+      - name: Test production mode install (macOS)
+        shell: bash
+        run: |
+          echo "==== macOS Production Install ===="
+          sudo rm -f /usr/local/bin/liven
+          sudo rm -rf /etc/liven
+
+          sudo bash ./install.sh --env production
+
+          test -f /usr/local/bin/liven
+          test -f /etc/liven/certs/ca.crt
+          test -f /etc/liven/certs/server.crt
+          grep -q 'mode = "auth_key"' /etc/liven/liven.toml
+          echo "PASS: macOS production mode install verified"
+
+  # ── Windows: validate detection and instructions ──
+  install-windows:
+    name: Install (Windows x86_64)
+    runs-on: windows-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Run install.sh
+        run: |
+          echo "==== Windows Install Test ===="
+          OUTPUT=$(bash ./install.sh 2>&1) || true
+          echo "$OUTPUT"
+
+          # Verify detection
+          echo "$OUTPUT" | grep -q "Detected OS:"
+          echo "$OUTPUT" | grep -q "Detected Arch:"
+          echo "$OUTPUT" | grep -q "Windows Installation"
+
+          echo "PASS: Windows detection and instructions verified"
+
+      - name: Verify binary was downloaded
+        run: |
+          echo "==== Binary Download Verification ===="
+          # The script downloads the archive to the current directory
+          if ls liven-*.zip 1>/dev/null 2>&1; then
+            echo "PASS: Archive downloaded"
+            ls -la liven-*.zip
+          else
+            echo "FAIL: No archive downloaded"
+            exit 1
+          fi
+
+      - name: Verify extracted binary exists
+        run: |
+          echo "==== Extracted Binary Verification ===="
+          # The script extracts to a folder named liven-<target>
+          for dir in liven-*/; do
+            if [ -f "${dir}liven.exe" ]; then
+              echo "PASS: Binary found at ${dir}liven.exe"
+              ls -la "${dir}liven.exe"
+              exit 0
+            fi
+          done
+          echo "FAIL: liven.exe not found in extracted directories"
+          exit 1

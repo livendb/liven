@@ -6,7 +6,7 @@
 # and installs it to /usr/local/bin.
 #
 # Usage:
-#   curl --proto '=https' --tlsv1.2 -sSf https://livendb.com/install | sh
+#   curl --proto '=https' --tlsv1.2 -sSfL https://livendb.com/install | sh
 #   curl ... | sh -s -- --dir ~/.local/bin          # custom install dir
 #   curl ... | sh -s -- --no-service                 # skip systemd/launchd
 #   curl ... | sh -s -- --version 0.0.1             # specific version
