@@ -281,13 +281,14 @@ jobs:
       - name: Verify extracted binary exists
         run: |
           echo "==== Extracted Binary Verification ===="
-          # The script extracts to a folder named liven-<target>
-          for dir in liven-*/; do
-            if [ -f "${dir}liven.exe" ]; then
-              echo "PASS: Binary found at ${dir}liven.exe"
-              ls -la "${dir}liven.exe"
-              exit 0
-            fi
-          done
-          echo "FAIL: liven.exe not found in extracted directories"
-          exit 1
+          if [ -f "liven.exe" ]; then
+            echo "PASS: Binary found at ./liven.exe"
+            ls -la liven.exe
+          elif [ -f "./liven.exe" ]; then
+            echo "PASS: Binary found at liven.exe"
+            ls -la liven.exe
+          else
+            echo "FAIL: liven.exe not found after extraction"
+            ls -la
+            exit 1
+          fi

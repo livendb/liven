@@ -118,11 +118,11 @@ if [ "$OS_NORMALIZED" = "Windows" ]; then
   echo "============================================================"
   echo "         LIVEN Windows Installation                        "
   echo "============================================================"
-  echo "Binary extracted to: ./${FOLDER_NAME}/${BINARY_NAME}"
+  echo "Binary extracted to: ./${BINARY_NAME}"
   echo ""
   echo "Next steps:"
-  echo "  1. Add to PATH or copy:"
-  echo "     copy .\\${FOLDER_NAME}\\${BINARY_NAME} liven.exe"
+  echo "  1. Move the binary to your PATH:"
+  echo "     move .\\${BINARY_NAME} liven.exe"
   echo "  2. Run: liven.exe start"
   echo "  3. Create a liven.toml configuration file as needed."
   echo "============================================================"
@@ -135,7 +135,8 @@ $DOWNLOAD_CMD "/tmp/${ARCHIVE_NAME}" "$ARCHIVE_URL"
 
 echo "Extracting ${ARCHIVE_NAME}..."
 $EXTRACT_CMD "/tmp/${ARCHIVE_NAME}" -d "/tmp/"
-BINARY_PATH="/tmp/${FOLDER_NAME}/${BINARY_NAME}"
+# Files are at the zip root (liven + liven.toml), no subfolder
+BINARY_PATH="/tmp/${BINARY_NAME}"
 chmod +x "$BINARY_PATH"
 
 # Ensure directories exist with secure permissions
@@ -152,7 +153,6 @@ sudo chmod +x /usr/local/bin/liven
 
 # Clean up downloaded artifacts
 rm -f "/tmp/${ARCHIVE_NAME}"
-rm -rf "/tmp/${FOLDER_NAME}"
 
 # ---- Setup Configuration ----
 if [ "$ENV" = "production" ]; then
