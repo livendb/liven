@@ -86,22 +86,242 @@ liven query 'from("events") | filter(priority == "high") .listen()'
 
 ### Embedded in Rust
 
+Add the dependency with the features you need:
+
 ```toml
 [dependencies]
-liven = { version = "0.0", default-features = false }
+liven = "0.0.3"
 ```
 
 For a minimal embedded build with no server, TUI, or TLS:
 
-```rust
-use liven::Liven;
-
-let db = Liven::open("./data")?;
-db.query(r#"from("events").insert("e1", {type: "click"})"#)?;
-let results = db.query(r#"from("events") | filter(type == "click")"#)?;
+```toml
+[dependencies]
+liven = { version = "0.0.3", default-features = false }
 ```
 
-**[Full documentation &rarr;](https://docs.rs/liven)**
+---
+
+## Rust Crate API
+
+Liven provides two usage modes via the same unified method signatures:
+
+| Mode | Initialization | Runtime |
+|------|---------------|---------|
+| **Embedded** | `Liven::open("./data")?` | In-process, no server needed |
+| **Wire** | `LivenClient::connect("127.0.0.1:43121").await?` | Remote server over TCP |
+
+Both modes expose the same methods (`insert`, `get`, `filter`, `enrich`, etc.) —
+the embedded versions are synchronous, the wire versions are async.
+
+```rust
+use liven::Liven;
+use liven::client::LivenClient;
+use liven::query::{Pipeline, Filter};
+use serde_json::json;
+
+// ── Embedded ──
+let db = Liven::open("./data")?;
+db.insert("events", "e1", json!({"type": "click"}))?;
+let results = db.run(
+    Pipeline::from("events")
+        .filter(Filter::field("type").eq("click"))
+        .limit(10)
+)?;
+
+// ── Wire (async) ──
+let mut client = LivenClient::connect("127.0.0.1:43121").await?;
+client.insert("events", "e1", json!({"type": "click"})).await?;
+let results = client.run(
+    &Pipeline::from("events")
+        .filter(Filter::field("type").eq("click"))
+        .limit(10)
+        .build(),
+).await?;
+```
+
+> **Tip:** Use `db.query("...")` for ad-hoc string queries and `db.insert(...)` / `db.get(...)` etc.
+> for the typed API. Both work identically in embedded mode and over the wire.
+
+### Connection URL
+
+The wire client supports connection URLs with optional auth key:
+
+```rust
+// Plain TCP
+LivenClient::connect("127.0.0.1:43121").await?;
+
+// With auth key in URL
+LivenClient::connect("127.0.0.1:43121?auth_key=my_secret").await?;
+```
+
+### CRUD operations
+
+```rust
+// ── Embedded ──        // ── Wire (async) ──
+db.insert("users", "u1", json!({"name":"Alice"}))?;
+                        // client.insert("users", "u1", json!(...)).await?;
+
+db.upsert("users", "u1", json!({"name":"Alice"}))?;
+db.update("users", "u1", json!({"status":"active"}))?;
+db.get("users", "u1")?;
+db.delete("users", "u1")?;
+db.clear("logs")?;
+db.drop_stream("temp")?;
+db.insert_many("orders", vec![("o1".into(), json!({"amount":100}))])?;
+db.upsert_many("orders", vec![("o1".into(), json!({"amount":200}))])?;
+
+// Metadata
+db.streams()?;
+db.status()?;
+```
+
+### Pipeline operations
+
+```rust
+use liven::query::{Pipeline, Filter};
+use liven::types::AggregateStrategy;
+
+// ── Embedded ──                    // ── Wire (async) ──
+db.filter("events",                   // client.filter("events",
+    Filter::field("type").eq("click"), //   Filter::field("type").eq("click"),
+)?;                                     // ).await?;
+
+db.limit("events", 10)?;             // client.limit("events", 10).await?;
+db.count("events")?;                  // client.count("events").await?;
+db.sort("events", "timestamp", true)?; // client.sort("events","timestamp",true).await?;
+db.page("events", 1, 50)?;           // client.page("events", 1, 50).await?;
+db.map("users", vec!["name".into(), "email".into()])?;
+db.window("metrics", 60_000, AggregateStrategy::avg())?;
+db.group("events", "type", vec!["count".into()])?;
+db.distinct("users", "email")?;
+db.page_cursor("events", "cursor_abc", 50)?;
+
+// Vector similarity
+db.vector_filter("embeddings", "vector", vec![12, -5, 3], 0.85)?;
+
+// Stream joins
+db.enrich("logs", "users", "user_id")?;
+db.correlate("events", "orders", "user_id", 5000)?;
+db.chain("prompts", "responses", "prompt_id")?;
+db.sequence("system_events",
+    vec![Filter::field("event").eq("disk_full"),
+         Filter::field("event").eq("crash")],
+    10_000)?;
+```
+
+### Pipeline builder (for complex chains)
+
+When you need multiple stages, use the builder and execute with `db.run()`:
+
+```rust
+use liven::query::{Pipeline, Filter};
+
+let pipeline = Pipeline::from("orders")
+    .filter(Filter::field("amount").gte(100.0))
+    .filter(Filter::field("status").eq("completed"))
+    .sort("amount", true)
+    .limit(10);
+
+// Embedded
+db.run(pipeline.clone())?;
+
+// Wire
+client.run(&pipeline.build()).await?;
+```
+
+### Pipeline update / delete
+
+```rust
+let pipeline = Pipeline::from("orders")
+    .filter(Filter::field("status").eq("pending"));
+
+// Update all matching records
+db.pipeline_update(pipeline.clone(), json!({"status": "cancelled"}))?;
+
+// Delete all matching records
+db.pipeline_delete(pipeline)?;
+```
+
+### Explain
+
+```rust
+use liven::query::Query as Q;
+
+let plan = db.explain(Q::insert("events", "e1", json!({"x": 1})))?;
+```
+
+### Real-time subscriptions
+
+```rust
+use liven::query::{Pipeline, Filter};
+
+// Blocking subscription (embedded, non-async)
+loop {
+    if let Some(record) = db.subscribe_sync(std::time::Duration::from_millis(100))? {
+        println!("New: {}", record.key);
+    }
+}
+
+// Async subscription (embedded)
+let mut rx = db.subscribe();
+tokio::spawn(async move {
+    while let Ok(record) = rx.recv().await {
+        println!("Live: {:?}", record);
+    }
+});
+
+// Wire streaming (client)
+use futures_util::StreamExt;
+let mut stream = client.listen("events").await?;
+while let Some(Ok(record)) = stream.next().await {
+    println!("Got: {}", record.key);
+}
+```
+
+### Custom configuration
+
+```rust
+use liven::embed::{LivenConfig, Liven};
+
+let config = LivenConfig {
+    max_streams: 128,
+    max_index_ram_mb: 1024,
+    ..Default::default()
+};
+let db = Liven::open_with_config("./data", config)?;
+```
+
+### Full example
+
+```rust
+use liven::Liven;
+use liven::query::{Pipeline, Filter};
+use serde_json::json;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let dir = format!("./liven_demo_{}", std::process::id());
+    let db = Liven::open(&dir)?;
+
+    // Insert
+    db.insert("events", "e1", json!({"type": "click", "value": 10}))?;
+    db.insert("events", "e2", json!({"type": "purchase", "value": 50}))?;
+    db.insert("events", "e3", json!({"type": "click", "value": 20}))?;
+
+    // Query
+    let clicks = db.filter("events", Filter::field("type").eq("click"))?;
+    println!("Clicks: {:?}", clicks);
+
+    // Count
+    let count = db.count("events")?;
+    println!("Total: {:?}", count);
+
+    let _ = std::fs::remove_dir_all(&dir);
+    Ok(())
+}
+```
+
+**[Full API documentation &rarr;](https://docs.rs/liven)**
 
 ---
 

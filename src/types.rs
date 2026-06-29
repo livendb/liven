@@ -207,7 +207,7 @@ pub enum Query {
         pipeline: Vec<PipelineStage>,
     },
     /// Explain the execution plan of a query without running it.
-    /// Returns a Vec<Record> describing each pipeline stage and its estimated cost.
+    /// Returns a `Vec<Record>` describing each pipeline stage and its estimated cost.
     Explain {
         inner_query: Box<Query>,
     },
@@ -232,6 +232,257 @@ impl Query {
             Query::Status => "status",
             Query::Listen { .. } => "listen",
             Query::Explain { .. } => "explain",
+        }
+    }
+
+    /// Serialize this query back to a LIVEN DSL string for wire transmission.
+    pub fn to_dsl_string(&self) -> String {
+        match self {
+            Query::Insert {
+                stream_name,
+                key,
+                value,
+            } => {
+                let val = serde_json::to_string(value).unwrap_or_else(|_| "{}".to_string());
+                format!("from(\"{}\").insert(\"{}\", {})", stream_name, key, val)
+            }
+            Query::Upsert {
+                stream_name,
+                key,
+                value,
+            } => {
+                let val = serde_json::to_string(value).unwrap_or_else(|_| "{}".to_string());
+                format!("from(\"{}\").upsert(\"{}\", {})", stream_name, key, val)
+            }
+            Query::Update {
+                stream_name,
+                key,
+                value,
+            } => {
+                let val = serde_json::to_string(value).unwrap_or_else(|_| "{}".to_string());
+                format!("from(\"{}\").update(\"{}\", {})", stream_name, key, val)
+            }
+            Query::InsertBatch { stream_name, batch } => {
+                let items: Vec<String> = batch
+                    .iter()
+                    .map(|(k, v)| {
+                        let val = serde_json::to_string(v).unwrap_or_else(|_| "{}".to_string());
+                        format!("(\"{}\", {})", k, val)
+                    })
+                    .collect();
+                format!(
+                    "from(\"{}\").insert_batch([{}])",
+                    stream_name,
+                    items.join(", ")
+                )
+            }
+            Query::UpsertBatch { stream_name, batch } => {
+                let items: Vec<String> = batch
+                    .iter()
+                    .map(|(k, v)| {
+                        let val = serde_json::to_string(v).unwrap_or_else(|_| "{}".to_string());
+                        format!("(\"{}\", {})", k, val)
+                    })
+                    .collect();
+                format!(
+                    "from(\"{}\").upsert_batch([{}])",
+                    stream_name,
+                    items.join(", ")
+                )
+            }
+            Query::DeleteKey { stream_name, key } => {
+                format!("from(\"{}\").delete(\"{}\")", stream_name, key)
+            }
+            Query::Empty { stream_name } => format!("from(\"{}\").empty()", stream_name),
+            Query::Drop { stream_name } => format!("from(\"{}\").drop()", stream_name),
+            Query::Pipeline(stages) => {
+                let mut parts: Vec<String> = Vec::new();
+                for stage in stages {
+                    parts.push(stage.to_dsl_string());
+                }
+                if parts.is_empty() {
+                    String::new()
+                } else {
+                    // First stage uses dot notation, rest use pipe
+                    let mut result = parts[0].clone();
+                    for p in &parts[1..] {
+                        result.push_str(" | ");
+                        result.push_str(p);
+                    }
+                    result
+                }
+            }
+            Query::PipelineUpdate {
+                pipeline,
+                update_value,
+            } => {
+                let val = serde_json::to_string(update_value).unwrap_or_else(|_| "{}".to_string());
+                let base = Query::Pipeline(pipeline.clone()).to_dsl_string();
+                format!("{} | update({})", base, val)
+            }
+            Query::PipelineDelete { pipeline } => {
+                let base = Query::Pipeline(pipeline.clone()).to_dsl_string();
+                format!("{} | delete()", base)
+            }
+            Query::ListStreams => "streams()".to_string(),
+            Query::Status => "status()".to_string(),
+            Query::Listen { pipeline } => {
+                let base = Query::Pipeline(pipeline.clone()).to_dsl_string();
+                format!("{} .listen()", base)
+            }
+            Query::Explain { inner_query } => {
+                format!("explain({})", inner_query.to_dsl_string())
+            }
+        }
+    }
+}
+
+impl PipelineStage {
+    /// Serialize this pipeline stage back to its DSL representation.
+    pub fn to_dsl_string(&self) -> String {
+        match self {
+            PipelineStage::From { stream_name } => {
+                format!("from(\"{}\")", stream_name)
+            }
+            PipelineStage::Filter { expr } => format!("filter({})", expr.to_dsl_string()),
+            PipelineStage::VectorFilter {
+                field,
+                query_vector,
+                threshold,
+            } => {
+                let vec_str = query_vector
+                    .iter()
+                    .map(|v| v.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("vector_filter(\"{}\", [{}], {})", field, vec_str, threshold)
+            }
+            PipelineStage::Get { key } => format!("get(\"{}\")", key),
+            PipelineStage::Map { projections } => {
+                format!("map({})", projections.join(", "))
+            }
+            PipelineStage::Window {
+                duration_ms,
+                strategy,
+            } => {
+                let s = match strategy {
+                    AggregateStrategy::Count => "count",
+                    AggregateStrategy::Sum => "sum",
+                    AggregateStrategy::Average => "avg",
+                };
+                format!("window({}, {})", duration_ms, s)
+            }
+            PipelineStage::Limit { count } => format!("limit({})", count),
+            PipelineStage::Export { format: fmt } => {
+                let s = match fmt {
+                    ExportFormat::Jsonl => "jsonl",
+                    ExportFormat::Csv => "csv",
+                    ExportFormat::MsgPack => "msgpack",
+                };
+                format!("export({})", s)
+            }
+            PipelineStage::Enrich {
+                source_stream,
+                join_key,
+            } => format!("enrich(\"{}\", {})", source_stream, join_key),
+            PipelineStage::Delete => "delete()".to_string(),
+            PipelineStage::Trash => "trash()".to_string(),
+            PipelineStage::Count => "count()".to_string(),
+            PipelineStage::Sort { field, descending } => {
+                let dir = if *descending { "desc" } else { "asc" };
+                format!("sort({} {})", field, dir)
+            }
+            PipelineStage::Page {
+                page_number,
+                page_size,
+            } => format!("page({}, {})", page_number, page_size),
+            PipelineStage::PageCursor { cursor, page_size } => {
+                format!("page_cursor(\"{}\", {})", cursor, page_size)
+            }
+            PipelineStage::Group {
+                field,
+                aggregations,
+            } => format!("group({}, {})", field, aggregations.join(", ")),
+            PipelineStage::Correlate {
+                source_stream,
+                join_key,
+                within_ms,
+            } => format!(
+                "correlate(\"{}\", {}, {})",
+                source_stream, join_key, within_ms
+            ),
+            PipelineStage::Sequence { steps, within_ms } => {
+                let steps_str: Vec<String> = steps.iter().map(|s| s.to_dsl_string()).collect();
+                format!("sequence([{}], {})", steps_str.join(", "), within_ms)
+            }
+            PipelineStage::Chain {
+                target_stream,
+                join_key,
+            } => format!("chain(\"{}\", {})", target_stream, join_key),
+            PipelineStage::Distinct { field } => format!("distinct({})", field),
+        }
+    }
+}
+
+impl FilterExpr {
+    /// Serialize this filter expression back to its DSL representation.
+    pub fn to_dsl_string(&self) -> String {
+        match self {
+            FilterExpr::Simple {
+                field,
+                operator,
+                value,
+            } => {
+                let op_str = match operator {
+                    Op::Eq => "==",
+                    Op::NotEq => "!=",
+                    Op::Gt => ">",
+                    Op::Lt => "<",
+                    Op::GtEq => ">=",
+                    Op::LtEq => "<=",
+                    Op::In => "in",
+                    Op::StartsWith => "startsWith",
+                    Op::Contains => "contains",
+                    Op::EndsWith => "endsWith",
+                    Op::Between => "between",
+                };
+                let val_str = value.to_dsl_string();
+                format!("{} {} {}", field, op_str, val_str)
+            }
+            FilterExpr::And { left, right } => {
+                format!("{} and {}", left.to_dsl_string(), right.to_dsl_string())
+            }
+            FilterExpr::Or { left, right } => {
+                format!("{} or {}", left.to_dsl_string(), right.to_dsl_string())
+            }
+            FilterExpr::Not { expr } => format!("not({})", expr.to_dsl_string()),
+        }
+    }
+}
+
+impl DataValue {
+    /// Serialize this data value to its DSL string representation.
+    pub fn to_dsl_string(&self) -> String {
+        match self {
+            DataValue::Null => "null".to_string(),
+            DataValue::Bool(b) => b.to_string(),
+            DataValue::Int(i) => i.to_string(),
+            DataValue::UInt(u) => u.to_string(),
+            DataValue::Float(f) => f.to_string(),
+            DataValue::String(s) => format!("\"{}\"", s),
+            DataValue::Binary(b) => format!("<binary:{}>", b.len()),
+            DataValue::Array(arr) => {
+                let items: Vec<String> = arr.iter().map(|v| v.to_dsl_string()).collect();
+                format!("[{}]", items.join(", "))
+            }
+            DataValue::Object(obj) => {
+                let items: Vec<String> = obj
+                    .iter()
+                    .map(|(k, v)| format!("{}: {}", k, v.to_dsl_string()))
+                    .collect();
+                format!("{{{}}}", items.join(", "))
+            }
+            DataValue::Vector(v) => format!("{:?}", v),
         }
     }
 }

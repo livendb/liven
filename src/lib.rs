@@ -33,6 +33,7 @@
     clippy::collapsible_if,
     clippy::vec_init_then_push
 )]
+#![doc = include_str!("../rust-crate-api.md")]
 
 pub mod client;
 pub mod codec;
@@ -42,6 +43,7 @@ pub mod error;
 pub mod executor;
 pub mod import_export;
 pub mod parser;
+pub mod query;
 pub mod security;
 pub mod storage;
 pub mod sysinfo;

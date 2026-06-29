@@ -107,6 +107,419 @@ impl LivenClient {
         self.framed
     }
 
+    /// Submits a typed `Query` over the wire by serializing it to a DSL string.
+    pub async fn run(&mut self, query: &crate::types::Query) -> io::Result<Vec<Record>> {
+        let query_str = query.to_dsl_string();
+        self.query(&query_str).await
+    }
+
+    // ── Convenience methods ────────────────────────────────────────────
+
+    /// Insert a single record into a stream.
+    pub async fn insert(
+        &mut self,
+        stream_name: &str,
+        key: &str,
+        value: serde_json::Value,
+    ) -> io::Result<Vec<Record>> {
+        self.run(&crate::types::Query::Insert {
+            stream_name: stream_name.to_string(),
+            key: key.to_string(),
+            value,
+        })
+        .await
+    }
+
+    /// Upsert a record (insert or replace).
+    pub async fn upsert(
+        &mut self,
+        stream_name: &str,
+        key: &str,
+        value: serde_json::Value,
+    ) -> io::Result<Vec<Record>> {
+        self.run(&crate::types::Query::Upsert {
+            stream_name: stream_name.to_string(),
+            key: key.to_string(),
+            value,
+        })
+        .await
+    }
+
+    /// Update specific fields on an existing record (merge).
+    pub async fn update(
+        &mut self,
+        stream_name: &str,
+        key: &str,
+        value: serde_json::Value,
+    ) -> io::Result<Vec<Record>> {
+        self.run(&crate::types::Query::Update {
+            stream_name: stream_name.to_string(),
+            key: key.to_string(),
+            value,
+        })
+        .await
+    }
+
+    /// Delete a single record by key.
+    pub async fn delete(&mut self, stream_name: &str, key: &str) -> io::Result<Vec<Record>> {
+        self.run(&crate::types::Query::DeleteKey {
+            stream_name: stream_name.to_string(),
+            key: key.to_string(),
+        })
+        .await
+    }
+
+    /// Get a single record by key.
+    pub async fn get(&mut self, stream_name: &str, key: &str) -> io::Result<Vec<Record>> {
+        self.run(&crate::types::Query::Pipeline(vec![
+            crate::types::PipelineStage::From {
+                stream_name: stream_name.to_string(),
+            },
+            crate::types::PipelineStage::Get {
+                key: key.to_string(),
+            },
+        ]))
+        .await
+    }
+
+    /// Clear all records from a stream without removing it.
+    pub async fn clear(&mut self, stream_name: &str) -> io::Result<Vec<Record>> {
+        self.run(&crate::types::Query::Empty {
+            stream_name: stream_name.to_string(),
+        })
+        .await
+    }
+
+    /// Drop a stream and all its data.
+    pub async fn drop_stream(&mut self, stream_name: &str) -> io::Result<Vec<Record>> {
+        self.run(&crate::types::Query::Drop {
+            stream_name: stream_name.to_string(),
+        })
+        .await
+    }
+
+    /// Insert multiple records in one batch.
+    pub async fn insert_many(
+        &mut self,
+        stream_name: &str,
+        batch: Vec<(String, serde_json::Value)>,
+    ) -> io::Result<Vec<Record>> {
+        self.run(&crate::types::Query::InsertBatch {
+            stream_name: stream_name.to_string(),
+            batch,
+        })
+        .await
+    }
+
+    /// Upsert multiple records in one batch.
+    pub async fn upsert_many(
+        &mut self,
+        stream_name: &str,
+        batch: Vec<(String, serde_json::Value)>,
+    ) -> io::Result<Vec<Record>> {
+        self.run(&crate::types::Query::UpsertBatch {
+            stream_name: stream_name.to_string(),
+            batch,
+        })
+        .await
+    }
+
+    /// List all streams.
+    pub async fn streams(&mut self) -> io::Result<Vec<Record>> {
+        self.run(&crate::types::Query::ListStreams).await
+    }
+
+    /// Get server status.
+    pub async fn status(&mut self) -> io::Result<Vec<Record>> {
+        self.run(&crate::types::Query::Status).await
+    }
+
+    /// Explain the execution plan of a query without running it.
+    pub async fn explain(&mut self, query: &crate::types::Query) -> io::Result<Vec<Record>> {
+        self.run(&crate::types::Query::Explain {
+            inner_query: Box::new(query.clone()),
+        })
+        .await
+    }
+
+    // ── Pipeline convenience methods ───────────────────────────────────
+
+    /// Filter records in a stream by a condition.
+    pub async fn filter(
+        &mut self,
+        stream_name: &str,
+        filter: crate::query::Filter,
+    ) -> io::Result<Vec<Record>> {
+        self.run(&crate::types::Query::Pipeline(vec![
+            crate::types::PipelineStage::From {
+                stream_name: stream_name.to_string(),
+            },
+            crate::types::PipelineStage::Filter {
+                expr: filter.build(),
+            },
+        ]))
+        .await
+    }
+
+    /// Limit the number of results from a stream.
+    pub async fn limit(&mut self, stream_name: &str, count: usize) -> io::Result<Vec<Record>> {
+        self.run(&crate::types::Query::Pipeline(vec![
+            crate::types::PipelineStage::From {
+                stream_name: stream_name.to_string(),
+            },
+            crate::types::PipelineStage::Limit { count },
+        ]))
+        .await
+    }
+
+    /// Count records in a stream.
+    pub async fn count(&mut self, stream_name: &str) -> io::Result<Vec<Record>> {
+        self.run(&crate::types::Query::Pipeline(vec![
+            crate::types::PipelineStage::From {
+                stream_name: stream_name.to_string(),
+            },
+            crate::types::PipelineStage::Count,
+        ]))
+        .await
+    }
+
+    /// Sort records by a field.
+    pub async fn sort(
+        &mut self,
+        stream_name: &str,
+        field: &str,
+        descending: bool,
+    ) -> io::Result<Vec<Record>> {
+        self.run(&crate::types::Query::Pipeline(vec![
+            crate::types::PipelineStage::From {
+                stream_name: stream_name.to_string(),
+            },
+            crate::types::PipelineStage::Sort {
+                field: field.to_string(),
+                descending,
+            },
+        ]))
+        .await
+    }
+
+    /// Paginate through results.
+    pub async fn page(
+        &mut self,
+        stream_name: &str,
+        page_number: usize,
+        page_size: usize,
+    ) -> io::Result<Vec<Record>> {
+        self.run(&crate::types::Query::Pipeline(vec![
+            crate::types::PipelineStage::From {
+                stream_name: stream_name.to_string(),
+            },
+            crate::types::PipelineStage::Page {
+                page_number,
+                page_size,
+            },
+        ]))
+        .await
+    }
+
+    /// Project specific fields from a stream.
+    pub async fn map(&mut self, stream_name: &str, fields: Vec<String>) -> io::Result<Vec<Record>> {
+        self.run(&crate::types::Query::Pipeline(vec![
+            crate::types::PipelineStage::From {
+                stream_name: stream_name.to_string(),
+            },
+            crate::types::PipelineStage::Map {
+                projections: fields,
+            },
+        ]))
+        .await
+    }
+
+    /// Time-windowed aggregation.
+    pub async fn window(
+        &mut self,
+        stream_name: &str,
+        duration_ms: u64,
+        strategy: crate::types::AggregateStrategy,
+    ) -> io::Result<Vec<Record>> {
+        self.run(&crate::types::Query::Pipeline(vec![
+            crate::types::PipelineStage::From {
+                stream_name: stream_name.to_string(),
+            },
+            crate::types::PipelineStage::Window {
+                duration_ms,
+                strategy,
+            },
+        ]))
+        .await
+    }
+
+    /// Group records by a field with aggregations.
+    pub async fn group(
+        &mut self,
+        stream_name: &str,
+        field: &str,
+        aggregations: Vec<String>,
+    ) -> io::Result<Vec<Record>> {
+        self.run(&crate::types::Query::Pipeline(vec![
+            crate::types::PipelineStage::From {
+                stream_name: stream_name.to_string(),
+            },
+            crate::types::PipelineStage::Group {
+                field: field.to_string(),
+                aggregations,
+            },
+        ]))
+        .await
+    }
+
+    /// Vector similarity search.
+    pub async fn vector_filter(
+        &mut self,
+        stream_name: &str,
+        field: &str,
+        query_vector: Vec<i8>,
+        threshold: f64,
+    ) -> io::Result<Vec<Record>> {
+        self.run(&crate::types::Query::Pipeline(vec![
+            crate::types::PipelineStage::From {
+                stream_name: stream_name.to_string(),
+            },
+            crate::types::PipelineStage::VectorFilter {
+                field: field.to_string(),
+                query_vector,
+                threshold: ordered_float::OrderedFloat(threshold),
+            },
+        ]))
+        .await
+    }
+
+    /// Enrich records with a left join from another stream.
+    pub async fn enrich(
+        &mut self,
+        stream_name: &str,
+        source_stream: &str,
+        join_key: &str,
+    ) -> io::Result<Vec<Record>> {
+        self.run(&crate::types::Query::Pipeline(vec![
+            crate::types::PipelineStage::From {
+                stream_name: stream_name.to_string(),
+            },
+            crate::types::PipelineStage::Enrich {
+                source_stream: source_stream.to_string(),
+                join_key: join_key.to_string(),
+            },
+        ]))
+        .await
+    }
+
+    /// Correlate events within a time window.
+    pub async fn correlate(
+        &mut self,
+        stream_name: &str,
+        source_stream: &str,
+        join_key: &str,
+        within_ms: u64,
+    ) -> io::Result<Vec<Record>> {
+        self.run(&crate::types::Query::Pipeline(vec![
+            crate::types::PipelineStage::From {
+                stream_name: stream_name.to_string(),
+            },
+            crate::types::PipelineStage::Correlate {
+                source_stream: source_stream.to_string(),
+                join_key: join_key.to_string(),
+                within_ms,
+            },
+        ]))
+        .await
+    }
+
+    /// Chain (multi-hop join) across streams.
+    pub async fn chain(
+        &mut self,
+        stream_name: &str,
+        target_stream: &str,
+        join_key: &str,
+    ) -> io::Result<Vec<Record>> {
+        self.run(&crate::types::Query::Pipeline(vec![
+            crate::types::PipelineStage::From {
+                stream_name: stream_name.to_string(),
+            },
+            crate::types::PipelineStage::Chain {
+                target_stream: target_stream.to_string(),
+                join_key: join_key.to_string(),
+            },
+        ]))
+        .await
+    }
+
+    /// Sequence (ordered event pattern detection) within a time window.
+    pub async fn sequence(
+        &mut self,
+        stream_name: &str,
+        steps: Vec<crate::query::Filter>,
+        within_ms: u64,
+    ) -> io::Result<Vec<Record>> {
+        self.run(&crate::types::Query::Pipeline(vec![
+            crate::types::PipelineStage::From {
+                stream_name: stream_name.to_string(),
+            },
+            crate::types::PipelineStage::Sequence {
+                steps: steps.into_iter().map(|f| f.build()).collect(),
+                within_ms,
+            },
+        ]))
+        .await
+    }
+
+    /// Deduplicate records by a specific field.
+    pub async fn distinct(&mut self, stream_name: &str, field: &str) -> io::Result<Vec<Record>> {
+        self.run(&crate::types::Query::Pipeline(vec![
+            crate::types::PipelineStage::From {
+                stream_name: stream_name.to_string(),
+            },
+            crate::types::PipelineStage::Distinct {
+                field: field.to_string(),
+            },
+        ]))
+        .await
+    }
+
+    /// Cursor-based pagination.
+    pub async fn page_cursor(
+        &mut self,
+        stream_name: &str,
+        cursor: &str,
+        page_size: usize,
+    ) -> io::Result<Vec<Record>> {
+        self.run(&crate::types::Query::Pipeline(vec![
+            crate::types::PipelineStage::From {
+                stream_name: stream_name.to_string(),
+            },
+            crate::types::PipelineStage::PageCursor {
+                cursor: cursor.to_string(),
+                page_size,
+            },
+        ]))
+        .await
+    }
+
+    /// Pipeline update: filter then update matching records.
+    pub async fn pipeline_update(
+        &mut self,
+        pipeline: crate::query::Pipeline,
+        update_value: serde_json::Value,
+    ) -> io::Result<Vec<Record>> {
+        self.run(&pipeline.build_update(update_value)).await
+    }
+
+    /// Pipeline delete: filter then delete matching records.
+    pub async fn pipeline_delete(
+        &mut self,
+        pipeline: crate::query::Pipeline,
+    ) -> io::Result<Vec<Record>> {
+        self.run(&pipeline.build_delete()).await
+    }
+
     /// Submits a query expression over the wire and awaits deserialized Records response.
     pub async fn query(&mut self, query_str: &str) -> io::Result<Vec<Record>> {
         self.framed
