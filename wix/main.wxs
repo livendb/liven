@@ -1,6 +1,5 @@
 <?xml version='1.0' encoding='windows-1252'?>
 <Wix xmlns='http://schemas.microsoft.com/wix/2006/wi'>
-
   <Product
     Id='*'
     Name='LIVEN'
@@ -9,7 +8,6 @@
     Language='1033'
     Codepage='1252'
     Version='$(var.Version)'>
-
     <Package Id='*'
       Keywords='Installer'
       Description='LIVEN High-Performance Storage Engine'
@@ -19,25 +17,33 @@
       Languages='1033'
       Compressed='yes'
       SummaryCodepage='1252' />
-
     <MajorUpgrade
       Schedule='afterInstallInitialize'
       DowngradeErrorMessage='A newer version of [ProductName] is already installed. Setup will now exit.' />
-
     <Media Id='1' Cabinet='media1.cab' EmbedCab='yes' DiskPrompt='CD-ROM #1' />
     <Property Id='DiskPrompt' Value='LIVEN Installation' />
-
     <Directory Id='TARGETDIR' Name='SourceDir'>
+      <!--
+        sys.BUILDARCH is set automatically by candle based on the -arch flag
+        cargo-wix passes (derived from --target). x86 builds need the 32-bit
+        Program Files folder; x64/arm64 builds need the 64-bit one, or light's
+        ICE80 validation fails because the components below are auto-marked
+        64-bit to match the build architecture.
+      -->
+      <?if $(sys.BUILDARCH) = "x86" ?>
       <Directory Id='ProgramFilesFolder' Name='PFiles'>
         <Directory Id='APPLICATIONFOLDER' Name='LIVEN'>
+      <?else?>
+      <Directory Id='ProgramFiles64Folder' Name='PFiles'>
+        <Directory Id='APPLICATIONFOLDER' Name='LIVEN'>
+      <?endif?>
           <Component Id='License' Guid='*'>
             <File Id='LicenseFile' Name='README.md' Source='README.md' KeyPath='yes'/>
           </Component>
-          
+
           <Component Id='ConfigFile' Guid='3E112833-2895-4654-8B7C-D3F8CEFE4999'>
             <File Id='LivenConfig' Name='liven.toml' Source='liven.toml' KeyPath='yes'/>
           </Component>
-
           <Component Id='Path' Guid='A657D982-EC33-4D93-9F9C-5D59A8331777' KeyPath='yes'>
             <Environment
                Id='PATH'
@@ -47,14 +53,13 @@
                Part='last'
                System='yes' />
           </Component>
-
           <Component Id='LivenBinary' Guid='8C1FE3B8-F6E5-467D-89EA-6651E8408888'>
             <File
               Id='LivenEXE'
               Name='liven.exe'
               Source='$(var.CargoTargetBinDir)\liven.exe'
               KeyPath='yes' />
-            
+
             <!-- Register LIVEN as a native Windows service -->
             <ServiceInstall
               Id='ServiceInstall'
@@ -71,7 +76,7 @@
                 OnUninstall='no'
                 DelayedAutoStart='no' />
             </ServiceInstall>
-            
+
             <ServiceControl
               Id='ServiceControl'
               Name='LIVEN'
@@ -83,13 +88,11 @@
         </Directory>
       </Directory>
     </Directory>
-
     <Feature Id='MainApplication' Title='LIVEN Application' Level='1'>
       <ComponentRef Id='License' />
       <ComponentRef Id='ConfigFile' />
       <ComponentRef Id='LivenBinary' />
       <ComponentRef Id='Path' />
     </Feature>
-
   </Product>
 </Wix>
