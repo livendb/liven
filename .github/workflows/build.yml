@@ -338,11 +338,19 @@ jobs:
         run: |
           curl -fsSL https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
 
-      - name: Install packaging tools via binstall (skip compilation)
+      - name: Install Linux packaging tools
+        if: matrix.platform == 'linux'
         shell: bash
         run: |
-          cargo binstall cargo-deb --no-confirm --locked
-          cargo binstall cargo-generate-rpm --no-confirm --locked
+          set -e
+          cargo install cargo-deb --locked
+          cargo install cargo-generate-rpm --locked
+
+      - name: Install Windows packaging tools
+        if: matrix.platform == 'windows'
+        shell: bash
+        run: |
+          set -e
           cargo binstall cargo-wix --no-confirm --locked
 
       - name: Package Linux (.deb, .rpm, .tar.gz)
