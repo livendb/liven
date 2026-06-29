@@ -19,7 +19,6 @@
 # Repository: https://github.com/livendb/liven
 
 set -e
-UNTYPED=1
 
 # ── Config ────────────────────────────────────────────────────────────
 
@@ -101,7 +100,6 @@ echo "Release: ${VERSION}"
 ARCHIVE="${ARTIFACT_NAME}-${PLATFORM}.tar.gz"
 ARCHIVE_URL="${BASE_URL}/download/${VERSION}/${ARCHIVE}"
 CHECKSUM_URL="${ARCHIVE_URL}.sha256"
-SIG_URL="${ARCHIVE_URL}.sig"
 
 TMP_DIR="$(mktemp -d 2>/dev/null || mktemp -d -t liven-install)"
 cd "${TMP_DIR}"

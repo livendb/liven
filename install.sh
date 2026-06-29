@@ -137,7 +137,7 @@ if [ "$OS_NORMALIZED" = "Windows" ]; then
 
   echo "Extracting ${ARCHIVE_NAME}..."
   if command -v unzip >/dev/null 2>&1; then
-    unzip -q "./${ARCHIVE_NAME}"
+    unzip -oq "./${ARCHIVE_NAME}"
   elif command -v powershell >/dev/null 2>&1; then
     powershell -NoProfile -Command "Expand-Archive -Path '.\\${ARCHIVE_NAME}' -DestinationPath '.'"
   else
