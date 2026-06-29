@@ -32,11 +32,15 @@ Liven is a database built for data that moves. It ingests streaming data, transf
 # Install via crates.io
 cargo install liven
 
-# Launch the server
-liven start
-
 # One-liner install (Linux & macOS)
 curl --proto '=https' --tlsv1.2 -sSf https://livendb.com/install | sh
+
+# Install via Docker
+docker pull ghcr.io/livendb/liven:latest
+docker run -p 43121:43121 -p 43120:43120 -v ./data:/var/lib/liven livendb/liven:latest
+
+# Launch the server
+liven start
 ```
 
 ---
