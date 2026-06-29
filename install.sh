@@ -91,12 +91,12 @@ echo "Environment:   $ENV"
 
 # ---- Map OS/Arch to release asset platform-arch naming ----
 case "${OS_NORMALIZED}-${ARCH_NORMALIZED}" in
-  Linux-x86_64)    PLATFORM_ARCH="linux-amd64"   ; ARCHIVE_EXT="tar.gz" ;;
-  Linux-aarch64)   PLATFORM_ARCH="linux-arm64"   ; ARCHIVE_EXT="tar.gz" ;;
-  Darwin-x86_64)   PLATFORM_ARCH="macos-amd64"   ; ARCHIVE_EXT="tar.gz" ;;
-  Darwin-aarch64)  PLATFORM_ARCH="macos-arm64"   ; ARCHIVE_EXT="tar.gz" ;;
-  Windows-x86_64)  PLATFORM_ARCH="windows-amd64" ; ARCHIVE_EXT="zip"    ;;
-  Windows-aarch64) PLATFORM_ARCH="windows-arm64" ; ARCHIVE_EXT="zip"    ;;
+  Linux-x86_64)    TARGET="x86_64-unknown-linux-gnu"   ;;
+  Linux-aarch64)   TARGET="aarch64-unknown-linux-gnu"   ;;
+  Darwin-x86_64)   TARGET="x86_64-apple-darwin"         ;;
+  Darwin-aarch64)  TARGET="aarch64-apple-darwin"        ;;
+  Windows-x86_64)  TARGET="x86_64-pc-windows-msvc"      ;;
+  Windows-aarch64) TARGET="aarch64-pc-windows-msvc"     ;;
   *)
     echo "Unsupported platform: ${OS_NORMALIZED}/${ARCH_NORMALIZED}"
     echo "Please build from source: https://github.com/${REPO}"
@@ -104,7 +104,7 @@ case "${OS_NORMALIZED}-${ARCH_NORMALIZED}" in
     ;;
 esac
 
-ARCHIVE_NAME="liven-${PLATFORM_ARCH}.${ARCHIVE_EXT}"
+ARCHIVE_NAME="liven-${TARGET}.zip"
 ARCHIVE_URL="${BASE_URL}/${ARCHIVE_NAME}"
 
 BINARY_NAME="liven"
@@ -159,15 +159,13 @@ if [ "$OS_NORMALIZED" = "Windows" ]; then
   exit 0
 fi
 
-# ---- Unix / macOS: download, extract (.tar.gz), install, configure ----
+# ---- Unix / macOS: download, extract (.zip), install, configure ----
 echo "Downloading ${ARCHIVE_NAME} from ${ARCHIVE_URL} ..."
 $DOWNLOAD_CMD "/tmp/${ARCHIVE_NAME}" "$ARCHIVE_URL"
 
 echo "Extracting ${ARCHIVE_NAME}..."
-# Release archives are .tar.gz on Unix — tar is always present on Linux/macOS,
-# unlike unzip, which isn't guaranteed on minimal Linux images.
-tar -xzf "/tmp/${ARCHIVE_NAME}" -C "/tmp/"
 # Files are at the archive root (liven + liven.toml), no subfolder
+unzip -oq "/tmp/${ARCHIVE_NAME}" -d "/tmp/"
 BINARY_PATH="/tmp/${BINARY_NAME}"
 chmod +x "$BINARY_PATH"
 
