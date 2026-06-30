@@ -91,6 +91,13 @@ pub struct StorageEngine {
     flusher_handle: Option<std::thread::JoinHandle<()>>,
     /// Maximum number of records to return from a full scan operation.
     max_scan_results: usize,
+    /// Group-commit drain window in microseconds.
+    /// The flusher waits this long for additional entries before flushing.
+    /// Default: 5000 (5ms). Set lower (e.g. 300) for lower-latency single-caller workloads.
+    pub commit_drain_window_us: u64,
+    /// Maximum number of entries to accumulate in one group-commit batch.
+    /// Default: 2048.
+    pub commit_max_batch_size: usize,
 }
 
 use std::cell::RefCell;
@@ -172,6 +179,8 @@ impl StorageEngine {
             timestamp_indexes: timestamp_indexes.clone(),
             flusher_handle: None,
             max_scan_results,
+            commit_drain_window_us: 5000,
+            commit_max_batch_size: 2048,
         };
 
         engine.recover()?;
@@ -189,6 +198,8 @@ impl StorageEngine {
         let flusher_running = is_running.clone();
         let flusher_index_ram_bytes = index_ram_bytes.clone();
         let flusher_timestamp_indexes = engine.timestamp_indexes.clone();
+        let flusher_drain_window_us = engine.commit_drain_window_us;
+        let flusher_max_batch = engine.commit_max_batch_size;
 
         let flusher_handle = std::thread::spawn(move || {
             run_flusher_loop(
@@ -206,6 +217,8 @@ impl StorageEngine {
                 flusher_running,
                 flusher_index_ram_bytes,
                 flusher_timestamp_indexes,
+                flusher_drain_window_us,
+                flusher_max_batch,
             );
         });
 
@@ -1242,8 +1255,14 @@ fn run_flusher_loop(
     is_running: Arc<std::sync::atomic::AtomicBool>,
     index_ram_bytes: Arc<AtomicU64>,
     timestamp_indexes: Arc<Mutex<HashMap<String, Arc<timestamp_index::TimestampIndex>>>>,
+    drain_window_us: u64,
+    max_batch: usize,
 ) {
-    let mut batch = Vec::with_capacity(2048);
+    // Solo-caller fast path: if the channel is empty after a short check,
+    // flush immediately instead of waiting out the full drain window.
+    // This collapses single-call latency from 5ms to pure I/O cost.
+    let solo_check_us = std::cmp::min(drain_window_us / 10, 500);
+    let mut batch = Vec::with_capacity(max_batch);
     while is_running.load(Ordering::Relaxed) {
         // Wait for the first entry with a short timeout to prevent blocking indefinitely on shutdown
         let first_entry = match rx.recv_timeout(std::time::Duration::from_millis(100)) {
@@ -1258,16 +1277,24 @@ fn run_flusher_loop(
         }
         batch.push(first_entry);
 
-        // Pull as many entries as possible without blocking (up to 2048 or until empty)
+        // Pull as many entries as possible without blocking
         let start_time = std::time::Instant::now();
-        while batch.len() < 2048 {
+        while batch.len() < max_batch {
             match rx.try_recv() {
                 Ok(entry) => {
                     batch.push(entry);
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => {
                     let elapsed = start_time.elapsed();
-                    if elapsed.as_millis() >= 5 {
+                    let elapsed_us = elapsed.as_micros() as u64;
+                    // Solo-caller fast path: if only one entry and channel is empty
+                    // after a short check, flush immediately
+                    let limit = if batch.len() == 1 {
+                        solo_check_us
+                    } else {
+                        drain_window_us
+                    };
+                    if elapsed_us >= limit {
                         break;
                     }
                     std::thread::yield_now();

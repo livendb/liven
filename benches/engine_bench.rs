@@ -358,6 +358,65 @@ fn bench_concurrent_reads(c: &mut Criterion) {
     group.finish();
 }
 
+// ── Concurrent Append (group-commit scaling) ────────────────────────────────
+
+fn bench_concurrent_append(c: &mut Criterion) {
+    let mut group = c.benchmark_group("concurrent_append");
+    group
+        .sample_size(10)
+        .measurement_time(Duration::from_secs(5));
+
+    for thread_count in [1usize, 2, 4, 8] {
+        group.throughput(Throughput::Elements(thread_count as u64));
+        group.bench_with_input(
+            BenchmarkId::new("writers", thread_count),
+            &thread_count,
+            |b, &n| {
+                b.iter_batched(
+                    || {
+                        let (engine, _dir) = make_engine("concurrent_append", 50);
+                        let engine = Arc::new(engine);
+                        let counter = Arc::new(std::sync::atomic::AtomicU64::new(0));
+                        let barrier = Arc::new(std::sync::Barrier::new(n + 1));
+                        (engine, counter, barrier)
+                    },
+                    |(engine, counter, barrier)| {
+                        let handles: Vec<_> = (0..n)
+                            .map(|_| {
+                                let engine = Arc::clone(&engine);
+                                let counter = Arc::clone(&counter);
+                                let barrier = Arc::clone(&barrier);
+                                std::thread::spawn(move || {
+                                    barrier.wait();
+                                    for _ in 0..25 {
+                                        let idx = counter
+                                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                        let key = format!("ck_{}", idx);
+                                        let _ = engine.append(
+                                            "events",
+                                            &key,
+                                            DataValue::String(r#"{"v":1}"#.to_string()),
+                                            false,
+                                        );
+                                    }
+                                })
+                            })
+                            .collect();
+                        barrier.wait();
+                        for h in handles {
+                            h.join().unwrap();
+                        }
+                        drop(engine);
+                    },
+                    BatchSize::SmallInput,
+                );
+            },
+        );
+    }
+
+    group.finish();
+}
+
 // ── Compaction ────────────────────────────────────────────────────────────────
 
 fn bench_compaction(c: &mut Criterion) {
@@ -543,6 +602,7 @@ criterion_group! {
         bench_scan,
         bench_time_range,
         bench_concurrent_reads,
+        bench_concurrent_append,
         bench_compaction,
         bench_vector,
         bench_codec,

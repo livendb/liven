@@ -20,20 +20,16 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
-
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
-
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Extract metadata for Docker
         id: meta
         uses: docker/metadata-action@v6
@@ -44,7 +40,6 @@ jobs:
             type=sha,format=short
             type=ref,event=branch
             type=ref,event=pr
-
       - name: Build and push Docker image
         uses: docker/build-push-action@v7
         with:
@@ -59,7 +54,7 @@ jobs:
   # ── Reproducible benchmarks ──
   benchmark:
     name: Benchmarks
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -77,6 +72,17 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-buildx-bench-
 
+      # Persist Criterion's baseline stats across runs so `change:` comparisons
+      # are meaningful instead of comparing against an empty/fresh state each time.
+      - name: Cache criterion baseline
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/criterion-data
+          key: criterion-${{ github.ref }}
+          restore-keys: |
+            criterion-refs/heads/main
+            criterion-
+
       - name: Build benchmark image
         run: |
           mkdir -p /tmp/.buildx-cache
@@ -89,9 +95,29 @@ jobs:
             .
 
       - name: Run benchmarks
-        run: docker run --rm liven-bench
+        run: |
+          mkdir -p criterion-data
+          docker run --rm \
+            -v "${{ github.workspace }}/criterion-data:/app/target/criterion" \
+            liven-bench | tee bench-output.txt
 
-      - name: Move cache
+      - name: Upload benchmark log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-output-${{ github.sha }}
+          path: bench-output.txt
+          retention-days: 90
+
+      - name: Upload criterion report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: criterion-report-${{ github.sha }}
+          path: criterion-data
+          retention-days: 30
+
+      - name: Move docker layer cache
         if: always()
         run: |
           rm -rf /tmp/.buildx-cache

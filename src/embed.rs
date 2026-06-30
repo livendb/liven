@@ -28,6 +28,12 @@ pub struct LivenConfig {
     pub compaction_threshold_bytes: u64,
     /// Maximum number of records to return from a full scan operation. Default: 100,000.
     pub max_scan_results: usize,
+    /// Group-commit drain window in microseconds. The flusher waits this long
+    /// for additional entries before flushing. Default: 5000 (5ms).
+    /// Set lower (e.g. 300) for lower-latency single-caller workloads.
+    pub commit_drain_window_us: u64,
+    /// Maximum number of entries to accumulate in one group-commit batch. Default: 2048.
+    pub commit_max_batch_size: usize,
 }
 
 impl Default for LivenConfig {
@@ -48,6 +54,8 @@ impl Default for LivenConfig {
             compaction_threshold_segments: 4,
             compaction_threshold_bytes: 64 * 1024 * 1024,
             max_scan_results: 100_000,
+            commit_drain_window_us: 5000,
+            commit_max_batch_size: 2048,
         }
     }
 }
@@ -91,6 +99,8 @@ impl Liven {
         engine.set_max_scan_results(config.max_scan_results);
         engine.compaction_threshold_segments = config.compaction_threshold_segments;
         engine.compaction_threshold_bytes = config.compaction_threshold_bytes;
+        engine.commit_drain_window_us = config.commit_drain_window_us;
+        engine.commit_max_batch_size = config.commit_max_batch_size;
         Ok(Self {
             engine: Arc::new(engine),
         })
