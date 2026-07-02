@@ -501,7 +501,7 @@ fn test_continuous_edge_check_query_capabilities() {
     assert!(check_query_capabilities("from(\"stream\")", CAP_READ));
     assert!(check_query_capabilities("tail(\"stream\")", CAP_READ));
     assert!(check_query_capabilities("status()", CAP_READ));
-    assert!(check_query_capabilities("list_streams()", CAP_READ));
+    assert!(check_query_capabilities("streams()", CAP_READ));
     // CAP_READ must NOT allow inserts or deletes
     assert!(!check_query_capabilities(
         "from(\"stream\").insert(\"key\", {val: 1})",
@@ -522,7 +522,7 @@ fn test_continuous_edge_check_query_capabilities() {
     assert!(check_query_capabilities("from(\"stream\")", write_caps));
     assert!(check_query_capabilities("tail(\"stream\")", write_caps));
     assert!(check_query_capabilities("status()", write_caps));
-    assert!(check_query_capabilities("list_streams()", write_caps));
+    assert!(check_query_capabilities("streams()", write_caps));
     assert!(check_query_capabilities(
         "from(\"stream\").insert(\"key\", {val: 1})",
         write_caps
@@ -554,10 +554,7 @@ fn test_continuous_edge_check_query_capabilities() {
         write_delete_caps
     ));
     assert!(check_query_capabilities("status()", write_delete_caps));
-    assert!(check_query_capabilities(
-        "list_streams()",
-        write_delete_caps
-    ));
+    assert!(check_query_capabilities("streams()", write_delete_caps));
     assert!(check_query_capabilities(
         "from(\"stream\").insert(\"key\", {val: 1})",
         write_delete_caps
@@ -604,4 +601,243 @@ fn test_continuous_edge_check_query_capabilities() {
         CAP_NONE
     ));
     assert!(!check_query_capabilities("drop(\"stream\")", CAP_NONE));
+
+    // ── Malformed/unparseable queries must be rejected (fail closed) ──
+    // Previously this returned `true` due to Err(_) => true bug
+    // CAP_ROOT has an early return that bypasses parsing — it allows everything
+    assert!(check_query_capabilities("garbage!!!", CAP_ROOT));
+    assert!(check_query_capabilities(
+        "from(\"stream\") | unknown_op()",
+        CAP_ROOT
+    ));
+    assert!(!check_query_capabilities("garbage!!!", CAP_NONE));
+    assert!(!check_query_capabilities(" ", CAP_NONE));
+}
+
+#[cfg(feature = "server")]
+#[tokio::test]
+async fn test_session_role_downgrade_takes_effect_immediately() {
+    let test_dir = std::env::temp_dir().join(format!(
+        "liven_downgrade_test_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _ = fs::remove_dir_all(&test_dir);
+    fs::create_dir_all(&test_dir).unwrap();
+
+    let db_port = 45330;
+    let webui_port = 45329;
+    let master_key_str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    let config = AppConfig {
+        server: ServerConfig {
+            environment: "test".to_string(),
+            host: "127.0.0.1".to_string(),
+            db_port,
+            webui_port,
+            max_connections: 100,
+            broadcast_capacity: 10,
+        },
+        storage: StorageConfig {
+            data_directory: test_dir.to_string_lossy().to_string(),
+            max_segment_size_mb: 10,
+            sync_mode: "always".to_string(),
+            sync_interval_ms: 10,
+        },
+        limits: LimitsConfig {
+            max_concurrent_streams: 10,
+            max_open_file_descriptors: 10,
+            max_index_ram_mb: 10,
+            max_segment_size_mb: 10,
+            max_scan_results: 100_000,
+        },
+        security: SecurityConfig {
+            mode: "auth_key".to_string(),
+            master_key: Some(master_key_str.to_string()),
+            ztna: None,
+            auth_key: Some(AuthKeyConfig {
+                system_stream: "auth_keys".to_string(),
+                allow_local_auto_generation: true,
+            }),
+        },
+    };
+
+    let engine =
+        Arc::new(StorageEngine::new(&test_dir, 10 * 1024 * 1024).expect("StorageEngine::new"));
+
+    // Pre-populate admin and write-delete keys directly into storage
+    let admin_raw = "admin-secret-key-12345";
+    let admin_hash = blake3::hash(admin_raw.as_bytes());
+    let admin_hash_hex = liven::security::hex_encode(admin_hash.as_bytes());
+    let admin_rec = AuthKeyRecord {
+        key_id: "test-admin".to_string(),
+        role: "admin".to_string(),
+        auth_key: admin_hash_hex,
+        status: "active".to_string(),
+        allowed_tags: Vec::new(),
+    };
+    engine
+        .append(
+            "auth_keys",
+            "test-admin",
+            DataValue::String(serde_json::to_string(&admin_rec).unwrap()),
+            false,
+        )
+        .unwrap();
+
+    let bob_raw = "bob-write-delete-key";
+    let bob_hash = blake3::hash(bob_raw.as_bytes());
+    let bob_hash_hex = liven::security::hex_encode(bob_hash.as_bytes());
+    let bob_rec = AuthKeyRecord {
+        key_id: "operator_bob".to_string(),
+        role: "write-delete".to_string(),
+        auth_key: bob_hash_hex,
+        status: "active".to_string(),
+        allowed_tags: Vec::new(),
+    };
+    engine
+        .append(
+            "auth_keys",
+            "operator_bob",
+            DataValue::String(serde_json::to_string(&bob_rec).unwrap()),
+            false,
+        )
+        .unwrap();
+
+    // Run server in background
+    let engine_clone = engine.clone();
+    let config_clone = config.clone();
+    tokio::spawn(async move {
+        let _ = run_server(engine_clone, config_clone, true).await;
+    });
+
+    // Wait a brief moment for the server to start listening
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    // 1. Login as operator_bob (write-delete role) to get a session
+    let (code, headers, body) = send_http_request(
+        webui_port,
+        "POST",
+        "/api/system/auth/login",
+        vec![("content-type".to_string(), "application/json".to_string())],
+        Some(r#"{"token":"bob-write-delete-key"}"#),
+    )
+    .await;
+    assert_eq!(code, 200, "Login should succeed: body={}", body);
+    let _login_json: serde_json::Value = serde_json::from_str(&body).unwrap();
+
+    // Extract session cookie
+    let session_cookie = headers
+        .iter()
+        .find(|(k, _)| k == "set-cookie")
+        .map(|(_, v)| v.clone())
+        .expect("Set-Cookie header");
+    let session_id = session_cookie
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .strip_prefix("liven_session=")
+        .unwrap_or("")
+        .to_string();
+
+    // 2. Insert a record (write-delete can insert)
+    let (code, _, _) = send_http_request(
+        webui_port,
+        "POST",
+        "/api/ingest",
+        vec![
+            (
+                "cookie".to_string(),
+                format!("liven_session={}", session_id),
+            ),
+            ("content-type".to_string(), "application/json".to_string()),
+        ],
+        Some(r#"[{"stream":"test","key":"k1","value":{"x":1}}]"#),
+    )
+    .await;
+    assert_eq!(code, 200, "Insert should succeed with write-delete role");
+
+    // 3. Delete the record (write-delete can delete)
+    let (code, _, _) = send_http_request(
+        webui_port,
+        "POST",
+        "/api/query",
+        vec![
+            (
+                "cookie".to_string(),
+                format!("liven_session={}", session_id),
+            ),
+            ("content-type".to_string(), "application/json".to_string()),
+        ],
+        Some(r#"{"query":"from(\"test\").delete(\"k1\")"}"#),
+    )
+    .await;
+    assert_eq!(code, 200, "Delete should succeed with write-delete role");
+
+    // 4. Login as admin to downgrade operator_bob to read-only
+    let (code, headers2, _) = send_http_request(
+        webui_port,
+        "POST",
+        "/api/system/auth/login",
+        vec![("content-type".to_string(), "application/json".to_string())],
+        Some(r#"{"token":"admin-secret-key-12345"}"#),
+    )
+    .await;
+    assert_eq!(code, 200);
+    let admin_cookie = headers2
+        .iter()
+        .find(|(k, _)| k == "set-cookie")
+        .map(|(_, v)| v.clone())
+        .unwrap();
+    let admin_session = admin_cookie
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .strip_prefix("liven_session=")
+        .unwrap_or("")
+        .to_string();
+
+    // 5. Downgrade operator_bob from write-delete to read-only
+    let (code, _, _) = send_http_request(
+        webui_port,
+        "POST",
+        "/api/system/auth/keys/role",
+        vec![
+            (
+                "cookie".to_string(),
+                format!("liven_session={}", admin_session),
+            ),
+            ("content-type".to_string(), "application/json".to_string()),
+        ],
+        Some(r#"{"key_id":"operator_bob","role":"read-only"}"#),
+    )
+    .await;
+    assert_eq!(code, 200, "Role downgrade should succeed: code={}", code);
+
+    // 6. Attempt delete again on bob's EXISTING session — should be REJECTED
+    let (code, _, body) = send_http_request(
+        webui_port,
+        "POST",
+        "/api/query",
+        vec![
+            (
+                "cookie".to_string(),
+                format!("liven_session={}", session_id),
+            ),
+            ("content-type".to_string(), "application/json".to_string()),
+        ],
+        Some(r#"{"query":"from(\"test\").delete(\"k1\")"}"#),
+    )
+    .await;
+    assert!(
+        code == 403 || code == 401,
+        "Delete should be rejected after role downgrade: got code={}, body={}",
+        code,
+        body
+    );
+
+    // Clean up
+    let _ = fs::remove_dir_all(&test_dir);
 }

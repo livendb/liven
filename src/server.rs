@@ -168,6 +168,23 @@ pub fn lookup_key_by_hash(engine: &StorageEngine, incoming_hash: &str) -> Option
     None
 }
 
+pub fn lookup_role_for_key_id(engine: &StorageEngine, key_id: &str) -> Option<String> {
+    let keys = engine.list_keys("auth_keys");
+    for k in keys {
+        if let Ok(Some(rec)) = engine.get("auth_keys", &k)
+            && let DataValue::String(json_str) = rec.value
+            && let Ok(auth_rec) = serde_json::from_str::<AuthKeyRecord>(&json_str)
+            && auth_rec.key_id == key_id
+        {
+            if auth_rec.status == "active" {
+                return Some(auth_rec.role);
+            }
+            return None;
+        }
+    }
+    None
+}
+
 pub fn kill_active_connections_for_hash(state: &ServerState, hash: &str) {
     let mut conns = state.active_connections.lock().unwrap();
     let before_len = conns.len();
@@ -996,7 +1013,7 @@ pub fn check_query_capabilities(query_str: &str, capabilities: u8) -> bool {
             crate::types::Query::Listen { .. } => (capabilities & crate::security::CAP_READ) != 0,
             crate::types::Query::Explain { .. } => (capabilities & crate::security::CAP_READ) != 0,
         },
-        Err(_) => true,
+        Err(_) => false,
     }
 }
 
@@ -1340,6 +1357,22 @@ pub fn validate_session_and_slide(
         if session.last_seen.elapsed() > Duration::from_secs(28800) {
             sessions.remove(&session_id);
             return Err(StatusCode::UNAUTHORIZED);
+        }
+
+        // Re-validate role against the auth_keys stream on every request.
+        // This ensures role downgrades/revocations take effect immediately
+        // for Web UI sessions, not just native wire connections.
+        if state.config.security.mode == "auth_key" {
+            let current_role = lookup_role_for_key_id(&state.engine, &session.user_id);
+            if let Some(new_role) = current_role {
+                if new_role != session.role {
+                    session.role = new_role.clone();
+                }
+            } else {
+                // Key was revoked — session is no longer valid
+                sessions.remove(&session_id);
+                return Err(StatusCode::UNAUTHORIZED);
+            }
         }
 
         session.last_seen = std::time::Instant::now();
