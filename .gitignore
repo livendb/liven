@@ -51,3 +51,4 @@ auth_*
 *.keystore
 *.truststore
 *.status
+liven.status

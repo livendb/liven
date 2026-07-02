@@ -17,9 +17,10 @@
   <a href="https://crates.io/crates/liven">
     <img src="https://img.shields.io/crates/v/liven?logo=rust&label=crates.io" alt="crates.io">
   </a>
-  <a href="https://crates.io/crates/liven">
-    <img src="https://img.shields.io/crates/d/liven?logo=rust&label=downloads" alt="downloads">
+  <a href="https://www.npmjs.com/package/@livendb/liven-client">
+    <img src="https://img.shields.io/npm/v/@livendb/liven-client?logo=npm" alt="npm">
   </a>
+
 </p>
 
 ---
