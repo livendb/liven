@@ -107,23 +107,23 @@ Add the dependency with the features you need:
 
 ```toml
 [dependencies]
-liven = "0.0.8"                        # full build (server, TUI, TLS)
+liven = "0.0.9"                        # full build (server, TUI, TLS)
 ```
 
 For a minimal embedded build with no server, TUI, or TLS:
 
 ```toml
 [dependencies]
-liven = { version = "0.0.8", default-features = false }      # core only
+liven = { version = "0.0.9", default-features = false }      # core only
 ```
 
 Select individual features:
 
 ```toml
 [dependencies]
-liven = { version = "0.0.8", default-features = false, features = ["tls"] }   # core + TLS
-liven = { version = "0.0.8", default-features = false, features = ["server", "tls"] }  # core + server + TLS
-liven = { version = "0.0.8", features = ["tui"] }  # full + TUI (already included)
+liven = { version = "0.0.9", default-features = false, features = ["tls"] }   # core + TLS
+liven = { version = "0.0.9", default-features = false, features = ["server", "tls"] }  # core + server + TLS
+liven = { version = "0.0.9", features = ["tui"] }  # full + TUI (already included)
 ```
 
 ---
@@ -442,7 +442,7 @@ The `default` feature enables everything by pulling in `full`, which bundles all
 | Feature  | What's included                                 |
 |----------|-------------------------------------------------|
 | `full`   | All features below (enabled by default)          |
-| `server` | REST API + WebSocket + embedded Web UI           |
+| `server` | REST API + WebSocket + embedded Web UI + mTLS   |
 | `tui`    | Interactive terminal dashboard                   |
 | `tls`    | mTLS support with X.509 certificates             |
 
@@ -452,6 +452,9 @@ cargo build --release --no-default-features
 
 # Embedded with TLS support
 cargo build --release --no-default-features --features tls
+
+# Server without TUI (includes TLS for ZTNA/mTLS)
+cargo build --release --no-default-features --features server
 ```
 
 ---

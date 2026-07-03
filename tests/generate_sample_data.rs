@@ -402,11 +402,16 @@ fn test_generate_sample_data() {
     //   from("orders") | chain("shipments", "order_id") | chain("deliveries", "shipment_id")
     //
     // ENRICH:
-    //   from("prompts") | enrich("users", "user_id")
+    //   from("orders") | enrich("customers", "customer_id")
+    //   → Orders carry customer_id; customers stream is keyed by customer_id
     //
     // Key design principle for chain:
     //   chain(target_stream, join_key) does engine.get(target_stream, join_key_value)
     //   So the target record's KEY must equal the join_key_value from the source
+    //
+    // Key design principle for enrich:
+    //   enrich(target_stream, join_key) does engine.get(target_stream, join_key_value)
+    //   The target record's KEY must equal the join_key_value from the source record
     // =======================================================================
 
     // ── 5. Users (enrich source) ────────────────────────────────────────────
@@ -428,7 +433,29 @@ fn test_generate_sample_data() {
             .expect("Failed to append users data");
     }
 
-    // ── 6. Transactions (correlate partner with logins) ─────────────────────
+    // ── 6. Customers (enrich target for orders) ─────────────────────────────
+    // Keys are customer_id values so enrich("customers", "customer_id") resolves
+    let customer_tiers = ["free", "silver", "gold", "platinum"];
+    let countries = ["US", "UK", "CA", "DE", "JP", "AU", "FR", "SG"];
+    let mut customers: Vec<(String, String)> = Vec::with_capacity(25);
+    for i in 1..=25 {
+        let key = format!("cust_{:03}", i);
+        let tier = customer_tiers[i % customer_tiers.len()];
+        let country = countries[i % countries.len()];
+        let lifetime_value = (i as f64 * 157.3 + 99.99).round() / 100.0;
+        let signup_ts = 2000 + i * 500;
+        let json = format!(
+            r#"{{"customer_id": "{key}", "full_name": "Customer {i}", "email": "cust{i}@example.com", "tier": "{tier}", "country": "{country}", "lifetime_value": {lifetime_value}, "signup_ts": {signup_ts}}}"#
+        );
+        customers.push((key, json));
+    }
+    for (key, json) in &customers {
+        target
+            .append("customers", key, parse_json_to_datavalue(json))
+            .expect("Failed to append customers data");
+    }
+
+    // ── 7. Transactions (correlate partner with logins) ─────────────────────
     // Each transaction has user_id, amount, timestamp, merchant
     let merchants = [
         "Amazon",
@@ -469,7 +496,7 @@ fn test_generate_sample_data() {
             .expect("Failed to append transactions data");
     }
 
-    // ── 7. Logins (correlate source with transactions) ──────────────────────
+    // ── 8. Logins (correlate source with transactions) ──────────────────────
     // Logins share user_ids with transactions and have close timestamps (±30000ms)
     let devices = [
         "iPhone 15",
@@ -515,7 +542,7 @@ fn test_generate_sample_data() {
             .expect("Failed to append logins data");
     }
 
-    // ── 8. Telemetry (sequence: cpu_spike → memory_leak) ────────────────────
+    // ── 9. Telemetry (sequence: cpu_spike → memory_leak) ────────────────────
     let mut telemetry: Vec<(String, String)> = Vec::with_capacity(66);
     for batch in 0..11 {
         // Each batch: normal events, then cpu_spike, then memory_leak
@@ -552,7 +579,7 @@ fn test_generate_sample_data() {
             .expect("Failed to append telemetry data");
     }
 
-    // ── 9. Auth events (sequence: 3x login_fail) ────────────────────────────
+    // ── 10. Auth events (sequence: 3x login_fail) ───────────────────────────
     let mut auth_events: Vec<(String, String)> = Vec::with_capacity(66);
     for batch in 0..10 {
         let base_ts = 200000 + batch * 70000;
@@ -592,7 +619,7 @@ fn test_generate_sample_data() {
             .expect("Failed to append auth events");
     }
 
-    // ── 10. Prompts (chain root for prompts→responses→memory) ──────────────
+    // ── 11. Prompts (chain root for prompts→responses→memory) ──────────────
     let mut prompts: Vec<(String, String)> = Vec::with_capacity(65);
     for i in 1..=65 {
         let key = format!("prompt_{:03}", i);
@@ -619,7 +646,7 @@ fn test_generate_sample_data() {
             .expect("Failed to append prompts data");
     }
 
-    // ── 11. Responses (chain hop 1: prompts → responses via prompt_id) ─────
+    // ── 12. Responses (chain hop 1: prompts → responses via prompt_id) ─────
     // Key = prompt_id value so chain("responses", "prompt_id") resolves
     let mut responses: Vec<(String, String)> = Vec::with_capacity(65);
     for i in 1..=65 {
@@ -640,7 +667,7 @@ fn test_generate_sample_data() {
             .expect("Failed to append responses data");
     }
 
-    // ── 12. Memory (chain hop 2: prompts→responses→memory via response_id) ─
+    // ── 13. Memory (chain hop 2: prompts→responses→memory via response_id) ─
     // Key = response_id value so chain("memory", "response_id") resolves
     let mut memories: Vec<(String, String)> = Vec::with_capacity(65);
     for i in 1..=65 {
@@ -658,17 +685,19 @@ fn test_generate_sample_data() {
             .expect("Failed to append memory data");
     }
 
-    // ── 13. Orders (chain root for orders→shipments→deliveries) ────────────
+    // ── 14. Orders (chain root for orders→shipments→deliveries) ────────────
     let mut orders: Vec<(String, String)> = Vec::with_capacity(65);
     for i in 1..=65 {
         let key = format!("order_{:03}", i);
         let user_idx = ((i * 7) % 20) + 1;
         let user_id = format!("user_{:03}", user_idx);
+        let customer_idx = ((i * 11) % 25) + 1;
+        let customer_id = format!("cust_{:03}", customer_idx);
         let items = (i % 5) + 1;
         let amount_f = (i as f64 * 29.99) % 500.0 + 15.0;
         let ts = 400000 + i * 300;
         let json = format!(
-            r#"{{"order_id": "{key}", "user_id": "{user_id}", "total": {amount_f:.2}, "currency": "USD", "items": {items}, "timestamp": {ts}}}"#
+            r#"{{"order_id": "{key}", "user_id": "{user_id}", "customer_id": "{customer_id}", "total": {amount_f:.2}, "currency": "USD", "items": {items}, "timestamp": {ts}}}"#
         );
         orders.push((key, json));
     }
@@ -678,7 +707,7 @@ fn test_generate_sample_data() {
             .expect("Failed to append orders data");
     }
 
-    // ── 14. Shipments (chain hop 1: orders → shipments via order_id) ───────
+    // ── 15. Shipments (chain hop 1: orders → shipments via order_id) ───────
     // Key = order_id value so chain("shipments", "order_id") resolves
     let carriers = ["FedEx", "UPS", "USPS", "DHL", "Amazon Logistics"];
     let mut shipments: Vec<(String, String)> = Vec::with_capacity(65);
@@ -706,7 +735,7 @@ fn test_generate_sample_data() {
             .expect("Failed to append shipments data");
     }
 
-    // ── 15. Deliveries (chain hop 2: orders→shipments→deliveries via shipment_id) ─
+    // ── 16. Deliveries (chain hop 2: orders→shipments→deliveries via shipment_id) ─
     // Key = shipment_id value so chain("deliveries", "shipment_id") resolves
     let mut deliveries: Vec<(String, String)> = Vec::with_capacity(65);
     for i in 1..=65 {
@@ -737,8 +766,12 @@ fn test_generate_sample_data() {
 
     println!("\n🔍 Relationship data summary:");
     println!(
-        "   users ........... {:>3} records  (enrich source)",
+        "   users ........... {:>3} records  (enrich source for prompts via user_id)",
         users.len()
+    );
+    println!(
+        "   customers ...... {:>3} records  (enrich target for orders via customer_id)",
+        customers.len()
     );
     println!(
         "   transactions ... {:>3} records  (correlate partner with logins)",
@@ -757,27 +790,27 @@ fn test_generate_sample_data() {
         auth_events.len()
     );
     println!(
-        "   prompts ........ {:>3} records  (chain root → responses → memory)",
+        "   prompts ........ {:>3} records  (chain root → responses → memory; enrich source via user_id)",
         prompts.len()
     );
     println!(
-        "   responses ...... {:>3} records  (chain hop 1)",
+        "   responses ...... {:>3} records  (chain hop 1: responses keyed by prompt_id)",
         responses.len()
     );
     println!(
-        "   memory ......... {:>3} records  (chain hop 2)",
+        "   memory ......... {:>3} records  (chain hop 2: memory keyed by response_id)",
         memories.len()
     );
     println!(
-        "   orders ......... {:>3} records  (chain root → shipments → deliveries)",
+        "   orders ......... {:>3} records  (chain root → shipments → deliveries; enrich source via customer_id)",
         orders.len()
     );
     println!(
-        "   shipments ...... {:>3} records  (chain hop 1)",
+        "   shipments ...... {:>3} records  (chain hop 1: shipments keyed by order_id)",
         shipments.len()
     );
     println!(
-        "   deliveries ..... {:>3} records  (chain hop 2)",
+        "   deliveries ..... {:>3} records  (chain hop 2: deliveries keyed by shipment_id)",
         deliveries.len()
     );
 

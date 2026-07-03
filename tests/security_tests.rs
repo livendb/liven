@@ -96,6 +96,7 @@ async fn test_auth_key_handshake_lifecycle() {
 
     // Build configuration
     let config = AppConfig {
+        version: env!("CARGO_PKG_VERSION").to_string(),
         server: ServerConfig {
             environment: "test".to_string(),
             host: "127.0.0.1".to_string(),
@@ -218,6 +219,7 @@ async fn test_rest_auth_key_challenge_login_lifecycle() {
 
     // Build configuration
     let config = AppConfig {
+        version: env!("CARGO_PKG_VERSION").to_string(),
         server: ServerConfig {
             environment: "test".to_string(),
             host: "127.0.0.1".to_string(),
@@ -632,6 +634,7 @@ async fn test_session_role_downgrade_takes_effect_immediately() {
     let master_key_str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
     let config = AppConfig {
+        version: env!("CARGO_PKG_VERSION").to_string(),
         server: ServerConfig {
             environment: "test".to_string(),
             host: "127.0.0.1".to_string(),

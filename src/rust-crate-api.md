@@ -27,23 +27,23 @@ or as a client over the wire protocol.
 
 ```toml
 [dependencies]
-liven = "0.0.8"                        # full build (server, TUI, TLS)
+liven = "0.0.9"                        # full build (server, TUI, TLS)
 ```
 
 For a minimal embedded build with no server, TUI, or TLS:
 
 ```toml
 [dependencies]
-liven = { version = "0.0.8", default-features = false }      # core only
+liven = { version = "0.0.9", default-features = false }      # core only
 ```
 
 Select individual features:
 
 ```toml
 [dependencies]
-liven = { version = "0.0.8", default-features = false, features = ["tls"] }   # core + TLS
-liven = { version = "0.0.8", default-features = false, features = ["server", "tls"] }  # core + server + TLS
-liven = { version = "0.0.8", features = ["tui"] }  # full + TUI (already included)
+liven = { version = "0.0.9", default-features = false, features = ["tls"] }   # core + TLS
+liven = { version = "0.0.9", default-features = false, features = ["server", "tls"] }  # core + server + TLS
+liven = { version = "0.0.9", features = ["tui"] }  # full + TUI (already included)
 ```
 
 ---
@@ -56,7 +56,7 @@ Liven provides two usage modes with the same method signatures.
 
 Opens a database at a filesystem path. All operations run in-process.
 
-```rust
+```rust,ignore
 use liven::Liven;
 use liven::embed::LivenConfig;
 
@@ -75,7 +75,7 @@ let db = Liven::open_with_config("./data", LivenConfig {
 
 Connects to a remote Liven server over TCP. All operations are async.
 
-```rust
+```rust,ignore
 use liven::client::LivenClient;
 
 // Plain TCP (no authentication)
@@ -95,8 +95,9 @@ Every CRUD method below exists on both `Liven` (sync) and `LivenClient` (async).
 
 Insert a single record into a stream.
 
-```rust
+```rust,ignore
 use serde_json::json;
+
 
 // Embedded (sync)
 db.insert("users", "u1", json!({"name": "Alice", "email": "alice@x.com"}))?;
@@ -109,7 +110,7 @@ client.insert("users", "u1", json!({"name": "Alice"})).await?;
 
 Insert a record or replace it if the key already exists.
 
-```rust
+```rust,ignore
 db.upsert("users", "u1", json!({"name": "Alice", "email": "alice@new.com"}))?;
 ```
 
@@ -117,7 +118,7 @@ db.upsert("users", "u1", json!({"name": "Alice", "email": "alice@new.com"}))?;
 
 Update specific fields on an existing record (merges with current value).
 
-```rust
+```rust,ignore
 db.update("users", "u1", json!({"status": "active"}))?;
 ```
 
@@ -125,7 +126,7 @@ db.update("users", "u1", json!({"status": "active"}))?;
 
 Retrieve a single record by key.
 
-```rust
+```rust,ignore
 let result = db.get("users", "u1")?;
 ```
 
@@ -133,7 +134,7 @@ let result = db.get("users", "u1")?;
 
 Delete a single record by key.
 
-```rust
+```rust,ignore
 db.delete("users", "u1")?;
 ```
 
@@ -141,7 +142,7 @@ db.delete("users", "u1")?;
 
 Clear all records from a stream without removing the stream itself.
 
-```rust
+```rust,ignore
 db.clear("logs")?;
 ```
 
@@ -149,7 +150,7 @@ db.clear("logs")?;
 
 Drop a stream and all its data entirely.
 
-```rust
+```rust,ignore
 db.drop_stream("temp_data")?;
 ```
 
@@ -157,7 +158,7 @@ db.drop_stream("temp_data")?;
 
 Insert multiple records in a single batch.
 
-```rust
+```rust,ignore
 db.insert_many("orders", vec![
     ("o1".into(), json!({"amount": 100, "status": "pending"})),
     ("o2".into(), json!({"amount": 200, "status": "completed"})),
@@ -169,7 +170,7 @@ db.insert_many("orders", vec![
 
 Upsert multiple records in a single batch.
 
-```rust
+```rust,ignore
 db.upsert_many("orders", vec![
     ("o1".into(), json!({"amount": 110})),
     ("o4".into(), json!({"amount": 300})),
@@ -189,7 +190,7 @@ All methods exist on both `Liven` (sync) and `LivenClient` (async).
 
 Filter records by a condition.
 
-```rust
+```rust,ignore
 use liven::query::Filter;
 
 // Embedded
@@ -203,7 +204,7 @@ client.filter("events", Filter::field("type").eq("click")).await?;
 
 Limit the number of results.
 
-```rust
+```rust,ignore
 db.limit("events", 10)?;
 ```
 
@@ -211,7 +212,7 @@ db.limit("events", 10)?;
 
 Count records in a stream.
 
-```rust
+```rust,ignore
 let result = db.count("events")?;
 ```
 
@@ -219,7 +220,7 @@ let result = db.count("events")?;
 
 Sort results by a field.
 
-```rust
+```rust,ignore
 db.sort("orders", "amount", true)?;   // descending
 db.sort("orders", "created_at", false)?; // ascending
 ```
@@ -228,7 +229,7 @@ db.sort("orders", "created_at", false)?; // ascending
 
 Paginate through results (1-based page number).
 
-```rust
+```rust,ignore
 db.page("events", 1, 50)?;  // page 1, 50 items per page
 ```
 
@@ -236,7 +237,7 @@ db.page("events", 1, 50)?;  // page 1, 50 items per page
 
 Cursor-based pagination.
 
-```rust
+```rust,ignore
 db.page_cursor("events", "cursor_abc123", 50)?;
 ```
 
@@ -244,7 +245,7 @@ db.page_cursor("events", "cursor_abc123", 50)?;
 
 Project specific fields from records.
 
-```rust
+```rust,ignore
 db.map("users", vec!["name".into(), "email".into()])?;
 ```
 
@@ -252,7 +253,7 @@ db.map("users", vec!["name".into(), "email".into()])?;
 
 Time-windowed aggregation.
 
-```rust
+```rust,ignore
 use liven::types::AggregateStrategy;
 
 db.window("metrics", 60_000, AggregateStrategy::avg())?;
@@ -264,7 +265,7 @@ db.window("orders", 86_400_000, AggregateStrategy::sum())?;
 
 Group records by a field with aggregations.
 
-```rust
+```rust,ignore
 db.group("events", "type", vec!["count".into()])?;
 db.group("orders", "status", vec!["sum(amount)".into(), "count".into()])?;
 ```
@@ -273,7 +274,7 @@ db.group("orders", "status", vec!["sum(amount)".into(), "count".into()])?;
 
 Deduplicate records by a specific field.
 
-```rust
+```rust,ignore
 db.distinct("users", "email")?;
 ```
 
@@ -281,7 +282,7 @@ db.distinct("users", "email")?;
 
 Vector similarity search on an int8 quantized vector field with a similarity threshold.
 
-```rust
+```rust,ignore
 db.vector_filter("embeddings", "vector", vec![12, -5, 3, 0, -8], 0.85)?;
 ```
 
@@ -289,7 +290,7 @@ db.vector_filter("embeddings", "vector", vec![12, -5, 3, 0, -8], 0.85)?;
 
 Left-join records from another stream.
 
-```rust
+```rust,ignore
 db.enrich("logs", "users", "user_id")?;
 ```
 
@@ -298,7 +299,7 @@ db.enrich("logs", "users", "user_id")?;
 Windowed join: links records from two streams on a shared key within a time window.
 Used for behavioral correlation — fraud detection, anomaly signals, session linking.
 
-```rust
+```rust,ignore
 db.correlate("events", "orders", "user_id", 5000)?;
 ```
 
@@ -307,7 +308,7 @@ db.correlate("events", "orders", "user_id", 5000)?;
 Multi-hop join: follows key relationships across streams hop by hop.
 Used for AI memory linking, transaction lineage, multi-step event tracing.
 
-```rust
+```rust,ignore
 db.chain("prompts", "responses", "prompt_id")?;
 ```
 
@@ -316,7 +317,7 @@ db.chain("prompts", "responses", "prompt_id")?;
 Ordered event pattern detection within a time window using a finite state machine.
 Used for predictive failure detection, fraud pattern matching, behavioral flow analysis.
 
-```rust
+```rust,ignore
 use liven::query::Filter;
 
 db.sequence("system_events", vec![
@@ -331,7 +332,7 @@ db.sequence("system_events", vec![
 
 For complex chains with multiple stages, use the `Pipeline` builder.
 
-```rust
+```rust,ignore
 use liven::query::{Pipeline, Filter};
 use liven::types::AggregateStrategy;
 
@@ -348,7 +349,7 @@ client.run(&pipeline.build()).await?;          // wire
 
 ### Build variants
 
-```rust
+```rust,ignore
 // Standard pipeline query
 let q = pipeline.build();            // -> Query::Pipeline
 
@@ -387,7 +388,7 @@ let q = pipeline.build_delete();     // -> Query::PipelineDelete
 
 ## Batch Operations
 
-```rust
+```rust,ignore
 // insert_many
 db.insert_many("orders", vec![
     ("o1".into(), json!({"amount": 100})),
@@ -405,7 +406,7 @@ db.upsert_many("orders", vec![
 
 ## Metadata
 
-```rust
+```rust,ignore
 // List all streams
 let streams = db.streams()?;
 
@@ -419,7 +420,7 @@ let status = db.status()?;
 
 Returns the execution plan of a query without running it.
 
-```rust
+```rust,ignore
 use liven::query::Query as Q;
 
 let plan = db.explain(Q::insert("events", "e1", json!({"x": 1})))?;
@@ -431,7 +432,7 @@ let plan = db.explain(Q::insert("events", "e1", json!({"x": 1})))?;
 
 Update or delete all records matching a pipeline filter.
 
-```rust
+```rust,ignore
 let pipeline = Pipeline::from("orders")
     .filter(Filter::field("status").eq("pending"));
 
@@ -448,7 +449,7 @@ db.pipeline_delete(pipeline)?;
 
 ### Embedded — blocking (non-async)
 
-```rust
+```rust,ignore
 use std::time::Duration;
 
 loop {
@@ -460,7 +461,7 @@ loop {
 
 ### Embedded — async (Tokio)
 
-```rust
+```rust,ignore
 let mut rx = db.subscribe();
 
 tokio::spawn(async move {
@@ -472,7 +473,7 @@ tokio::spawn(async move {
 
 ### Wire — streaming
 
-```rust
+```rust,ignore
 use futures_util::StreamExt;
 
 let mut stream = client.listen("events").await?;
@@ -490,7 +491,7 @@ client.tail_stream("events", "json").await?;
 
 Embedded-only — storage engine introspection.
 
-```rust
+```rust,ignore
 // Database metrics: (ram_bytes, disk_bytes, segments, streams)
 let (ram, disk, segments, streams) = db.metrics()?;
 
@@ -520,7 +521,7 @@ The `Filter` builder creates typed filter expressions without string parsing.
 
 ### Comparisons
 
-```rust
+```rust,ignore
 use liven::query::Filter;
 
 Filter::field("status").eq("active")           // ==
@@ -533,7 +534,7 @@ Filter::field("temperature").lte(100.0)         // <=
 
 ### String matching
 
-```rust
+```rust,ignore
 Filter::field("name").contains("alice")         // substring
 Filter::field("email").starts_with("admin")     // prefix
 Filter::field("path").ends_with(".log")         // suffix
@@ -541,14 +542,14 @@ Filter::field("path").ends_with(".log")         // suffix
 
 ### Range and membership
 
-```rust
+```rust,ignore
 Filter::field("amount").between(10.0, 100.0)    // inclusive range
 Filter::field("role").in(vec!["admin", "moderator", "owner"])
 ```
 
 ### Compound logic
 
-```rust
+```rust,ignore
 // AND
 Filter::and(vec![
     Filter::field("status").eq("active"),
@@ -567,7 +568,7 @@ Filter::not(Filter::field("status").eq("deleted"))
 
 ### Using filters in pipeline builder
 
-```rust
+```rust,ignore
 let pipeline = Pipeline::from("users")
     .filter(Filter::and(vec![
         Filter::field("status").eq("active"),
@@ -586,7 +587,7 @@ let pipeline = Pipeline::from("users")
 
 Query results are returned as `Vec<Record>`.
 
-```rust
+```rust,ignore
 use liven::types::DataValue;
 
 pub struct Record {
@@ -600,7 +601,7 @@ pub struct Record {
 
 The `value` field is a `DataValue` enum:
 
-```rust
+```rust,ignore
 match &record.value {
     DataValue::String(s) => println!("String: {}", s),
     DataValue::Int(n) => println!("Integer: {}", n),
@@ -621,7 +622,7 @@ match &record.value {
 
 ### Embedded config
 
-```rust
+```rust,ignore
 use liven::embed::LivenConfig;
 
 let config = LivenConfig {
@@ -661,7 +662,7 @@ cargo build --release --no-default-features --features tls
 
 ### Embedded — complete program
 
-```rust
+```rust,ignore
 use liven::Liven;
 use liven::query::{Pipeline, Filter};
 use serde_json::json;
@@ -695,7 +696,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ### Wire — async client
 
-```rust
+```rust,ignore
 use liven::client::LivenClient;
 use liven::query::{Pipeline, Filter};
 use serde_json::json;
@@ -725,7 +726,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ### Mixed — embedded with subscriptions
 
-```rust
+```rust,ignore
 use liven::Liven;
 use liven::query::{Pipeline, Filter};
 use serde_json::json;

@@ -198,6 +198,7 @@ async fn test_ztna_development_mode() {
     let port = 45221;
 
     let config = AppConfig {
+        version: env!("CARGO_PKG_VERSION").to_string(),
         server: ServerConfig {
             environment: "development".to_string(),
             host: "127.0.0.1".to_string(),
@@ -275,6 +276,7 @@ async fn test_ztna_production_mode_cleartext_rejected() {
     let port = 45223;
 
     let config = AppConfig {
+        version: env!("CARGO_PKG_VERSION").to_string(),
         server: ServerConfig {
             environment: "production".to_string(),
             host: "127.0.0.1".to_string(),
@@ -392,6 +394,7 @@ async fn test_ztna_production_mode_mtls_success_with_filtering() {
     let port = 45225;
 
     let config = AppConfig {
+        version: env!("CARGO_PKG_VERSION").to_string(),
         server: ServerConfig {
             environment: "production".to_string(),
             host: "127.0.0.1".to_string(),

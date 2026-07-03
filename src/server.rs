@@ -2152,6 +2152,7 @@ async fn system_config_handler(
 
     // Return only essential configuration that UI needs (no sensitive data)
     let response = serde_json::json!({
+        "version": config.version,
         "webui_port": config.server.webui_port,
         "db_port": config.server.db_port,
         "security": {

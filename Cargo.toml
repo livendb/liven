@@ -1,6 +1,6 @@
 [package]
 name = "liven"
-version = "0.0.8"
+version = "0.0.9"
 edition = "2024"
 license = "SSPL-1.0"
 description = "LIVEN is a fast, lightweight database built to capture, store, and stream data in real time."
@@ -31,12 +31,13 @@ path = "src/main.rs"
 
 [features]
 default = ["full"]
-full = ["server", "tui", "tls"]
+full = ["server", "tui"]
 server = [
     "dep:axum",
     "dep:tower-http",
     "dep:rust-embed",
     "dep:mime_guess",
+    "tls",
 ]
 tui = [
     "dep:ratatui",

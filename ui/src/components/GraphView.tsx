@@ -35,6 +35,7 @@ const STREAM_COLORS: Record<string, string> = {
   telemetry: "#14b8a6",
   auth: "#f97316",
   users: "#6366f1",
+  customers: "#a855f7",
   events: "#0ea5e9",
 };
 

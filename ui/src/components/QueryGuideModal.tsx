@@ -86,6 +86,13 @@ export default function QueryGuideModal({
           <div>
             <h4 className="font-bold text-slate-900 dark:text-white text-2xl flex items-center gap-2.5 tracking-tight">
               Query Guide
+              <a
+                target="_blank"
+                href="https://livendb.com/docs/query"
+                className="pl-2 text-sm text-slate-500 dark:text-zinc-400 font-normal hover:text-orange-600"
+              >
+                Learn more &#9432;
+              </a>
             </h4>
           </div>
           <button

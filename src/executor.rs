@@ -182,6 +182,9 @@ pub fn extract_field(value: &DataValue, field: &str) -> Option<DataValue> {
                 };
             }
         }
+        DataValue::Object(obj) => {
+            return obj.get(field).cloned();
+        }
         _ => {}
     }
     None
@@ -409,6 +412,7 @@ pub fn project_record(record: &mut Record, projections: &[String]) {
     // If source is a JSON-like string, we can project keys from it
     let source_json = match &record.value {
         DataValue::String(s) => serde_json::from_str::<serde_json::Value>(s).ok(),
+        DataValue::Object(_) => Some(datavalue_to_json(&record.value)),
         _ => None,
     };
 
@@ -465,6 +469,7 @@ pub fn enrich_record(
                 DataValue::String(s) => {
                     serde_json::from_str::<serde_json::Value>(s).unwrap_or(serde_json::Value::Null)
                 }
+                DataValue::Object(_) => datavalue_to_json(&record.value),
                 _ => serde_json::Value::Null,
             };
 

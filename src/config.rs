@@ -40,6 +40,10 @@ pub struct ServerConfig {
     pub broadcast_capacity: usize,
 }
 
+fn default_version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
+}
+
 fn default_max_connections() -> usize {
     10000
 }
@@ -133,6 +137,8 @@ fn embedded_security_default() -> SecurityConfig {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AppConfig {
+    #[serde(default = "default_version")]
+    pub version: String,
     pub server: ServerConfig,
     pub storage: StorageConfig,
     #[serde(default = "default_limits")]
@@ -183,6 +189,7 @@ impl AppConfig {
             .add_source(Environment::with_prefix("LIVENDB").separator("__"));
 
         let mut config: Self = builder.build()?.try_deserialize()?;
+        config.version = env!("CARGO_PKG_VERSION").to_string();
 
         // P12: Auto-switch security mode based on environment
         // If user explicitly set security.mode, respect it
@@ -336,6 +343,7 @@ impl AppConfig {
         broadcast_capacity: usize,
     ) -> Self {
         AppConfig {
+            version: env!("CARGO_PKG_VERSION").to_string(),
             server: ServerConfig {
                 environment: "embedded".to_string(),
                 host: "127.0.0.1".to_string(),
