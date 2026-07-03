@@ -20,6 +20,12 @@
   <a href="https://www.npmjs.com/package/@livendb/liven-client">
     <img src="https://img.shields.io/npm/v/@livendb/liven-client?logo=npm" alt="npm">
   </a>
+  <a href="https://pypi.org/project/liven-client">
+    <img src="https://img.shields.io/pypi/v/liven-client?logo=pypi" alt="PyPi">
+  </a>
+  <a href="https://pkg.go.dev/github.com/livendb/liven-go">
+    <img src="https://pkg.go.dev/badge/github.com/livendb/liven-go.svg" alt="Go">
+  </a>
 
 </p>
 
