@@ -12,6 +12,7 @@ cargo test
 ```
 
 For the full stack (including the web dashboard):
+
 ```bash
 cd ui && npm ci --legacy-peer-deps && npm run build && cd ..
 cargo build --release
@@ -53,11 +54,11 @@ We follow standard Rust conventions enforced by `cargo fmt` and `cargo clippy`. 
 
 Liven uses Cargo feature flags for binary size control:
 
-| Feature  | What it enables                  |
-|----------|----------------------------------|
-| `server` | REST API + WebSocket + Web UI    |
-| `tui`    | Interactive terminal dashboard   |
-| `tls`    | mTLS support                     |
+| Feature  | What it enables                |
+| -------- | ------------------------------ |
+| `server` | REST API + WebSocket + Web UI  |
+| `tui`    | Interactive terminal dashboard |
+| `tls`    | mTLS support                   |
 
 The `full` feature enables everything. For embedded use, build with `--no-default-features`.
 
@@ -76,4 +77,4 @@ The `full` feature enables everything. For embedded use, build with `--no-defaul
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the [SSPL 1.0](LICENSE-SSPL).
+By contributing, you agree that your contributions will be licensed under the [Apache License, Version 2.0](LICENSE).

@@ -110,23 +110,23 @@ Add the dependency with the features you need:
 
 ```toml
 [dependencies]
-liven = "0.1.0"                        # full build (server, TUI, TLS)
+liven = "0.1.1"                        # full build (server, TUI, TLS)
 ```
 
 For a minimal embedded build with no server, TUI, or TLS:
 
 ```toml
 [dependencies]
-liven = { version = "0.1.0", default-features = false }      # core only
+liven = { version = "0.1.1", default-features = false }      # core only
 ```
 
 Select individual features:
 
 ```toml
 [dependencies]
-liven = { version = "0.1.0", default-features = false, features = ["tls"] }   # core + TLS
-liven = { version = "0.1.0", default-features = false, features = ["server", "tls"] }  # core + server + TLS
-liven = { version = "0.1.0", features = ["tui"] }  # full + TUI (already included)
+liven = { version = "0.1.1", default-features = false, features = ["tls"] }   # core + TLS
+liven = { version = "0.1.1", default-features = false, features = ["server", "tls"] }  # core + server + TLS
+liven = { version = "0.1.1", features = ["tui"] }  # full + TUI (already included)
 ```
 
 ---
@@ -462,16 +462,11 @@ cargo build --release --no-default-features --features server
 
 ---
 
-## Licensing
+## License
 
-**SSPL 1.0 OR Commercial**
+Licensed under the Apache License, Version 2.0.
 
-- **SSPL** — Free for self-hosting, development, and personal use.
-- **Commercial** — Required for managed services or proprietary embedding.
-
-Contact `team@livendb.com` for commercial licensing.
-
-[**Full license &rarr;**](./LICENSE-SSPL)
+[**Full license &rarr;**](./LICENSE)
 
 ## Contributing
 

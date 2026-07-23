@@ -1,8 +1,8 @@
 [package]
 name = "liven"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
-license = "SSPL-1.0"
+license = "Apache-2.0"
 description = "LIVEN is a fast, lightweight database built to capture, store, and stream data in real time."
 homepage = "https://livendb.com"
 documentation = "https://docs.rs/liven"
@@ -122,7 +122,7 @@ maintainer-scripts = "debian"
 [package.metadata.generate-rpm]
 summary = "LIVEN High-Performance Storage Engine"
 description = "High-performance storage engine with ZTNA and mTLS support"
-license = "SSPL-1.0"
+license = "Apache-2.0"
 release = "1"
 packager = "LIVEN Maintainers <team@livendb.com>"
 assets = [
