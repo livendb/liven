@@ -8,9 +8,44 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::SystemTime;
+use std::time::{Duration, Instant, SystemTime};
 use tokio::sync::broadcast;
 use tracing::{error, info, warn};
+
+/// Controls how `recover()` handles corrupted or truncated segment files.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecoveryMode {
+    /// Safe default: auto-truncate trailing torn writes on the last segment,
+    /// skip broken mid-file frames in inactive segments (log and continue),
+    /// and still start the database. No files are modified on disk — truncation
+    /// stops replay at the last known-good frame boundary but does not rewrite
+    /// the segment file.
+    Default,
+    /// Fail hard on any CRC mismatch or incomplete frame — preserve today's
+    /// behaviour for operators who want to investigate before auto-repairing.
+    Strict,
+    /// Before modifying or skipping any segment, write a full backup copy to
+    /// `{segment_id:020}.liven.repair-{unix_timestamp}`. Then proceed with
+    /// Default-mode recovery (truncate torn writes, skip broken inactive
+    /// segments). Prints a summary report of exactly what was discarded.
+    Repair,
+}
+
+/// Summary of what recovery discarded or skipped, produced after a successful
+/// (non-Strict) recovery that encountered corruption.
+#[derive(Debug, Clone, Default)]
+pub struct RecoveryReport {
+    /// Segments that had a torn write at the end and were truncated to the
+    /// last valid frame boundary.  (segment_id, offset_truncated_to, bytes_discarded).
+    pub truncated_segments: Vec<(u64, u64, u64)>,
+    /// Segments that were skipped entirely because of mid-file corruption.
+    /// (segment_id, offset_of_first_bad_frame, approximate_keys_lost).
+    pub skipped_segments: Vec<(u64, u64, usize)>,
+    /// Backup files created in Repair mode.
+    pub repair_backups: Vec<PathBuf>,
+    /// Whether any recovery action was taken (false for clean startups).
+    pub had_issues: bool,
+}
 
 #[allow(unsafe_code)]
 pub mod key;
@@ -98,6 +133,15 @@ pub struct StorageEngine {
     /// Maximum number of entries to accumulate in one group-commit batch.
     /// Default: 2048.
     pub commit_max_batch_size: usize,
+    /// Controls how corruption is handled during recovery.
+    /// Default: RecoveryMode::Default.
+    pub recovery_mode: RecoveryMode,
+    /// Timeout in seconds for advisory file locks during recovery.
+    /// Default: 5. Set to 0 to disable (block indefinitely).
+    pub lock_timeout_secs: u64,
+    /// Populated after `recover()` completes; contains details of any
+    /// truncation or segment-skipping that occurred.
+    pub recovery_report: Option<RecoveryReport>,
 }
 
 use std::cell::RefCell;
@@ -181,6 +225,9 @@ impl StorageEngine {
             max_scan_results,
             commit_drain_window_us: 5000,
             commit_max_batch_size: 2048,
+            recovery_mode: RecoveryMode::Default,
+            lock_timeout_secs: 5,
+            recovery_report: None,
         };
 
         engine.recover()?;
@@ -299,7 +346,7 @@ impl StorageEngine {
     }
 
     /// Scans the directory and rebuilds the concurrent SkipMap index
-    fn recover(&self) -> crate::error::Result<()> {
+    fn recover(&mut self) -> crate::error::Result<()> {
         let mut segments = Vec::new();
 
         for entry in fs::read_dir(&self.data_dir).map_err(LivenError::Io)? {
@@ -316,23 +363,45 @@ impl StorageEngine {
 
         segments.sort_by_key(|a| a.0);
 
+        // Determine the last (highest-ID) segment for torn-write detection.
+        let last_segment_id = segments.last().map(|(id, _)| *id);
         let mut highest_seq = 0;
         let mut active_id = 1;
 
+        let mut report = RecoveryReport::default();
+
         for (segment_id, path) in &segments {
             active_id = *segment_id;
+            let is_last = Some(*segment_id) == last_segment_id;
+
             let mut file = File::open(path).map_err(LivenError::Io)?;
-            // Coop locking
-            file.lock_shared().map_err(LivenError::Io)?;
+            self.lock_segment_with_timeout(&mut file, *segment_id, path)?;
 
             let file_len = file.metadata().map_err(LivenError::Io)?.len();
+            if file_len == 0 {
+                file.unlock().map_err(LivenError::Io)?;
+                continue;
+            }
             let mut offset = 0;
-
             let mut header_buf = [0u8; 26];
+            let mut segment_corrupted = false;
+            let mut last_good_offset = 0u64;
 
             while offset + 26 <= file_len {
                 file.seek(SeekFrom::Start(offset)).map_err(LivenError::Io)?;
                 if file.read_exact(&mut header_buf).is_err() {
+                    // Partial header at end of file — torn write.
+                    if is_last && offset < file_len {
+                        let discarded = file_len - offset;
+                        warn!(
+                            "Torn header at offset {} in last segment {} ({} bytes discarded). Truncating.",
+                            offset, segment_id, discarded
+                        );
+                        report
+                            .truncated_segments
+                            .push((*segment_id, offset, discarded));
+                        report.had_issues = true;
+                    }
                     break;
                 }
 
@@ -364,40 +433,100 @@ impl StorageEngine {
                     header_buf[20],
                     header_buf[21],
                 ]) as u64;
-                let crc32 = u32::from_be_bytes([
+                let declared_crc = u32::from_be_bytes([
                     header_buf[22],
                     header_buf[23],
                     header_buf[24],
                     header_buf[25],
                 ]);
 
+                // Incomplete payload — torn write
                 if offset + 26 + payload_len > file_len {
-                    warn!(
-                        "Incomplete payload write detected at offset {} in segment {}. Truncating.",
-                        offset, segment_id
-                    );
+                    if is_last {
+                        let discarded = file_len.saturating_sub(offset);
+                        warn!(
+                            "Torn payload at offset {} in last segment {} (declared {} bytes, {} available). Truncating.",
+                            offset,
+                            segment_id,
+                            payload_len,
+                            file_len.saturating_sub(offset + 26)
+                        );
+                        report
+                            .truncated_segments
+                            .push((*segment_id, offset, discarded));
+                        report.had_issues = true;
+                    } else {
+                        warn!(
+                            "Incomplete payload in inactive segment {} at offset {}. Skipping remainder.",
+                            segment_id, offset
+                        );
+                        report.skipped_segments.push((*segment_id, offset, 0));
+                        report.had_issues = true;
+                    }
                     break;
                 }
 
+                // Read payload and verify CRC
                 let mut payload_buf = vec![0u8; payload_len as usize];
                 file.read_exact(&mut payload_buf).map_err(LivenError::Io)?;
 
-                // Verify integrity
                 let actual_crc = crc32fast::hash(&payload_buf);
-                if actual_crc != crc32 {
-                    error!(
-                        "CRC32 checksum mismatch in segment {} at offset {}. Data corruption!",
-                        segment_id, offset
-                    );
-                    return Err(LivenError::CrcMismatch {
-                        segment_id: *segment_id,
-                        offset,
-                    });
+                if actual_crc != declared_crc {
+                    if is_last {
+                        // Last segment + bad CRC near end -> likely torn write
+                        let discarded = file_len.saturating_sub(offset);
+                        if self.recovery_mode == RecoveryMode::Strict {
+                            error!(
+                                "Strict mode: CRC mismatch in last segment {} at offset {}. Aborting.",
+                                segment_id, offset
+                            );
+                            return Err(LivenError::StrictCrcMismatch {
+                                segment_id: *segment_id,
+                                offset,
+                            });
+                        }
+                        self.maybe_backup_for_repair(path, *segment_id, &mut report)?;
+                        warn!(
+                            "CRC mismatch at offset {} in last segment {} - torn write assumed. Truncating to offset {} ({} bytes discarded).",
+                            offset, segment_id, last_good_offset, discarded
+                        );
+                        report
+                            .truncated_segments
+                            .push((*segment_id, last_good_offset, discarded));
+                        report.had_issues = true;
+                        break;
+                    } else {
+                        // Mid-file corruption in inactive segment
+                        if self.recovery_mode == RecoveryMode::Strict {
+                            error!(
+                                "Strict mode: CRC mismatch in segment {} at offset {}. Aborting.",
+                                segment_id, offset
+                            );
+                            return Err(LivenError::StrictCrcMismatch {
+                                segment_id: *segment_id,
+                                offset,
+                            });
+                        }
+                        self.maybe_backup_for_repair(path, *segment_id, &mut report)?;
+                        let approx_keys = self
+                            .skipmap
+                            .iter()
+                            .filter(|e| e.value().segment_id == *segment_id)
+                            .count();
+                        warn!(
+                            "CRC mismatch in inactive segment {} at offset {} - skipping segment (~{} keys potentially affected).",
+                            segment_id, offset, approx_keys
+                        );
+                        report
+                            .skipped_segments
+                            .push((*segment_id, offset, approx_keys));
+                        report.had_issues = true;
+                        segment_corrupted = true;
+                        break;
+                    }
                 }
 
                 // Decode payload to extract stream name and key
-                // Use actual type_tag from header, not hardcoded 0x02,
-                // so vector records (type_tag = 8) are parsed correctly.
                 match deserialize_payload_borrowed(&payload_buf, type_tag) {
                     Ok((stream_name, key, _value)) => {
                         let compound_key = format!("{}:{}", stream_name, key);
@@ -465,18 +594,91 @@ impl StorageEngine {
                         }
                     }
                     Err(e) => {
-                        error!(
-                            "Failed to parse payload in segment {} at offset {}: {}",
-                            segment_id, offset, e
-                        );
-                        return Err(e);
+                        if is_last {
+                            if self.recovery_mode == RecoveryMode::Strict {
+                                error!(
+                                    "Strict mode: unparseable payload in last segment {} at offset {}: {}",
+                                    segment_id, offset, e
+                                );
+                                return Err(e);
+                            }
+                            self.maybe_backup_for_repair(path, *segment_id, &mut report)?;
+                            let discarded = file_len.saturating_sub(offset);
+                            warn!(
+                                "Unparseable payload at offset {} in last segment {} - torn write assumed. Truncating ({} bytes discarded).",
+                                offset, segment_id, discarded
+                            );
+                            report.truncated_segments.push((
+                                *segment_id,
+                                last_good_offset,
+                                discarded,
+                            ));
+                            report.had_issues = true;
+                            break;
+                        } else {
+                            if self.recovery_mode == RecoveryMode::Strict {
+                                error!(
+                                    "Strict mode: unparseable payload in segment {} at offset {}: {}",
+                                    segment_id, offset, e
+                                );
+                                return Err(e);
+                            }
+                            self.maybe_backup_for_repair(path, *segment_id, &mut report)?;
+                            let approx_keys = self
+                                .skipmap
+                                .iter()
+                                .filter(|entry| entry.value().segment_id == *segment_id)
+                                .count();
+                            warn!(
+                                "Unparseable payload in inactive segment {} at offset {} - skipping segment (~{} keys affected).",
+                                segment_id, offset, approx_keys
+                            );
+                            report
+                                .skipped_segments
+                                .push((*segment_id, offset, approx_keys));
+                            report.had_issues = true;
+                            segment_corrupted = true;
+                            break;
+                        }
                     }
                 }
 
-                offset += 26 + payload_len;
+                last_good_offset = offset + 26 + payload_len;
+                offset = last_good_offset;
             }
 
             file.unlock().map_err(LivenError::Io)?;
+
+            // If this segment was corrupted mid-file, evict skipmap entries
+            // that may have been added from earlier frames in this segment.
+            if segment_corrupted {
+                let keys_to_remove: Vec<String> = self
+                    .skipmap
+                    .iter()
+                    .filter(|e| e.value().segment_id == *segment_id)
+                    .map(|e| e.key().clone())
+                    .collect();
+                for key in &keys_to_remove {
+                    if self.skipmap.remove(key).is_some() {
+                        let overhead = key.len() as u64 + 64;
+                        self.index_ram_bytes.fetch_sub(overhead, Ordering::SeqCst);
+                    }
+                }
+            }
+
+            // Detect trailing bytes after last complete frame (torn write
+            // that leaves a partial header between frame boundaries).
+            if !segment_corrupted && is_last && offset < file_len {
+                let discarded = file_len - offset;
+                warn!(
+                    "Trailing bytes after last frame in segment {} (offset {}, {} bytes discarded). Truncating.",
+                    segment_id, offset, discarded
+                );
+                report
+                    .truncated_segments
+                    .push((*segment_id, offset, discarded));
+                report.had_issues = true;
+            }
         }
 
         self.current_sequence_id
@@ -496,9 +698,32 @@ impl StorageEngine {
 
         let mut active_file_guard = self.active_file.lock().unwrap();
         let mut active_size_guard = self.active_size.lock().unwrap();
-
         *active_file_guard = Some(file);
         *active_size_guard = active_len;
+
+        // Log recovery summary if any issues were found
+        if report.had_issues {
+            warn!(
+                "RECOVERY REPORT: {} truncated segment(s), {} skipped segment(s).",
+                report.truncated_segments.len(),
+                report.skipped_segments.len()
+            );
+            for (seg_id, off, discarded) in &report.truncated_segments {
+                warn!(
+                    "  Truncated segment {} at offset {}, {} bytes discarded",
+                    seg_id, off, discarded
+                );
+            }
+            for (seg_id, off, keys) in &report.skipped_segments {
+                warn!(
+                    "  Skipped segment {} (corrupted at offset {}, ~{} keys affected)",
+                    seg_id, off, keys
+                );
+            }
+            for backup in &report.repair_backups {
+                warn!("  Repair backup: {}", backup.display());
+            }
+        }
 
         info!(
             "LIVEN Engine started. Active Segment ID: {}, Next Sequence ID: {}, Index Entries: {}",
@@ -507,6 +732,63 @@ impl StorageEngine {
             self.skipmap.len()
         );
 
+        self.recovery_report = Some(report);
+
+        Ok(())
+    }
+
+    /// Attempts to acquire a shared advisory lock on `file` with a timeout.
+    /// If `lock_timeout_secs` is 0, blocks indefinitely.
+    fn lock_segment_with_timeout(
+        &self,
+        file: &mut File,
+        segment_id: u64,
+        path: &Path,
+    ) -> crate::error::Result<()> {
+        if self.lock_timeout_secs == 0 {
+            return file.lock_shared().map_err(LivenError::Io);
+        }
+        let deadline = Instant::now() + Duration::from_secs(self.lock_timeout_secs);
+        loop {
+            match file.try_lock_shared() {
+                Ok(()) => return Ok(()),
+                Err(_) => {
+                    if Instant::now() >= deadline {
+                        let path_str = path.display().to_string();
+                        return Err(LivenError::SegmentLockTimeout {
+                            segment_id,
+                            path: path_str,
+                        });
+                    }
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+            }
+        }
+    }
+
+    /// In Repair mode, creates a timestamped backup copy before recovery actions.
+    fn maybe_backup_for_repair(
+        &self,
+        path: &Path,
+        segment_id: u64,
+        report: &mut RecoveryReport,
+    ) -> crate::error::Result<()> {
+        if self.recovery_mode != RecoveryMode::Repair {
+            return Ok(());
+        }
+        let timestamp = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let backup_name = format!("{:020}.liven.repair-{}", segment_id, timestamp);
+        let backup_path = self.data_dir.join(&backup_name);
+        fs::copy(path, &backup_path).map_err(LivenError::Io)?;
+        info!(
+            "Repair backup: {} -> {}",
+            path.display(),
+            backup_path.display()
+        );
+        report.repair_backups.push(backup_path);
         Ok(())
     }
 

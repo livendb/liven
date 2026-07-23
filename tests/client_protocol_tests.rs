@@ -30,7 +30,7 @@ async fn test_client_protocol_prefixes() {
 
     // Build configuration with no auth to make prefix testing trivial
     let config = AppConfig {
-        version: "0.0.9".to_string(),
+        version: "0.1.0".to_string(),
         server: ServerConfig {
             environment: "test".to_string(),
             host: "127.0.0.1".to_string(),
@@ -112,7 +112,7 @@ async fn test_client_listen_stream() {
     let port = 45147;
 
     let config = AppConfig {
-        version: "0.0.9".to_string(),
+        version: "0.1.0".to_string(),
         server: ServerConfig {
             environment: "test".to_string(),
             host: "127.0.0.1".to_string(),

@@ -466,3 +466,166 @@ fn test_recovery_stream_limit_excludes_tombstoned_streams() {
 
     let _ = std::fs::remove_dir_all(&path);
 }
+
+// ---------- Recovery Mode Tests ----------
+
+#[test]
+fn test_recovery_torn_write_truncation() {
+    let path = std::env::temp_dir().join(format!(
+        "liven_torn_write_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _ = std::fs::remove_dir_all(&path);
+
+    // Write valid data
+    {
+        let engine = StorageEngine::new(&path, 1024 * 1024).unwrap();
+        engine
+            .append("test", "k1", DataValue::String("v1".to_string()), false)
+            .unwrap();
+        engine
+            .append("test", "k2", DataValue::Int(42), false)
+            .unwrap();
+        engine
+            .append("test", "k3", DataValue::String("v3".to_string()), false)
+            .unwrap();
+    }
+
+    // Find the segment and truncate it mid-frame to simulate a torn write
+    let mut segment_files: Vec<_> = std::fs::read_dir(&path)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("liven"))
+        .collect();
+    segment_files.sort_by_key(|e| e.file_name());
+
+    if let Some(last_seg) = segment_files.last() {
+        let seg_path = last_seg.path();
+        let original_len = std::fs::metadata(&seg_path).unwrap().len();
+        assert!(original_len > 100, "Need enough data; got {}", original_len);
+        // Truncate to 50 bytes - guaranteed mid-frame with 3 records
+        let trunc_len = 50u64;
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&seg_path)
+            .unwrap();
+        file.set_len(trunc_len).unwrap();
+    }
+
+    // Recover
+    let engine = StorageEngine::new(&path, 1024 * 1024).unwrap();
+
+    assert!(engine.recovery_report.is_some());
+    let report = engine.recovery_report.as_ref().unwrap();
+    assert!(
+        report.had_issues,
+        "Expected recovery issues after torn write"
+    );
+    assert!(
+        !report.truncated_segments.is_empty(),
+        "Expected truncation, got: {:?}",
+        report
+    );
+
+    let k1 = engine.get("test", "k1").unwrap();
+    assert!(k1.is_some(), "k1 should survive truncation");
+
+    let _ = std::fs::remove_dir_all(&path);
+}
+
+#[test]
+fn test_recovery_mid_file_corruption_skips_segment() {
+    let path = std::env::temp_dir().join(format!(
+        "liven_mid_corrupt_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _ = std::fs::remove_dir_all(&path);
+
+    // Create multiple segments with small segment size
+    {
+        let engine = StorageEngine::new(&path, 120).unwrap();
+        engine
+            .append("stream_a", "a1", DataValue::Int(1), false)
+            .unwrap();
+        engine
+            .append("stream_a", "a2", DataValue::Int(2), false)
+            .unwrap();
+        engine
+            .append("stream_b", "b1", DataValue::Int(3), false)
+            .unwrap();
+        engine
+            .append("stream_b", "b2", DataValue::Int(4), false)
+            .unwrap();
+    }
+
+    // Corrupt a byte in the first segment
+    let mut segment_files: Vec<_> = std::fs::read_dir(&path)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("liven"))
+        .collect();
+    segment_files.sort_by_key(|e| e.file_name());
+
+    if segment_files.len() >= 2 {
+        let first_path = segment_files.first().unwrap().path();
+        let mut data = std::fs::read(&first_path).unwrap();
+        if data.len() > 30 {
+            // Corrupt CRC bytes of first frame
+            data[22] ^= 0xFF;
+            data[23] ^= 0xFF;
+            std::fs::write(&first_path, &data).unwrap();
+        }
+    }
+
+    // Recover - should skip corrupted segment and still start
+    let engine = StorageEngine::new(&path, 1024 * 1024).unwrap();
+
+    assert!(engine.recovery_report.is_some());
+    let report = engine.recovery_report.as_ref().unwrap();
+    assert!(
+        report.had_issues,
+        "Expected recovery issues after corruption"
+    );
+    assert!(
+        !report.skipped_segments.is_empty() || !report.truncated_segments.is_empty(),
+        "Expected skipped or truncated segments, got: {:?}",
+        report
+    );
+
+    let _ = std::fs::remove_dir_all(&path);
+}
+
+#[test]
+fn test_recovery_clean_startup_no_report_issues() {
+    let path = std::env::temp_dir().join(format!(
+        "liven_clean_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _ = std::fs::remove_dir_all(&path);
+
+    {
+        let engine = StorageEngine::new(&path, 1024 * 1024).unwrap();
+        engine
+            .append("test", "k1", DataValue::Int(100), false)
+            .unwrap();
+    }
+
+    let engine = StorageEngine::new(&path, 1024 * 1024).unwrap();
+    assert!(engine.recovery_report.is_some());
+    let report = engine.recovery_report.as_ref().unwrap();
+    assert!(!report.had_issues, "Clean startup should report no issues");
+    assert!(report.truncated_segments.is_empty());
+    assert!(report.skipped_segments.is_empty());
+    assert!(report.repair_backups.is_empty());
+
+    let _ = std::fs::remove_dir_all(&path);
+}

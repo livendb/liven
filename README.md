@@ -39,7 +39,7 @@ Liven is a database built for data that moves. It ingests streaming data, transf
 # Install via crates.io
 cargo install liven
 
-# One-liner install 
+# One-liner install
 curl --proto '=https' --tlsv1.2 -sSfL https://livendb.com/install | sh
 
 # Install via Docker
@@ -57,15 +57,18 @@ liven start
 Databases today make you choose: batch or stream? Historical or real-time? Key-value or vector? Liven was built to erase those lines.
 
 **One query language, two modes:**
+
 - Historical queries against stored data
 - Real-time subscriptions on the same pipeline — just add `.listen()`
 
 **One engine, three deployment models:**
+
 - Embedded library (~1.5 MB) — runs inside your Rust process
 - Network server — TCP + WebSocket, thousands of clients
 - Interactive TUI or web dashboard — for ad-hoc queries and monitoring
 
 **Built-in capabilities that usually require separate systems:**
+
 - Vector similarity search (int8 quantized, cosine similarity)
 - Stream joins (time-bounded correlate, multi-hop chain)
 - Event pattern detection (sequence FSM)
@@ -77,7 +80,7 @@ Databases today make you choose: batch or stream? Historical or real-time? Key-v
 ## Quick Start
 
 ```bash
-# One-liner install 
+# One-liner install
 curl --proto '=https' --tlsv1.2 -sSfL https://livendb.com/install | sh
 
 # Or via Docker
@@ -107,23 +110,23 @@ Add the dependency with the features you need:
 
 ```toml
 [dependencies]
-liven = "0.0.9"                        # full build (server, TUI, TLS)
+liven = "0.1.0"                        # full build (server, TUI, TLS)
 ```
 
 For a minimal embedded build with no server, TUI, or TLS:
 
 ```toml
 [dependencies]
-liven = { version = "0.0.9", default-features = false }      # core only
+liven = { version = "0.1.0", default-features = false }      # core only
 ```
 
 Select individual features:
 
 ```toml
 [dependencies]
-liven = { version = "0.0.9", default-features = false, features = ["tls"] }   # core + TLS
-liven = { version = "0.0.9", default-features = false, features = ["server", "tls"] }  # core + server + TLS
-liven = { version = "0.0.9", features = ["tui"] }  # full + TUI (already included)
+liven = { version = "0.1.0", default-features = false, features = ["tls"] }   # core + TLS
+liven = { version = "0.1.0", default-features = false, features = ["server", "tls"] }  # core + server + TLS
+liven = { version = "0.1.0", features = ["tui"] }  # full + TUI (already included)
 ```
 
 ---
@@ -132,10 +135,10 @@ liven = { version = "0.0.9", features = ["tui"] }  # full + TUI (already include
 
 Liven provides two usage modes via the same unified method signatures:
 
-| Mode | Initialization | Runtime |
-|------|---------------|---------|
-| **Embedded** | `Liven::open("./data")?` | In-process, no server needed |
-| **Wire** | `LivenClient::connect("127.0.0.1:43121").await?` | Remote server over TCP |
+| Mode         | Initialization                                   | Runtime                      |
+| ------------ | ------------------------------------------------ | ---------------------------- |
+| **Embedded** | `Liven::open("./data")?`                         | In-process, no server needed |
+| **Wire**     | `LivenClient::connect("127.0.0.1:43121").await?` | Remote server over TCP       |
 
 Both modes expose the same methods (`insert`, `get`, `filter`, `enrich`, etc.) —
 the embedded versions are synchronous, the wire versions are async.
@@ -376,22 +379,22 @@ flowchart LR
 Reproducible benchmarks run inside a pinned Docker image (`x86-64-v2` CPU features)
 to ensure consistent results across hardware.
 
-| Operation | Performance | Notes |
-|-----------|-------------|-------|
-| **Point lookup** (existing key) | **~2.3 µs** | Microsecond, independent of dataset size |
-| **Point lookup** (missing key) | **~65 ns** | Near-zero cost (hash miss) |
-| **Range index** (timestamp) | **~88 ns** | Billion elements/second |
-| **Full scan** | **~600–700K** elem/s | Linear, predictable throughput |
-| **Scan with limit** | **~67M** elem/s | Short-circuits after limit |
-| **Append** (single) | **~5 ms** | Fsync-bound per operation |
-| **Append** (batch 500) | **~707K** ops/s | **Batch for throughput** |
-| **Upsert** (new key) | **~5.3 ms** | Same cost as append |
-| **Upsert** (existing key) | **~10.7 ms** | Includes tombstone write |
-| **Compaction** | **~500–570 µs** | Sub-linear growth |
-| **Parse** (simple) | **~437 ns** | Not a bottleneck |
-| **Parse** (complex) | **~1.15 µs** | Still sub-microsecond |
-| **Vector lookup** (quantized 512d) | **223 MiB/s** | 9× faster than msgpack |
-| **Wire encode** (16 KB) | **15 GiB/s** | Far beyond network limits |
+| Operation                          | Performance          | Notes                                    |
+| ---------------------------------- | -------------------- | ---------------------------------------- |
+| **Point lookup** (existing key)    | **~2.3 µs**          | Microsecond, independent of dataset size |
+| **Point lookup** (missing key)     | **~65 ns**           | Near-zero cost (hash miss)               |
+| **Range index** (timestamp)        | **~88 ns**           | Billion elements/second                  |
+| **Full scan**                      | **~600–700K** elem/s | Linear, predictable throughput           |
+| **Scan with limit**                | **~67M** elem/s      | Short-circuits after limit               |
+| **Append** (single)                | **~5 ms**            | Fsync-bound per operation                |
+| **Append** (batch 500)             | **~707K** ops/s      | **Batch for throughput**                 |
+| **Upsert** (new key)               | **~5.3 ms**          | Same cost as append                      |
+| **Upsert** (existing key)          | **~10.7 ms**         | Includes tombstone write                 |
+| **Compaction**                     | **~500–570 µs**      | Sub-linear growth                        |
+| **Parse** (simple)                 | **~437 ns**          | Not a bottleneck                         |
+| **Parse** (complex)                | **~1.15 µs**         | Still sub-microsecond                    |
+| **Vector lookup** (quantized 512d) | **223 MiB/s**        | 9× faster than msgpack                   |
+| **Wire encode** (16 KB)            | **15 GiB/s**         | Far beyond network limits                |
 
 ### Run benchmarks
 
@@ -414,12 +417,12 @@ Docker runner: [`Dockerfile.bench`](./Dockerfile.bench), [`run-bench.sh`](./run-
 
 Symmetric keys with BLAKE3 hashing. Four role levels:
 
-| Role | Read | Insert | Delete | Admin |
-|------|------|--------|--------|-------|
-| `read-only` | ✅ | ❌ | ❌ | ❌ |
-| `write` | ✅ | ✅ | ❌ | ❌ |
-| `write-delete` | ✅ | ✅ | ✅ | ❌ |
-| `admin` | ✅ | ✅ | ✅ | ✅ |
+| Role           | Read | Insert | Delete | Admin |
+| -------------- | ---- | ------ | ------ | ----- |
+| `read-only`    | ✅   | ❌     | ❌     | ❌    |
+| `write`        | ✅   | ✅     | ❌     | ❌    |
+| `write-delete` | ✅   | ✅     | ✅     | ❌    |
+| `admin`        | ✅   | ✅     | ✅     | ✅    |
 
 Keys can be generated, revoked, and role-changed at runtime via the Web UI or REST API — no server restart required.
 
@@ -439,12 +442,12 @@ Liven uses Cargo feature flags for modular builds.
 
 The `default` feature enables everything by pulling in `full`, which bundles all three optional capabilities.
 
-| Feature  | What's included                                 |
-|----------|-------------------------------------------------|
-| `full`   | All features below (enabled by default)          |
-| `server` | REST API + WebSocket + embedded Web UI + mTLS   |
-| `tui`    | Interactive terminal dashboard                   |
-| `tls`    | mTLS support with X.509 certificates             |
+| Feature  | What's included                               |
+| -------- | --------------------------------------------- |
+| `full`   | All features below (enabled by default)       |
+| `server` | REST API + WebSocket + embedded Web UI + mTLS |
+| `tui`    | Interactive terminal dashboard                |
+| `tls`    | mTLS support with X.509 certificates          |
 
 ```sh
 # Minimal embedded build (no server, no TUI, no TLS)

@@ -27,23 +27,23 @@ or as a client over the wire protocol.
 
 ```toml
 [dependencies]
-liven = "0.0.9"                        # full build (server, TUI, TLS)
+liven = "0.1.0"                        # full build (server, TUI, TLS)
 ```
 
 For a minimal embedded build with no server, TUI, or TLS:
 
 ```toml
 [dependencies]
-liven = { version = "0.0.9", default-features = false }      # core only
+liven = { version = "0.1.0", default-features = false }      # core only
 ```
 
 Select individual features:
 
 ```toml
 [dependencies]
-liven = { version = "0.0.9", default-features = false, features = ["tls"] }   # core + TLS
-liven = { version = "0.0.9", default-features = false, features = ["server", "tls"] }  # core + server + TLS
-liven = { version = "0.0.9", features = ["tui"] }  # full + TUI (already included)
+liven = { version = "0.1.0", default-features = false, features = ["tls"] }   # core + TLS
+liven = { version = "0.1.0", default-features = false, features = ["server", "tls"] }  # core + server + TLS
+liven = { version = "0.1.0", features = ["tui"] }  # full + TUI (already included)
 ```
 
 ---
@@ -365,24 +365,24 @@ let q = pipeline.build_delete();     // -> Query::PipelineDelete
 
 ### Builder stages
 
-| Method | PipelineStage | Description |
-|--------|--------------|-------------|
-| `.filter(f)` | `Filter` | Filter by condition |
-| `.get(key)` | `Get` | Get by key |
-| `.map(fields)` | `Map` | Field projection |
-| `.limit(n)` | `Limit` | Limit results |
-| `.count()` | `Count` | Count results |
-| `.sort(field, desc)` | `Sort` | Sort by field |
-| `.page(n, size)` | `Page` | Paginate |
-| `.page_cursor(c, size)` | `PageCursor` | Cursor pagination |
-| `.window(ms, strategy)` | `Window` | Time-windowed aggregation |
-| `.group(field, aggs)` | `Group` | Group by field |
-| `.distinct(field)` | `Distinct` | Deduplicate |
-| `.vector_filter(field, vec, threshold)` | `VectorFilter` | Vector similarity |
-| `.enrich(stream, key)` | `Enrich` | Left join |
-| `.correlate(stream, key, ms)` | `Correlate` | Windowed join |
-| `.chain(stream, key)` | `Chain` | Multi-hop join |
-| `.sequence(steps, ms)` | `Sequence` | Event pattern FSM |
+| Method                                  | PipelineStage  | Description               |
+| --------------------------------------- | -------------- | ------------------------- |
+| `.filter(f)`                            | `Filter`       | Filter by condition       |
+| `.get(key)`                             | `Get`          | Get by key                |
+| `.map(fields)`                          | `Map`          | Field projection          |
+| `.limit(n)`                             | `Limit`        | Limit results             |
+| `.count()`                              | `Count`        | Count results             |
+| `.sort(field, desc)`                    | `Sort`         | Sort by field             |
+| `.page(n, size)`                        | `Page`         | Paginate                  |
+| `.page_cursor(c, size)`                 | `PageCursor`   | Cursor pagination         |
+| `.window(ms, strategy)`                 | `Window`       | Time-windowed aggregation |
+| `.group(field, aggs)`                   | `Group`        | Group by field            |
+| `.distinct(field)`                      | `Distinct`     | Deduplicate               |
+| `.vector_filter(field, vec, threshold)` | `VectorFilter` | Vector similarity         |
+| `.enrich(stream, key)`                  | `Enrich`       | Left join                 |
+| `.correlate(stream, key, ms)`           | `Correlate`    | Windowed join             |
+| `.chain(stream, key)`                   | `Chain`        | Multi-hop join            |
+| `.sequence(steps, ms)`                  | `Sequence`     | Event pattern FSM         |
 
 ---
 
@@ -641,12 +641,12 @@ let db = Liven::open_with_config("./data", config)?;
 
 ### Feature flags
 
-| Feature | What's included |
-|---------|----------------|
-| `full` | All features below (default) |
+| Feature  | What's included                        |
+| -------- | -------------------------------------- |
+| `full`   | All features below (default)           |
 | `server` | REST API + WebSocket + embedded Web UI |
-| `tui` | Interactive terminal dashboard |
-| `tls` | mTLS support with X.509 certificates |
+| `tui`    | Interactive terminal dashboard         |
+| `tls`    | mTLS support with X.509 certificates   |
 
 ```sh
 # Minimal embedded build

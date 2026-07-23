@@ -100,6 +100,17 @@ pub enum LivenError {
     /// The flusher thread terminated unexpectedly.
     #[error("ring buffer flusher terminated")]
     FlusherTerminated,
+
+    // ── Recovery ──────────────────────────────────────────────────
+    /// A segment file could not be locked within the configured timeout.
+    #[error("timed out locking segment {segment_id} at {path} (lock held by another process?)")]
+    SegmentLockTimeout { segment_id: u64, path: String },
+
+    /// Strict recovery mode: a CRC mismatch was detected and recovery was aborted.
+    #[error(
+        "strict mode: CRC mismatch in segment {segment_id} at offset {offset} — recovery aborted. Use default mode to auto-truncate or --repair to create a backup first."
+    )]
+    StrictCrcMismatch { segment_id: u64, offset: u64 },
 }
 
 pub type Result<T> = std::result::Result<T, LivenError>;
