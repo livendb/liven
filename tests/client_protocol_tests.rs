@@ -60,9 +60,6 @@ async fn test_client_protocol_prefixes() {
         },
     };
 
-    // Build configuration with no auth to make prefix testing trivial
-    let config2 = AppConfig {
-        version: "0.1.1".to_string(),
     // Spin up storage engine
     let engine = Arc::new(StorageEngine::new(&config.storage.data_directory, 1024 * 1024).unwrap());
 
