@@ -419,7 +419,7 @@ export default function Dashboard({
                 <span
                   className={`w-1.5 h-1.5 rounded-full ${wsConnected ? "bg-accent animate-pulse" : "bg-rose-500"}`}
                 />
-                <span>Sync: 0.24ms latency</span>
+                <span>Writes: {metrics.sequence_id.toLocaleString()}</span>
               </div>
             </div>
           </div>

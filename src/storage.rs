@@ -117,6 +117,9 @@ pub struct StorageEngine {
     compaction_counter: Arc<AtomicU64>,
     pub compaction_threshold_segments: usize,
     pub compaction_threshold_bytes: u64,
+    /// Dedicated monotonic counter for segment file IDs.
+    /// Incremented on each segment rollover, independent of the sequence ID.
+    pub segment_id_counter: Arc<AtomicU64>,
     /// Serialises operations that do a read-check-then-write.
     /// Held by: InsertBatch, DeleteKey, PipelineDelete (full scan path),
     /// PipelineUpdate. NOT held by single Insert or Upsert (last-writer-wins).
@@ -154,6 +157,17 @@ thread_local! {
 
 impl StorageEngine {
     pub fn new<P: AsRef<Path>>(data_dir: P, max_segment_size: u64) -> crate::error::Result<Self> {
+        Self::new_with_recovery_mode(data_dir, max_segment_size, RecoveryMode::Default)
+    }
+
+    /// Like `new()`, but with an explicit `RecoveryMode`.
+    /// Use `RecoveryMode::Strict` to fail hard on any corruption during recovery,
+    /// or `RecoveryMode::Repair` to auto-backup and truncate.
+    pub fn new_with_recovery_mode<P: AsRef<Path>>(
+        data_dir: P,
+        max_segment_size: u64,
+        recovery_mode: RecoveryMode,
+    ) -> crate::error::Result<Self> {
         let path = data_dir.as_ref().to_path_buf();
         fs::create_dir_all(&path).map_err(LivenError::Io)?;
 
@@ -192,6 +206,7 @@ impl StorageEngine {
         // These can be overridden via config or LivenConfig before the engine is used.
         let compaction_threshold_segments = 4;
         let compaction_threshold_bytes = 64 * 1024 * 1024;
+        let segment_id_counter = Arc::new(AtomicU64::new(1));
         let timestamp_indexes = Arc::new(Mutex::new(HashMap::new()));
 
         let mut engine = Self {
@@ -219,23 +234,34 @@ impl StorageEngine {
             compaction_counter: compaction_counter.clone(),
             compaction_threshold_segments,
             compaction_threshold_bytes,
+            segment_id_counter: segment_id_counter.clone(),
             write_lock: write_lock.clone(),
             timestamp_indexes: timestamp_indexes.clone(),
             flusher_handle: None,
             max_scan_results,
             commit_drain_window_us: 5000,
             commit_max_batch_size: 2048,
-            recovery_mode: RecoveryMode::Default,
+            recovery_mode,
             lock_timeout_secs: 5,
             recovery_report: None,
         };
 
         engine.recover()?;
 
+        // Initialize segment_id_counter to max(existing_segment_ids) + 1.
+        // The recover() method already identifies the highest segment ID, so
+        // we seed the counter from active_segment_id + 1 so the next rollover
+        // produces a strictly greater ID.
+        let max_seen_id = engine.active_segment_id.load(Ordering::SeqCst);
+        engine
+            .segment_id_counter
+            .store(max_seen_id + 1, Ordering::SeqCst);
+
         let flusher_data_dir = engine.data_dir.clone();
         let flusher_max_size = engine.max_segment_size;
         let flusher_seq = current_sequence_id;
         let flusher_active_id = active_segment_id;
+        let flusher_segment_id_counter = segment_id_counter.clone();
         let flusher_file = active_file.clone();
         let flusher_size = active_size;
         let flusher_skipmap = skipmap;
@@ -255,6 +281,7 @@ impl StorageEngine {
                 flusher_max_size,
                 flusher_seq,
                 flusher_active_id,
+                flusher_segment_id_counter,
                 flusher_file,
                 flusher_size,
                 flusher_skipmap,
@@ -310,6 +337,77 @@ impl StorageEngine {
         self.max_connections = limit;
         self.conn_semaphore = Arc::new(tokio::sync::Semaphore::new(limit));
         self
+    }
+
+    /// Set the recovery mode before `recover()` is called during construction.
+    /// Use before calling `new()` via the builder pattern, or call on the
+    /// returned engine before any writes.
+    pub fn with_recovery_mode(mut self, mode: RecoveryMode) -> Self {
+        self.recovery_mode = mode;
+        self
+    }
+
+    /// Run recovery in the given mode, print the report, and return without
+    /// starting any server or flusher thread.  This is an offline maintenance
+    /// operation — no writes are accepted.
+    pub fn repair<P: AsRef<Path>>(
+        data_dir: P,
+        max_segment_size: u64,
+        mode: RecoveryMode,
+    ) -> crate::error::Result<RecoveryReport> {
+        let path = data_dir.as_ref().to_path_buf();
+        fs::create_dir_all(&path).map_err(LivenError::Io)?;
+
+        // Minimal engine construction — only what recover() needs.
+        let skipmap = Arc::new(SkipMap::new());
+        let index_ram_bytes = Arc::new(AtomicU64::new(0));
+        let streams_set = Arc::new(Mutex::new(HashSet::new()));
+        let file_handles = Arc::new(Mutex::new(HashMap::new()));
+        let timestamp_indexes = Arc::new(Mutex::new(HashMap::new()));
+        let active_segment_id = Arc::new(AtomicU64::new(1));
+
+        let mut engine = Self {
+            data_dir: path,
+            max_segment_size,
+            current_sequence_id: Arc::new(AtomicU64::new(1)),
+            active_segment_id: active_segment_id.clone(),
+            active_file: Arc::new(Mutex::new(None)),
+            active_size: Arc::new(Mutex::new(0)),
+            skipmap: skipmap.clone(),
+            broadcast_tx: broadcast::channel(4096).0,
+            file_handles,
+            ring_buffer: {
+                let (tx, _rx) = std::sync::mpsc::sync_channel(2048);
+                ring_buffer::LogRingBuffer::new(tx)
+            },
+            sync_mode: String::new(),
+            sync_interval_ms: 0,
+            is_running: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            max_streams: 32,
+            max_fds: 64,
+            max_index_ram_bytes: 16 * 1024 * 1024,
+            index_ram_bytes: index_ram_bytes.clone(),
+            streams_set: streams_set.clone(),
+            max_connections: 1,
+            broadcast_capacity: 4096,
+            conn_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
+            compaction_counter: Arc::new(AtomicU64::new(u64::MAX / 2)),
+            compaction_threshold_segments: 4,
+            compaction_threshold_bytes: 64 * 1024 * 1024,
+            segment_id_counter: Arc::new(AtomicU64::new(1)),
+            write_lock: Arc::new(Mutex::new(())),
+            timestamp_indexes,
+            flusher_handle: None,
+            max_scan_results: 100_000,
+            commit_drain_window_us: 5000,
+            commit_max_batch_size: 2048,
+            recovery_mode: mode,
+            lock_timeout_secs: 5,
+            recovery_report: None,
+        };
+
+        engine.recover()?;
+        Ok(engine.recovery_report.clone().unwrap_or_default())
     }
 
     /// Gets the next monotonic sequence ID
@@ -1474,6 +1572,20 @@ impl StorageEngine {
         Ok((ram_usage, total_size, segment_count, total_streams))
     }
 
+    /// Returns true if the flusher thread is still running (has not exited or panicked).
+    pub fn is_flusher_alive(&self) -> bool {
+        self.is_running.load(Ordering::Relaxed)
+            && self
+                .flusher_handle
+                .as_ref()
+                .is_some_and(|h| !h.is_finished())
+    }
+
+    /// Returns the recovery report, if one was produced during startup.
+    pub fn recovery_report(&self) -> Option<&RecoveryReport> {
+        self.recovery_report.as_ref()
+    }
+
     /// Scan historical records within a time range using the timestamp index.
     /// Returns records with timestamps in [start_ms, end_ms] inclusive.
     pub fn scan_by_time_range(
@@ -1528,6 +1640,7 @@ fn run_flusher_loop(
     max_segment_size: u64,
     current_sequence_id: Arc<AtomicU64>,
     active_segment_id: Arc<AtomicU64>,
+    segment_id_counter: Arc<AtomicU64>,
     active_file: Arc<Mutex<Option<File>>>,
     active_size: Arc<Mutex<u64>>,
     skipmap: Arc<SkipMap<String, LogPointer>>,
@@ -1594,6 +1707,7 @@ fn run_flusher_loop(
             max_segment_size,
             &current_sequence_id,
             &active_segment_id,
+            &segment_id_counter,
             &active_file,
             &active_size,
             &skipmap,
@@ -1629,6 +1743,7 @@ fn execute_batch_append(
     max_segment_size: u64,
     current_sequence_id: &Arc<AtomicU64>,
     active_segment_id: &Arc<AtomicU64>,
+    segment_id_counter: &Arc<AtomicU64>,
     active_file: &Arc<Mutex<Option<File>>>,
     active_size: &Arc<Mutex<u64>>,
     skipmap: &Arc<SkipMap<String, LogPointer>>,
@@ -1789,7 +1904,7 @@ fn execute_batch_append(
             let _ = old_file.sync_all();
         }
 
-        let new_active_id = current_sequence_id.load(Ordering::SeqCst);
+        let new_active_id = segment_id_counter.fetch_add(1, Ordering::SeqCst);
         active_segment_id.store(new_active_id, Ordering::SeqCst);
 
         let new_path = data_dir.join(format!("{:020}.liven", new_active_id));

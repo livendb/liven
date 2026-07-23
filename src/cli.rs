@@ -35,7 +35,7 @@ fn print_usage() {
     println!("\x1b[0m");
     println!("\x1b[36m LIVEN CLI\x1b[0m");
     println!("Usage:");
-    println!("  liven start [--no-ui]   Start the database server");
+    println!("  liven start [--no-ui] [--repair] [--strict-recovery]   Start the database server");
     println!("  liven stop              Stop the running database server");
     println!("  liven status            Check the status of the database server");
     println!("  liven list [--auth-key <value>] List all available database streams");
@@ -54,6 +54,12 @@ fn print_usage() {
     println!();
     println!("Options:");
     println!("  --no-ui                Disable starting the Web UI");
+    println!(
+        "  --repair               Offline repair: backup and truncate corrupted segments, print report, exit"
+    );
+    println!(
+        "  --strict-recovery      Fail hard on any CRC mismatch during recovery (investigate manually)"
+    );
 }
 
 struct PidCleanup;
@@ -231,6 +237,49 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
         }
         #[cfg(feature = "server")]
         "start" => {
+            let is_repair = args.contains(&"--repair".to_string());
+            let is_strict = args.contains(&"--strict-recovery".to_string());
+            let run_ui = !args.contains(&"--no-ui".to_string());
+
+            // --repair is an offline maintenance operation — no server starts.
+            if is_repair {
+                let config = liven::config::AppConfig::load()
+                    .map_err(|e| format!("Failed to load config: {}", e))?;
+                let data_directory = &config.storage.data_directory;
+                let max_segment_size = config.storage.max_segment_size_mb * 1024 * 1024;
+
+                println!("Running repair on data directory: {}", data_directory);
+                let report = storage::StorageEngine::repair(
+                    data_directory,
+                    max_segment_size as u64,
+                    storage::RecoveryMode::Repair,
+                )?;
+
+                println!("\n=== Repair Report ===");
+                if report.had_issues {
+                    println!("Issues found and handled:");
+                    for (seg_id, offset, discarded) in &report.truncated_segments {
+                        println!(
+                            "  Segment {} truncated at offset {} ({} bytes discarded)",
+                            seg_id, offset, discarded
+                        );
+                    }
+                    for (seg_id, offset, keys) in &report.skipped_segments {
+                        println!(
+                            "  Segment {} skipped (corrupted at offset {}, ~{} keys affected)",
+                            seg_id, offset, keys
+                        );
+                    }
+                    for backup in &report.repair_backups {
+                        println!("  Backup written: {}", backup.display());
+                    }
+                } else {
+                    println!("No issues found — all segments are intact.");
+                }
+                println!("Repair complete.");
+                exit(0);
+            }
+
             // Check if already running
             if is_server_running()
                 && let Ok(pid) = read_pid()
@@ -241,8 +290,6 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                 );
                 exit(1);
             }
-
-            let run_ui = !args.contains(&"--no-ui".to_string());
 
             info!("Starting LIVEN Server...");
 
@@ -267,7 +314,16 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
 
             // Initialize StorageEngine with threshold from config
             let max_segment_size = config.storage.max_segment_size_mb * 1024 * 1024;
-            let mut engine = storage::StorageEngine::new(data_directory, max_segment_size as u64)?;
+            let recovery_mode = if is_strict {
+                storage::RecoveryMode::Strict
+            } else {
+                storage::RecoveryMode::Default
+            };
+            let mut engine = storage::StorageEngine::new_with_recovery_mode(
+                data_directory,
+                max_segment_size as u64,
+                recovery_mode,
+            )?;
 
             // Apply configuration limits
             engine.set_max_streams(config.limits.max_concurrent_streams);

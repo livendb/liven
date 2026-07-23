@@ -114,6 +114,7 @@ pub struct ClientIdentity {
 
 pub struct ActiveNativeConnection {
     pub auth_key_hash: String,
+    pub role: String,
     pub close_tx: Option<tokio::sync::oneshot::Sender<()>>,
 }
 
@@ -408,30 +409,49 @@ pub async fn run_server(
         }
     }
 
-    // Background checker task to instantly locate and close connections when keys are revoked
+    // Background checker task to instantly locate and close connections when keys
+    // are revoked or their role is changed.
     let engine_for_check = engine.clone();
     let state_for_check = state.clone();
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
-            let hashes_to_check: Vec<String> = {
+            let conns_snapshot: Vec<(String, String)> = {
                 let conns = state_for_check.active_connections.lock().unwrap();
-                conns.iter().map(|c| c.auth_key_hash.clone()).collect()
+                conns
+                    .iter()
+                    .map(|c| (c.auth_key_hash.clone(), c.role.clone()))
+                    .collect()
             };
 
-            for hash in hashes_to_check {
-                let is_active = if state_for_check.config.security.mode == "none" {
-                    true
-                } else {
-                    match lookup_key_by_hash(&engine_for_check, &hash) {
-                        Some(rec) => rec.status == "active",
-                        None => false,
-                    }
-                };
+            for (hash, stored_role) in conns_snapshot {
+                if state_for_check.config.security.mode == "none" {
+                    continue;
+                }
 
-                if !is_active {
-                    kill_active_connections_for_hash(&state_for_check, &hash);
+                match lookup_key_by_hash(&engine_for_check, &hash) {
+                    Some(rec) => {
+                        // Kill connection if key was revoked.
+                        if rec.status != "active" {
+                            kill_active_connections_for_hash(&state_for_check, &hash);
+                            continue;
+                        }
+                        // Kill connection if role was downgraded/changed.
+                        if rec.role != stored_role {
+                            tracing::info!(
+                                "Role changed for key {} from '{}' to '{}' — closing connections",
+                                rec.key_id,
+                                stored_role,
+                                rec.role
+                            );
+                            kill_active_connections_for_hash(&state_for_check, &hash);
+                        }
+                    }
+                    None => {
+                        // Key no longer exists in auth_keys — revoke.
+                        kill_active_connections_for_hash(&state_for_check, &hash);
+                    }
                 }
             }
         }
@@ -623,6 +643,11 @@ pub async fn run_server(
                                                             auth_key_hash: identity
                                                                 .auth_key_hash
                                                                 .clone(),
+                                                            role: lookup_role_for_key_id(
+                                                                &state_clone.engine,
+                                                                &identity.client_cn,
+                                                            )
+                                                            .unwrap_or_default(),
                                                             close_tx: Some(close_tx),
                                                         });
                                                     }
@@ -727,6 +752,7 @@ pub async fn run_server(
                                                     let mut conns = state.active_connections.lock().unwrap();
                                                     conns.push(ActiveNativeConnection {
                                                         auth_key_hash: auth_rec.auth_key.clone(),
+                                                        role: auth_rec.role.clone(),
                                                         close_tx: Some(close_tx),
                                                     });
                                                 }
@@ -1076,27 +1102,41 @@ async fn ws_handler(
     AxumQuery(params): AxumQuery<WsParams>,
     headers: HeaderMap,
 ) -> impl IntoResponse {
-    if state.config.security.mode == "auth_key" {
-        let mut authorized = if let Some(token) = params.token {
+    // Extract session token and role for per-query re-validation
+    let (session_token, session_role) = if state.config.security.mode == "auth_key" {
+        let token = if let Some(t) = params.token {
             let sessions = state.sessions.lock().unwrap();
-            sessions.contains_key(&token)
-        } else {
-            false
-        };
-
-        if !authorized && let Some(cookie_val) = extract_session_cookie(&headers) {
+            if sessions.contains_key(&t) {
+                Some(t)
+            } else {
+                None
+            }
+        } else if let Some(cookie_val) = extract_session_cookie(&headers) {
             let sessions = state.sessions.lock().unwrap();
             if sessions.contains_key(&cookie_val) {
-                authorized = true;
+                Some(cookie_val)
+            } else {
+                None
             }
-        }
+        } else {
+            None
+        };
 
-        if !authorized {
+        if let Some(tok) = token {
+            let sessions = state.sessions.lock().unwrap();
+            let role = sessions
+                .get(&tok)
+                .map(|s| s.role.clone())
+                .unwrap_or_default();
+            (Some(tok), role)
+        } else {
             return (StatusCode::UNAUTHORIZED, "Unauthorized").into_response();
         }
-    }
+    } else {
+        (None, "admin".to_string())
+    };
 
-    ws.on_upgrade(move |socket| handle_socket(socket, state))
+    ws.on_upgrade(move |socket| handle_socket(socket, state, session_token, session_role))
 }
 
 #[derive(Deserialize)]
@@ -1128,12 +1168,35 @@ enum WsResponse {
     Error { message: String },
 }
 
-async fn handle_socket(socket: WebSocket, state: Arc<ServerState>) {
+async fn handle_socket(
+    socket: WebSocket,
+    state: Arc<ServerState>,
+    session_token: Option<String>,
+    session_role: String,
+) {
     let (sender, mut receiver) = socket.split();
     let sender = Arc::new(tokio::sync::Mutex::new(sender));
     let sender_for_stats = sender.clone();
     let sender_for_query = sender.clone();
     let engine_metrics = state.engine.clone();
+
+    // Register this WebSocket connection in active_connections so the background
+    // checker can evict it if the key is revoked or role changes.
+    let (close_tx, close_rx) = tokio::sync::oneshot::channel::<()>();
+    let auth_key_hash_for_conn = if let Some(ref token) = session_token {
+        let hash = blake3::hash(token.as_bytes());
+        Some(crate::security::hex_encode(hash.as_bytes()))
+    } else {
+        None
+    };
+    if let Some(ref hash) = auth_key_hash_for_conn {
+        let mut conns = state.active_connections.lock().unwrap();
+        conns.push(ActiveNativeConnection {
+            auth_key_hash: hash.clone(),
+            role: session_role.clone(),
+            close_tx: Some(close_tx),
+        });
+    }
 
     // Spawn stats broadcast loop
     let mut stats_interval = tokio::time::interval(Duration::from_millis(1000));
@@ -1253,28 +1316,73 @@ async fn handle_socket(socket: WebSocket, state: Arc<ServerState>) {
         }
     });
 
-    while let Some(Ok(msg)) = receiver.next().await {
-        if let Message::Text(txt) = msg
-            && let Ok(req) = serde_json::from_str::<WsRequest>(&txt)
-        {
-            match req {
-                WsRequest::Query { query } => {
-                    let _ = query_tx.send(query).await;
-                }
-                WsRequest::Ping => {
-                    let resp = WsResponse::Pong;
-                    if let Ok(msg_str) = serde_json::to_string(&resp) {
-                        let mut sender_guard = sender.lock().await;
-                        if sender_guard.send(Message::Text(msg_str)).await.is_err() {
-                            break;
+    // Per-query capability check: verify the session role is still valid before
+    // forwarding each WsRequest::Query to the processing task.
+    let mut capabilities = capabilities_for_role(&session_role);
+
+    let mut close_rx_fused = close_rx;
+    loop {
+        tokio::select! {
+            msg = receiver.next() => {
+                match msg {
+                    Some(Ok(Message::Text(txt))) => {
+                        if let Ok(req) = serde_json::from_str::<WsRequest>(&txt) {
+                            match req {
+                                WsRequest::Query { query } => {
+                                    // Re-validate session before every query.
+                                    if let Some(ref token) = session_token {
+                                        let sessions = state.sessions.lock().unwrap();
+                                        if let Some(session) = sessions.get(token) {
+                                            let current_role = session.role.clone();
+                                            if current_role != session_role {
+                                                break;
+                                            }
+                                            capabilities = capabilities_for_role(&current_role);
+                                        } else {
+                                            break;
+                                        }
+                                    }
+
+                                    if !check_query_capabilities(&query, capabilities) {
+                                        let resp = WsResponse::Error {
+                                            message: "Insufficient capabilities for this query".to_string(),
+                                        };
+                                        if let Ok(msg_str) = serde_json::to_string(&resp) {
+                                            let mut sender_guard = sender.lock().await;
+                                            let _ = sender_guard.send(Message::Text(msg_str)).await;
+                                        }
+                                    } else {
+                                        let _ = query_tx.send(query).await;
+                                    }
+                                }
+                                WsRequest::Ping => {
+                                    let resp = WsResponse::Pong;
+                                    if let Ok(msg_str) = serde_json::to_string(&resp) {
+                                        let mut sender_guard = sender.lock().await;
+                                        if sender_guard.send(Message::Text(msg_str)).await.is_err() {
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
+                    Some(Ok(Message::Close(_))) => break,
+                    _ => break,
                 }
+            }
+            _ = &mut close_rx_fused => {
+                break;
             }
         }
     }
 
     let _ = stats_cancel_tx.send(());
+    // Remove from active_connections on close.
+    if let Some(ref hash) = auth_key_hash_for_conn {
+        let mut conns = state.active_connections.lock().unwrap();
+        conns.retain(|c| c.auth_key_hash != *hash);
+    }
 }
 
 // REST endpoints
@@ -2078,18 +2186,81 @@ async fn list_streams_handler(
     (StatusCode::OK, slide_headers, Json(streams)).into_response()
 }
 
+/// Query parameters for the health endpoint.
+#[derive(Deserialize)]
+struct HealthParams {
+    /// "live" for liveness (always fast, no engine checks).
+    /// "ready" (or omitted) for readiness (engine health checks).
+    #[serde(default = "default_health_type")]
+    r#type: String,
+}
+
+fn default_health_type() -> String {
+    "ready".to_string()
+}
+
 async fn health_handler(
     State(state): State<Arc<ServerState>>,
-    headers: HeaderMap,
+    AxumQuery(params): AxumQuery<HealthParams>,
 ) -> impl IntoResponse {
-    if !is_request_from_ui(&headers, &state.config.server) {
-        return StatusCode::NOT_FOUND.into_response();
+    let status_body = serde_json::json!({"status": "healthy"});
+
+    match params.r#type.as_str() {
+        "live" => {
+            // Liveness: always fast, just confirm the HTTP server is responsive.
+            (StatusCode::OK, Json(status_body)).into_response()
+        }
+        _ => {
+            // Readiness: check engine health.
+
+            // 1. Flusher thread must be alive.
+            if !state.engine.is_flusher_alive() {
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    Json(serde_json::json!({
+                        "status": "unhealthy",
+                        "reason": "flusher thread is not running"
+                    })),
+                )
+                    .into_response();
+            }
+
+            // 2. Write lock must not be stuck (non-blocking try).
+            if state.engine.write_lock.try_lock().is_err() {
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    Json(serde_json::json!({
+                        "status": "unhealthy",
+                        "reason": "write lock is held — possible stuck writer"
+                    })),
+                )
+                    .into_response();
+            }
+            // Drop the lock guard immediately so we don't hold it.
+            drop(state.engine.write_lock.try_lock());
+
+            // 3. If recovery had issues, surface them in the response body.
+            //    The DB is still healthy (it recovered), but operators should know.
+            if let Some(report) = state.engine.recovery_report()
+                && report.had_issues
+            {
+                return (
+                    StatusCode::OK,
+                    Json(serde_json::json!({
+                        "status": "healthy",
+                        "recovery": {
+                            "truncated_segments": report.truncated_segments.len(),
+                            "skipped_segments": report.skipped_segments.len(),
+                            "repair_backups": report.repair_backups.len(),
+                        }
+                    })),
+                )
+                    .into_response();
+            }
+
+            (StatusCode::OK, Json(status_body)).into_response()
+        }
     }
-    (
-        StatusCode::OK,
-        Json(serde_json::json!({ "status": "healthy" })),
-    )
-        .into_response()
 }
 
 async fn heartbeat_handler(
