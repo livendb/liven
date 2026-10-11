@@ -155,6 +155,25 @@ thread_local! {
     static FRAME_BUFFER: RefCell<Vec<u8>> = RefCell::new(Vec::with_capacity(256 * 1024));
 }
 
+/// Maximum stream-name length (in bytes) that a single stream-scoped scan will
+/// attempt to resolve from the payload prefix before falling back to reading the
+/// full payload. Stream names are the first field of every payload.
+const STREAM_PEEK_CAP: usize = 128;
+
+/// Decode the fixed 26-byte on-disk frame header.
+///
+/// Layout: `seq_id(8) | timestamp(8) | type_tag(1) | flags(1) | payload_len(4) | crc32(4)`.
+#[inline]
+fn decode_frame_header(h: &[u8]) -> (u64, i64, u8, u8, usize, u32) {
+    let seq_id = u64::from_be_bytes([h[0], h[1], h[2], h[3], h[4], h[5], h[6], h[7]]);
+    let timestamp = i64::from_be_bytes([h[8], h[9], h[10], h[11], h[12], h[13], h[14], h[15]]);
+    let type_tag = h[16];
+    let flags = h[17];
+    let payload_len = u32::from_be_bytes([h[18], h[19], h[20], h[21]]) as usize;
+    let crc32 = u32::from_be_bytes([h[22], h[23], h[24], h[25]]);
+    (seq_id, timestamp, type_tag, flags, payload_len, crc32)
+}
+
 impl StorageEngine {
     pub fn new<P: AsRef<Path>>(data_dir: P, max_segment_size: u64) -> crate::error::Result<Self> {
         Self::new_with_recovery_mode(data_dir, max_segment_size, RecoveryMode::Default)
@@ -1178,17 +1197,35 @@ impl StorageEngine {
     /// Scans all historical records from all active/read segments sequentially using safe positional reads.
     #[tracing::instrument(skip(self))]
     pub fn scan_historical(&self) -> crate::error::Result<Vec<Record>> {
-        self.scan_historical_inner(usize::MAX)
+        self.scan_historical_inner(usize::MAX, None)
     }
 
     /// Scans historical records but stops early once `max_records` have been collected.
     /// This allows early-termination optimizations for queries with a LIMIT clause.
     pub fn scan_historical_limited(&self, max_records: usize) -> crate::error::Result<Vec<Record>> {
-        self.scan_historical_inner(max_records)
+        self.scan_historical_inner(max_records, None)
     }
 
-    /// Single shared implementation for both unlimited and limited historical scans.
-    fn scan_historical_inner(&self, max_records: usize) -> crate::error::Result<Vec<Record>> {
+    /// Scans only records belonging to `stream_name`.
+    ///
+    /// Frames from other streams are dropped as soon as their stream name is known
+    /// (from the payload prefix) and are never materialized, so they do not count
+    /// against `max_scan_results`. The global scan limit therefore applies to the
+    /// number of records returned for the *queried* stream.
+    pub fn scan_historical_stream(
+        &self,
+        stream_name: &str,
+        max_records: usize,
+    ) -> crate::error::Result<Vec<Record>> {
+        self.scan_historical_inner(max_records, Some(stream_name))
+    }
+
+    /// Single shared implementation for unlimited, limited, and stream-scoped scans.
+    fn scan_historical_inner(
+        &self,
+        max_records: usize,
+        stream_filter: Option<&str>,
+    ) -> crate::error::Result<Vec<Record>> {
         // Apply the global max_scan_results limit if it's lower than the requested max_records
         let effective_limit = std::cmp::min(max_records, self.max_scan_results);
 
@@ -1216,6 +1253,14 @@ impl StorageEngine {
         use std::collections::HashMap;
         let mut latest_idx: HashMap<(String, String), usize> = HashMap::new();
 
+        // When scoping to a single stream we read the frame header plus a prefix of
+        // the payload in one positional read. The stream name is the first field of
+        // the payload (see `serialize_payload_into`), so a short prefix is enough to
+        // decide whether to read the rest of the frame. Frames from other streams are
+        // dropped before materialization and are not counted against the limit.
+        let mut peek_buf = [0u8; 26 + 2 + STREAM_PEEK_CAP];
+        let scoping = stream_filter.is_some();
+
         for (segment_id, _path) in &segments {
             if records.len() >= effective_limit {
                 break;
@@ -1235,45 +1280,26 @@ impl StorageEngine {
             let mut offset = 0;
 
             while offset + 26 <= file_len && records.len() < effective_limit {
-                let mut header_buf = [0u8; 26];
-                if file.read_exact_at(&mut header_buf, offset).is_err() {
-                    break;
-                }
+                // Read the fixed header. When scoping, read a payload prefix in the
+                // same positional read so the stream can be identified cheaply.
+                let (payload_prefix_avail, header_bytes): (usize, [u8; 26]) = if scoping {
+                    let n1 = std::cmp::min(peek_buf.len() as u64, file_len - offset) as usize;
+                    if file.read_exact_at(&mut peek_buf[..n1], offset).is_err() {
+                        break;
+                    }
+                    let mut h = [0u8; 26];
+                    h.copy_from_slice(&peek_buf[..26]);
+                    (n1 - 26, h)
+                } else {
+                    let mut h = [0u8; 26];
+                    if file.read_exact_at(&mut h, offset).is_err() {
+                        break;
+                    }
+                    (0, h)
+                };
 
-                let seq_id = u64::from_be_bytes([
-                    header_buf[0],
-                    header_buf[1],
-                    header_buf[2],
-                    header_buf[3],
-                    header_buf[4],
-                    header_buf[5],
-                    header_buf[6],
-                    header_buf[7],
-                ]);
-                let timestamp = i64::from_be_bytes([
-                    header_buf[8],
-                    header_buf[9],
-                    header_buf[10],
-                    header_buf[11],
-                    header_buf[12],
-                    header_buf[13],
-                    header_buf[14],
-                    header_buf[15],
-                ]);
-                let type_tag = header_buf[16];
-                let flags = header_buf[17];
-                let payload_len = u32::from_be_bytes([
-                    header_buf[18],
-                    header_buf[19],
-                    header_buf[20],
-                    header_buf[21],
-                ]) as usize;
-                let crc32 = u32::from_be_bytes([
-                    header_buf[22],
-                    header_buf[23],
-                    header_buf[24],
-                    header_buf[25],
-                ]);
+                let (seq_id, timestamp, type_tag, flags, payload_len, crc32) =
+                    decode_frame_header(&header_bytes);
 
                 // Skip tombstone frames — do not read payload, do not include in results
                 if flags & 0x02 != 0 {
@@ -1285,14 +1311,40 @@ impl StorageEngine {
                     break;
                 }
 
+                // Decide stream membership from the payload prefix when possible.
+                // `None` means "not yet decided" (stream name longer than the peek
+                // window) and is resolved after the full payload is parsed below.
+                let mut stream_decided: Option<bool> = None;
+                if let Some(target) = stream_filter {
+                    if payload_prefix_avail >= 2 {
+                        let stream_len = u16::from_be_bytes([peek_buf[26], peek_buf[27]]) as usize;
+                        if 2 + stream_len <= payload_prefix_avail {
+                            stream_decided =
+                                Some(&peek_buf[28..28 + stream_len] == target.as_bytes());
+                        }
+                    }
+                    if stream_decided == Some(false) {
+                        // Non-matching stream: drop before materialization and do not
+                        // count it against max_scan_results.
+                        offset += 26 + (payload_len as u64);
+                        continue;
+                    }
+                }
+
                 let payload_record = READ_STAGING_BUFFER.with(|buf_cell| {
                     let mut local_buf = buf_cell.borrow_mut();
                     if local_buf.len() < payload_len {
                         local_buf.resize(payload_len, 0);
                     }
-                    let target_slice = &mut local_buf[..payload_len];
-                    file.read_exact_at(target_slice, offset + 26)
-                        .map_err(LivenError::Io)?;
+                    if payload_prefix_avail >= payload_len {
+                        // The whole payload was already read into the peek buffer; avoid
+                        // a second positional read.
+                        local_buf[..payload_len].copy_from_slice(&peek_buf[26..26 + payload_len]);
+                    } else {
+                        file.read_exact_at(&mut local_buf[..payload_len], offset + 26)
+                            .map_err(LivenError::Io)?;
+                    }
+                    let target_slice = &local_buf[..payload_len];
 
                     let actual_crc = crc32fast::hash(target_slice);
                     if actual_crc == crc32
@@ -1300,6 +1352,12 @@ impl StorageEngine {
                             deserialize_payload_borrowed(target_slice, type_tag)
                         && let Ok(stream_key) = crate::storage::key::StreamKey::from_str(key)
                     {
+                        // For stream names longer than the peek window, decide now.
+                        if let Some(target) = stream_filter {
+                            if stream_decided.is_none() && stream_name != target {
+                                return Ok(None);
+                            }
+                        }
                         return Ok(Some(Record {
                             sequence_id: seq_id,
                             timestamp,

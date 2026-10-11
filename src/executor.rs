@@ -1208,7 +1208,14 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> crate::error::Res
             }
 
             // Fall through to the full historical scan for general queries.
-            let mut records = engine.scan_historical()?;
+            // Scope the scan to the FROM stream: frames from other streams are not
+            // materialized and do not count against max_scan_results.
+            let mut records = match stages.first() {
+                Some(PipelineStage::From { stream_name }) => {
+                    engine.scan_historical_stream(stream_name, usize::MAX)?
+                }
+                _ => engine.scan_historical()?,
+            };
             apply_pipeline_stages_to_vec(&mut records, engine, stages);
             Ok(records)
         }
@@ -1484,7 +1491,7 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> crate::error::Res
             // Acquire write_lock to prevent concurrent inserts from racing between
             // the historical scan and the append of updated records.
             let _guard = engine.write_lock.lock().unwrap();
-            let mut records = engine.scan_historical()?;
+            let mut records = engine.scan_historical_stream(&stream_name, usize::MAX)?;
             apply_pipeline_stages_to_vec(&mut records, engine, pipeline);
             let affected_rows = records.len();
             for r in &records {
@@ -1559,7 +1566,7 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> crate::error::Res
                 // Acquire write_lock to prevent concurrent inserts from racing between
                 // the historical scan and the tombstone batch.
                 let _guard = engine.write_lock.lock().unwrap();
-                let mut records = engine.scan_historical()?;
+                let mut records = engine.scan_historical_stream(&stream_name, usize::MAX)?;
                 apply_pipeline_stages_to_vec(&mut records, engine, pipeline);
 
                 let mut unique_keys = std::collections::HashSet::new();
@@ -1652,10 +1659,17 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> crate::error::Res
                     stream_name
                 )));
             }
-            let mut records = if let Some(limit) = get_limit_from_stages(pipeline) {
-                engine.scan_historical_limited(limit)?
-            } else {
-                engine.scan_historical()?
+            // Scope the scan to the FROM stream so the scan limit applies per stream.
+            let limit = get_limit_from_stages(pipeline);
+            let mut records = match (pipeline.first(), limit) {
+                (Some(PipelineStage::From { stream_name }), Some(l)) => {
+                    engine.scan_historical_stream(stream_name, l)?
+                }
+                (Some(PipelineStage::From { stream_name }), None) => {
+                    engine.scan_historical_stream(stream_name, usize::MAX)?
+                }
+                (_, Some(l)) => engine.scan_historical_limited(l)?,
+                (_, None) => engine.scan_historical()?,
             };
             apply_pipeline_stages_to_vec(&mut records, engine, pipeline);
             Ok(records)
@@ -1665,7 +1679,12 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> crate::error::Res
 
 /// Executes a pipeline query on static historical database records.
 pub fn execute_query_historical(engine: &StorageEngine, stages: &[PipelineStage]) -> Vec<Record> {
-    let mut records = engine.scan_historical().unwrap_or_default();
+    let mut records = match stages.first() {
+        Some(PipelineStage::From { stream_name }) => engine
+            .scan_historical_stream(stream_name, usize::MAX)
+            .unwrap_or_default(),
+        _ => engine.scan_historical().unwrap_or_default(),
+    };
     apply_pipeline_stages_to_vec(&mut records, engine, stages);
     records
 }
