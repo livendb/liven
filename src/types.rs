@@ -556,6 +556,27 @@ impl std::fmt::Display for DataValue {
     }
 }
 
+/// JSON tag used to carry a native int8 vector through JSON-based interfaces.
+///
+/// A JSON object of exactly the form `{"$vec": [<int8>, ...]}` is converted to
+/// [`DataValue::Vector`]. This is the mechanism behind the DSL `vec([...])` literal,
+/// the REST/ingest API, and JSONL import. Elements must be integers in `-128..=127`.
+pub const VEC_TAG: &str = "$vec";
+
+/// If `obj` is a `{"$vec": [<ints>]}` tag whose elements are all in the int8 range,
+/// return the corresponding int8 vector; otherwise `None`.
+pub fn vec_tag_to_vector(obj: &serde_json::Map<String, serde_json::Value>) -> Option<Vec<i8>> {
+    if obj.len() != 1 {
+        return None;
+    }
+    let arr = obj.get(VEC_TAG)?.as_array()?;
+    let mut out = Vec::with_capacity(arr.len());
+    for item in arr {
+        out.push(i8::try_from(item.as_i64()?).ok()?);
+    }
+    Some(out)
+}
+
 /// Convert serde_json::Value to DataValue, recursively handling nested structures
 pub fn json_to_datavalue(json: serde_json::Value) -> DataValue {
     match json {
@@ -576,11 +597,17 @@ pub fn json_to_datavalue(json: serde_json::Value) -> DataValue {
         serde_json::Value::Array(arr) => {
             DataValue::Array(arr.into_iter().map(json_to_datavalue).collect())
         }
-        serde_json::Value::Object(obj) => DataValue::Object(
-            obj.into_iter()
-                .map(|(k, v)| (k, json_to_datavalue(v)))
-                .collect(),
-        ),
+        serde_json::Value::Object(obj) => {
+            if let Some(v) = vec_tag_to_vector(&obj) {
+                DataValue::Vector(v)
+            } else {
+                DataValue::Object(
+                    obj.into_iter()
+                        .map(|(k, v)| (k, json_to_datavalue(v)))
+                        .collect(),
+                )
+            }
+        }
     }
 }
 

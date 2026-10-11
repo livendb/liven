@@ -78,6 +78,9 @@ pub fn json_to_datavalue_with_base64(json: serde_json::Value) -> Result<DataValu
             Ok(DataValue::Array(result))
         }
         serde_json::Value::Object(obj) => {
+            if let Some(v) = crate::types::vec_tag_to_vector(&obj) {
+                return Ok(DataValue::Vector(v));
+            }
             let mut result = BTreeMap::new();
             for (k, v) in obj {
                 result.insert(k, json_to_datavalue_with_base64(v)?);

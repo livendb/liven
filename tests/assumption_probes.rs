@@ -22,12 +22,12 @@ use std::thread;
 use std::time::Duration;
 
 use liven::executor::{
-    apply_pipeline_stages_to_vec, cosine_similarity, evaluate_record_field, execute_query,
-    to_vector,
+    cosine_similarity, evaluate_record_field, execute_query, to_vector, to_vector_strict,
+    try_apply_pipeline_stages_to_vec,
 };
 use liven::parser::{parse_pipeline, parse_query};
 use liven::storage::StorageEngine;
-use liven::types::{DataValue, PipelineStage};
+use liven::types::DataValue;
 use tempfile::TempDir;
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -60,14 +60,19 @@ fn variant_name(v: &DataValue) -> &'static str {
 
 // ── Probe 1: float embeddings ────────────────────────────────────────────────
 
-/// Goal: does a float array ever become `DataValue::Vector`, and does `as i8`
-/// truncation zero it out anywhere?
+/// Goal: does a float array ever become `DataValue::Vector`, and how are float /
+/// string / wrong-dimension vector fields handled?
+///
+/// STEP 2 INTENTIONALLY CHANGED THIS: vectors are now writable with the `vec([...])`
+/// literal, and vector inputs that are floats / strings / wrong-dimension are
+/// rejected with a clear error instead of silently scoring zero. The legacy
+/// `to_vector` helper still truncates (kept for compatibility) but the query engine
+/// no longer uses it.
 #[test]
 fn probe_1_float_embeddings() {
     let (engine, _dir) = tmp_engine("p1");
 
     // ── Case A: embedding as a FIELD of an object, via the DSL/server path ──
-    // This is the shape the docs show: `{..., embedding: [...]}`.
     let q = parse_query(r#"from("emb").insert("obj1", {embedding: [0.12, -0.5, 0.9]})"#)
         .expect("DSL insert (object form) should parse");
     execute_query(&engine, &q).expect("DSL insert (object form) should execute");
@@ -77,32 +82,33 @@ fn probe_1_float_embeddings() {
         "[probe1] object-insert stored value variant = {}",
         variant_name(&rec.value)
     );
-    // CURRENT: the whole object is stored as a JSON *String*; nested arrays are
-    // NOT typed as Array and NOT typed as Vector.
+    // UNCHANGED: the whole object is still stored as a JSON *String*.
     assert!(
         matches!(&rec.value, DataValue::String(_)),
-        "CURRENT behavior: object payload is stored as DataValue::String(JSON)"
+        "object payload is still stored as DataValue::String(JSON)"
     );
 
     let extracted = evaluate_record_field(&rec, "embedding");
     println!("[probe1] extracted `embedding` field = {:?}", extracted);
-    // CURRENT: a JSON *array* field is extracted as a String (the JSON text),
-    // not as an Array and not as a Vector — see executor::extract_field's final
-    // `_ => Some(DataValue::String(field_val.to_string()))` arm.
+    // NEW (Step 2): a JSON array field is extracted as DataValue::Array of Float.
     assert!(
-        matches!(&extracted, Some(DataValue::String(_))),
-        "CURRENT behavior: an array-valued field is extracted as DataValue::String"
+        matches!(&extracted, Some(DataValue::Array(_))),
+        "Step 2: array-valued fields are extracted as DataValue::Array"
     );
-    // Consequence: the vector path cannot see it at all.
-    assert_eq!(
-        to_vector(extracted.as_ref().unwrap()),
-        None,
-        "CURRENT behavior: to_vector(String) -> None, so vector_filter cannot match it"
+    // NEW (Step 2): vector_filter on it returns a CLEAR ERROR, not a silent zero.
+    let stages =
+        parse_pipeline(r#"from("emb") | vector_filter(embedding, vec([12, -5, 9]), 0.85)"#)
+            .expect("vec([...]) query vector parses");
+    let mut recs = vec![rec.clone()];
+    let err = try_apply_pipeline_stages_to_vec(&mut recs, &engine, &stages)
+        .expect_err("Step 2: a float vector field is rejected, never silently zeroed");
+    println!("[probe1] vector_filter(float array) error = {err}");
+    assert!(
+        err.to_string().contains("floating-point"),
+        "expected a floating-point rejection, got: {err}"
     );
-    // SHOULD: an embedding field should round-trip as a numeric vector so that
-    // `vector_filter(embedding, ...)` can search it.
 
-    // ── Case B: a BARE float array as the whole value, via the DSL/server path ──
+    // ── Case B: a BARE float array as the whole value ──
     let q = parse_query(r#"from("emb").insert("arr1", [0.12, -0.5, 0.9])"#)
         .expect("DSL insert (array form) should parse");
     execute_query(&engine, &q).expect("DSL insert (array form) should execute");
@@ -113,82 +119,66 @@ fn probe_1_float_embeddings() {
         variant_name(&rec.value),
         rec.value
     );
-    // CURRENT: the bare float array is stored as `DataValue::Array` of `Float`.
+    // UNCHANGED: a bare float array is stored as DataValue::Array of Float, never Vector.
+    assert!(matches!(&rec.value, DataValue::Array(_)));
+    assert!(!matches!(&rec.value, DataValue::Vector(_)));
+    // NEW (Step 2): the strict converter rejects it (no silent truncation).
+    let err = to_vector_strict(&rec.value).expect_err("float array rejected");
+    println!("[probe1] to_vector_strict(float array) = Err({err})");
+    assert!(err.contains("floating-point"));
+    // The legacy (non-strict) helper still truncates; retained but no longer used
+    // by the query engine.
+    println!(
+        "[probe1] legacy to_vector(float array) (still truncates) = {:?}",
+        to_vector(&rec.value)
+    );
+
+    // ── The parser now rejects float QUERY vectors too ──
+    let bad = parse_pipeline(r#"from("emb") | vector_filter(value, [0.12, -0.5, 0.9], 0.85)"#);
+    println!(
+        "[probe1] parse of a float query vector is an error = {}",
+        bad.is_err()
+    );
     assert!(
-        matches!(&rec.value, DataValue::Array(_)),
-        "CURRENT behavior: a float array is stored as DataValue::Array"
+        bad.is_err(),
+        "Step 2: float query vectors are rejected at parse time"
     );
-    if let DataValue::Array(items) = &rec.value {
-        assert!(
-            items.iter().all(|d| matches!(d, DataValue::Float(_))),
-            "CURRENT behavior: array elements remain DataValue::Float"
-        );
-    }
-    // CURRENT: the DSL never produces a `DataValue::Vector`.
+
+    // ── The supported path: `vec([...])` writes a real int8 Vector ──
+    let q = parse_query(r#"from("emb").insert("v1", vec([12, -5, 9]))"#).unwrap();
+    execute_query(&engine, &q).unwrap();
+    let rec = engine.get("emb", "v1").unwrap().unwrap();
+    println!(
+        "[probe1] vec([...]) insert stored variant = {}",
+        variant_name(&rec.value)
+    );
     assert!(
-        !matches!(&rec.value, DataValue::Vector(_)),
-        "CURRENT behavior: the DSL/parse path never yields DataValue::Vector"
+        matches!(&rec.value, DataValue::Vector(_)),
+        "Step 2: vec([...]) writes a native DataValue::Vector"
     );
-
-    // `as i8` truncation: each float is cast toward zero -> [0, 0, 0].
-    let stored_vec = to_vector(&rec.value).expect("to_vector accepts DataValue::Array");
-    println!("[probe1] to_vector(stored float array) = {:?}", stored_vec);
-    assert_eq!(
-        stored_vec,
-        vec![0, 0, 0],
-        "CURRENT behavior: `Float as i8` truncates 0.12 / -0.5 / 0.9 all to 0 (total signal loss)"
-    );
-    // SHOULD: a documented quantization step (e.g. round(x * 127)) with a known
-    // scale, rather than a silent truncating cast.
-
-    // The QUERY vector goes through the same `as i8` path during parsing.
-    let stages = parse_pipeline(r#"from("emb") | vector_filter(value, [0.12, -0.5, 0.9], 0.85)"#)
-        .expect("vector_filter pipeline should parse");
-    let query_vector = match &stages[1] {
-        PipelineStage::VectorFilter { query_vector, .. } => query_vector.clone(),
-        other => panic!("expected PipelineStage::VectorFilter, got {other:?}"),
-    };
-    println!("[probe1] parsed query vector = {:?}", query_vector);
-    assert_eq!(
-        query_vector,
-        vec![0, 0, 0],
-        "CURRENT behavior: query-vector floats also truncate to 0 via `as i8`"
-    );
-
-    let sim = cosine_similarity(&stored_vec, &query_vector).unwrap();
-    println!("[probe1] cosine_similarity(stored, query) = {}", sim);
-
-    let mut records = vec![rec.clone()];
-    apply_pipeline_stages_to_vec(&mut records, &engine, &stages);
+    let v = to_vector_strict(&rec.value).unwrap();
+    assert_eq!(v, vec![12, -5, 9]);
     println!(
-        "[probe1] vector_filter(threshold=0.85) matched {} of 1 record(s)",
-        records.len()
-    );
-    // CURRENT: a zero-norm vector scores exactly 0.0, so any positive threshold
-    // drops it (0.0 >= 0.85 is false).
-    assert_eq!(
-        records.len(),
-        0,
-        "CURRENT behavior: a truncated-to-zero vector scores 0.0 and is dropped"
+        "[probe1] cosine(vec, vec) = {}",
+        cosine_similarity(&v, &[12, -5, 9]).unwrap()
     );
 
-    // ── Contrast: only an EXPLICIT DataValue::Vector is searchable ──
-    engine
-        .append("emb", "vec1", DataValue::Vector(vec![10, -5, 9]), false)
-        .unwrap();
-    let genuine = engine.get("emb", "vec1").unwrap().unwrap();
-    let gv = to_vector(&genuine.value).unwrap();
-    let gsim = cosine_similarity(&gv, &[10, -5, 9]).unwrap();
+    // And it is searchable end to end:
+    let stages =
+        parse_pipeline(r#"from("emb") | vector_filter(value, vec([12, -5, 9]), 0.99)"#).unwrap();
+    let mut recs = vec![rec.clone()];
+    try_apply_pipeline_stages_to_vec(&mut recs, &engine, &stages).unwrap();
     println!(
-        "[probe1] genuine DataValue::Vector cosine vs itself = {}",
-        gsim
+        "[probe1] vector_filter on vec([...]) matched {} record(s)",
+        recs.len()
     );
-    assert!((gsim - 1.0).abs() < 1e-9);
+    assert_eq!(recs.len(), 1);
 
     println!(
-        "PROBE RESULT: probe_1_float_embeddings - object field stored as String and invisible to vector_filter; \
-bare float array stored as Array(Float) and truncated to zeros by `as i8`; float arrays NEVER become DataValue::Vector \
-(only an explicit DataValue::Vector is searchable)"
+        "PROBE RESULT: probe_1_float_embeddings - [UPDATED by Step 2] float arrays still never become DataValue::Vector \
+and the legacy to_vector still truncates them, but the DSL now has vec([...]) which writes a real int8 Vector, and \
+vector_filter returns a clear error (not silent zero) for float/string/wrong-dimension fields; float query vectors are \
+rejected at parse time"
     );
 }
 

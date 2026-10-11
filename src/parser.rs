@@ -321,12 +321,12 @@ fn parse_vector_filter_stage(input: &str) -> IResult<&str, PipelineStage> {
     let (input, threshold_val) = ws(parse_data_value)(input)?;
     let (input, _) = char(')')(input)?;
 
-    let query_vector = match crate::executor::to_vector(&query_val) {
-        Some(v) => v,
-        None => {
+    let query_vector = match crate::executor::to_vector_strict(&query_val) {
+        Ok(v) => v,
+        Err(_) => {
             return Err(nom::Err::Error(nom::error::Error::new(
                 input,
-                nom::error::ErrorKind::Tag,
+                nom::error::ErrorKind::Verify,
             )));
         }
     };
@@ -441,8 +441,26 @@ fn parse_array_literal(input: &str) -> IResult<&str, DataValue> {
     Ok((input, DataValue::Array(elements)))
 }
 
+/// Parses `vec([<int8>, ...])` into a native `DataValue::Vector`.
+///
+/// Rejects floating-point and out-of-range elements: vectors are int8 only.
+fn parse_vec_literal(input: &str) -> IResult<&str, DataValue> {
+    let (input, _) = tag("vec")(input)?;
+    let (input, _) = char('(')(input)?;
+    let (input, arr) = ws(parse_array_literal)(input)?;
+    let (input, _) = char(')')(input)?;
+    match crate::executor::to_vector_strict(&arr) {
+        Ok(v) => Ok((input, DataValue::Vector(v))),
+        Err(_) => Err(nom::Err::Error(nom::error::Error::new(
+            input,
+            nom::error::ErrorKind::Verify,
+        ))),
+    }
+}
+
 fn parse_data_value(input: &str) -> IResult<&str, DataValue> {
     alt((
+        parse_vec_literal,
         map(parse_string_literal, DataValue::String),
         value(DataValue::Null, tag("null")),
         value(DataValue::Bool(true), tag("true")),
@@ -768,6 +786,7 @@ fn find_outer_comma(input: &str) -> Option<usize> {
 
 fn parse_js_value(input: &str) -> IResult<&str, serde_json::Value> {
     alt((
+        parse_js_vec,
         map(parse_string_literal, serde_json::Value::String),
         map(parse_number, |dv| match dv {
             DataValue::Int(i) => serde_json::Value::Number(i.into()),
@@ -811,6 +830,32 @@ fn parse_js_array(input: &str) -> IResult<&str, serde_json::Value> {
         char(']'),
     )(input)?;
     Ok((input, serde_json::Value::Array(elements)))
+}
+
+/// Parses `vec([<int8>, ...])` in an insert-value position into the `{"$vec":[...]}`
+/// JSON tag, which the JSON→DataValue conversion turns into `DataValue::Vector`.
+/// This is what makes a native vector writable through the DSL and REST/ingest.
+fn parse_js_vec(input: &str) -> IResult<&str, serde_json::Value> {
+    let (input, _) = tag("vec")(input)?;
+    let (input, _) = char('(')(input)?;
+    let (input, arr) = ws(parse_js_array)(input)?;
+    let (input, _) = char(')')(input)?;
+    let valid = arr
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .all(|e| e.as_i64().map(|n| i8::try_from(n).is_ok()).unwrap_or(false))
+        })
+        .unwrap_or(false);
+    if !valid {
+        return Err(nom::Err::Error(nom::error::Error::new(
+            input,
+            nom::error::ErrorKind::Verify,
+        )));
+    }
+    let mut map = serde_json::Map::new();
+    map.insert(crate::types::VEC_TAG.to_string(), arr);
+    Ok((input, serde_json::Value::Object(map)))
 }
 
 fn parse_js_object(input: &str) -> IResult<&str, serde_json::Value> {

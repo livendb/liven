@@ -286,6 +286,34 @@ Vector similarity search on an int8 quantized vector field with a similarity thr
 db.vector_filter("embeddings", "vector", vec![12, -5, 3, 0, -8], 0.85)?;
 ```
 
+#### Vector input contract
+
+Vectors are **int8** (each element in `-128..=127`) and every vector compared against
+the query vector must have the **same dimension** as the query vector. A record whose
+vector field is a float array, a string, out of range, or the wrong dimension causes
+`vector_filter` to return an error — it never silently scores zero.
+
+Write a native vector using the `vec([...])` literal in a query:
+
+```text
+from("emb") | insert("k1", vec([12, -5, 9]))
+from("emb") | insert("k2", {embedding: vec([1, 2, 3]), user_id: "u1"})
+from("emb") | filter(user_id == "u1") | vector_filter(embedding, vec([1, 2, 3]), 0.9)
+```
+
+Through JSON interfaces (REST/ingest, JSONL import, the embedded `insert` API), use the
+`{"$vec": [...]}` tag:
+
+```jsonc
+// bare value
+{"stream": "emb", "key": "k1", "value": {"$vec": [12, -5, 9]}}
+// a vector field next to metadata
+{"stream": "emb", "key": "k2", "value": {"embedding": {"$vec": [1, 2, 3]}, "user_id": "u1"}}
+```
+
+Floating-point embeddings are **not** quantized by the core engine; convert them to
+int8 in the client SDK before writing.
+
 ### enrich
 
 Left-join records from another stream.

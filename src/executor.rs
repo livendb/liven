@@ -142,44 +142,14 @@ pub fn extract_field(value: &DataValue, field: &str) -> Option<DataValue> {
             if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(s)
                 && let Some(field_val) = json_val.get(field)
             {
-                return match field_val {
-                    serde_json::Value::Null => Some(DataValue::Null),
-                    serde_json::Value::Bool(b) => Some(DataValue::Bool(*b)),
-                    serde_json::Value::Number(n) => {
-                        if let Some(i) = n.as_i64() {
-                            Some(DataValue::Int(i))
-                        } else if let Some(u) = n.as_u64() {
-                            Some(DataValue::UInt(u))
-                        } else {
-                            n.as_f64()
-                                .map(|f| DataValue::Float(ordered_float::OrderedFloat(f)))
-                        }
-                    }
-                    serde_json::Value::String(str_val) => Some(DataValue::String(str_val.clone())),
-                    _ => Some(DataValue::String(field_val.to_string())),
-                };
+                return Some(json_field_to_datavalue(field_val));
             }
         }
         DataValue::Binary(b) => {
             if let Ok(msg_val) = rmp_serde::from_slice::<serde_json::Value>(b)
                 && let Some(field_val) = msg_val.get(field)
             {
-                return match field_val {
-                    serde_json::Value::Null => Some(DataValue::Null),
-                    serde_json::Value::Bool(b) => Some(DataValue::Bool(*b)),
-                    serde_json::Value::Number(n) => {
-                        if let Some(i) = n.as_i64() {
-                            Some(DataValue::Int(i))
-                        } else if let Some(u) = n.as_u64() {
-                            Some(DataValue::UInt(u))
-                        } else {
-                            n.as_f64()
-                                .map(|f| DataValue::Float(ordered_float::OrderedFloat(f)))
-                        }
-                    }
-                    serde_json::Value::String(str_val) => Some(DataValue::String(str_val.clone())),
-                    _ => Some(DataValue::String(field_val.to_string())),
-                };
+                return Some(json_field_to_datavalue(field_val));
             }
         }
         DataValue::Object(obj) => {
@@ -188,6 +158,40 @@ pub fn extract_field(value: &DataValue, field: &str) -> Option<DataValue> {
         _ => {}
     }
     None
+}
+
+/// Convert a single JSON field value to a `DataValue`.
+///
+/// Arrays become [`DataValue::Array`] (element types are preserved so an array of
+/// floats can be rejected later), and a `{"$vec":[...]}` tagged object becomes
+/// [`DataValue::Vector`]. Any other object falls back to its JSON text.
+fn json_field_to_datavalue(field_val: &serde_json::Value) -> DataValue {
+    match field_val {
+        serde_json::Value::Null => DataValue::Null,
+        serde_json::Value::Bool(b) => DataValue::Bool(*b),
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                DataValue::Int(i)
+            } else if let Some(u) = n.as_u64() {
+                DataValue::UInt(u)
+            } else {
+                n.as_f64()
+                    .map(|f| DataValue::Float(ordered_float::OrderedFloat(f)))
+                    .unwrap_or(DataValue::Null)
+            }
+        }
+        serde_json::Value::String(s) => DataValue::String(s.clone()),
+        serde_json::Value::Array(arr) => {
+            DataValue::Array(arr.iter().map(json_field_to_datavalue).collect())
+        }
+        serde_json::Value::Object(obj) => {
+            if let Some(v) = crate::types::vec_tag_to_vector(obj) {
+                DataValue::Vector(v)
+            } else {
+                DataValue::String(serde_json::Value::Object(obj.clone()).to_string())
+            }
+        }
+    }
 }
 
 /// Evaluates a field on a Record, supporting both system fields and nested payload fields.
@@ -374,6 +378,73 @@ pub fn to_vector(val: &DataValue) -> Option<Vec<i8>> {
     }
 }
 
+/// Strictly convert a `DataValue` to an int8 vector.
+///
+/// Unlike [`to_vector`], this never silently truncates: floating-point elements,
+/// out-of-range integers, strings, and other types are rejected with a message.
+///
+/// # Input contract
+/// * Vectors are **int8** (`-128..=127`). `DataValue::Vector` is the canonical
+///   form; an integer `DataValue::Array` is also accepted.
+/// * Every vector in a comparison must have the **same dimension** as the query
+///   vector; this function does not check that (see the callers).
+/// * Converting float embeddings to int8 is intentionally **not** done here —
+///   it belongs in the client SDKs.
+pub fn to_vector_strict(val: &DataValue) -> Result<Vec<i8>, String> {
+    match val {
+        DataValue::Vector(v) => Ok(v.clone()),
+        DataValue::Array(arr) => {
+            let mut out = Vec::with_capacity(arr.len());
+            for item in arr {
+                let b = match item {
+                    DataValue::Int(i) => i8::try_from(*i)
+                        .map_err(|_| format!("int8 element {i} out of range -128..=127"))?,
+                    DataValue::UInt(u) => i8::try_from(*u)
+                        .map_err(|_| format!("int8 element {u} out of range 0..=127"))?,
+                    DataValue::Float(f) => {
+                        return Err(format!(
+                            "floating-point element {} is not supported; vectors must be int8 (quantize in the SDK)",
+                            f.into_inner()
+                        ));
+                    }
+                    other => {
+                        return Err(format!(
+                            "unsupported element type {} (expected int8)",
+                            data_value_kind(other)
+                        ));
+                    }
+                };
+                out.push(b);
+            }
+            Ok(out)
+        }
+        DataValue::String(_) => Err(
+            "field is a string, not an int8 vector; write it with vec([...]) or a {\"$vec\":[...]} tag"
+                .to_string(),
+        ),
+        other => Err(format!(
+            "unsupported type {}; expected an int8 vector",
+            data_value_kind(other)
+        )),
+    }
+}
+
+/// Human-readable name of a `DataValue` variant, for error messages.
+pub fn data_value_kind(v: &DataValue) -> &'static str {
+    match v {
+        DataValue::Null => "null",
+        DataValue::Bool(_) => "bool",
+        DataValue::Int(_) => "int",
+        DataValue::UInt(_) => "uint",
+        DataValue::Float(_) => "float",
+        DataValue::String(_) => "string",
+        DataValue::Binary(_) => "binary",
+        DataValue::Array(_) => "array",
+        DataValue::Object(_) => "object",
+        DataValue::Vector(_) => "vector",
+    }
+}
+
 pub fn cosine_similarity(a: &[i8], b: &[i8]) -> Option<f64> {
     if a.len() != b.len() || a.is_empty() {
         return None;
@@ -554,7 +625,11 @@ pub fn json_to_datavalue(val: serde_json::Value) -> DataValue {
             DataValue::Array(arr.into_iter().map(json_to_datavalue).collect())
         }
         serde_json::Value::Object(obj) => {
-            DataValue::String(serde_json::Value::Object(obj).to_string())
+            if let Some(v) = crate::types::vec_tag_to_vector(&obj) {
+                DataValue::Vector(v)
+            } else {
+                DataValue::String(serde_json::Value::Object(obj).to_string())
+            }
         }
     }
 }
@@ -1193,7 +1268,7 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> crate::error::Res
                     })
                     .collect();
                 let remaining_refs: Vec<PipelineStage> = remaining.into_iter().cloned().collect();
-                apply_pipeline_stages_to_vec(&mut records, engine, &remaining_refs);
+                try_apply_pipeline_stages_to_vec(&mut records, engine, &remaining_refs)?;
                 return Ok(records);
             }
 
@@ -1203,7 +1278,7 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> crate::error::Res
                 && let Some(PipelineStage::From { stream_name }) = stages.first()
             {
                 let mut records = engine.scan_by_time_range(stream_name, start_ms, end_ms)?;
-                apply_pipeline_stages_to_vec(&mut records, engine, stages);
+                try_apply_pipeline_stages_to_vec(&mut records, engine, stages)?;
                 return Ok(records);
             }
 
@@ -1216,7 +1291,7 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> crate::error::Res
                 }
                 _ => engine.scan_historical()?,
             };
-            apply_pipeline_stages_to_vec(&mut records, engine, stages);
+            try_apply_pipeline_stages_to_vec(&mut records, engine, stages)?;
             Ok(records)
         }
         Query::Insert {
@@ -1492,7 +1567,7 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> crate::error::Res
             // the historical scan and the append of updated records.
             let _guard = engine.write_lock.lock().unwrap();
             let mut records = engine.scan_historical_stream(&stream_name, usize::MAX)?;
-            apply_pipeline_stages_to_vec(&mut records, engine, pipeline);
+            try_apply_pipeline_stages_to_vec(&mut records, engine, pipeline)?;
             let affected_rows = records.len();
             for r in &records {
                 let mut val = match &r.value {
@@ -1556,7 +1631,7 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> crate::error::Res
             if let Some(key) = extract_unique_key_from_pipeline(pipeline) {
                 if let Some(record) = engine.get(&stream_name, &key)? {
                     let mut single_rec_vec = vec![record];
-                    apply_pipeline_stages_to_vec(&mut single_rec_vec, engine, pipeline);
+                    try_apply_pipeline_stages_to_vec(&mut single_rec_vec, engine, pipeline)?;
                     if !single_rec_vec.is_empty() {
                         let _ = engine.append_tombstone_batch(&stream_name, &[key])?;
                         affected_rows = 1;
@@ -1567,7 +1642,7 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> crate::error::Res
                 // the historical scan and the tombstone batch.
                 let _guard = engine.write_lock.lock().unwrap();
                 let mut records = engine.scan_historical_stream(&stream_name, usize::MAX)?;
-                apply_pipeline_stages_to_vec(&mut records, engine, pipeline);
+                try_apply_pipeline_stages_to_vec(&mut records, engine, pipeline)?;
 
                 let mut unique_keys = std::collections::HashSet::new();
                 let mut target_keys = Vec::new();
@@ -1671,7 +1746,7 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> crate::error::Res
                 (_, Some(l)) => engine.scan_historical_limited(l)?,
                 (_, None) => engine.scan_historical()?,
             };
-            apply_pipeline_stages_to_vec(&mut records, engine, pipeline);
+            try_apply_pipeline_stages_to_vec(&mut records, engine, pipeline)?;
             Ok(records)
         }
     }
@@ -1690,11 +1765,27 @@ pub fn execute_query_historical(engine: &StorageEngine, stages: &[PipelineStage]
 }
 
 /// Helper to apply stages sequentially on a Vector.
+/// Backwards-compatible wrapper that ignores stage errors.
+///
+/// Prefer [`try_apply_pipeline_stages_to_vec`] on query paths so that malformed
+/// vector input surfaces as an error instead of silently producing zero results.
 pub fn apply_pipeline_stages_to_vec(
     records: &mut Vec<Record>,
     engine: &StorageEngine,
     stages: &[PipelineStage],
 ) {
+    let _ = try_apply_pipeline_stages_to_vec(records, engine, stages);
+}
+
+/// Apply pipeline stages to a record buffer, returning an error for invalid input.
+///
+/// Only the vector stages (`vector_filter`, `vector_search`) can currently fail;
+/// every other stage is infallible.
+pub fn try_apply_pipeline_stages_to_vec(
+    records: &mut Vec<Record>,
+    engine: &StorageEngine,
+    stages: &[PipelineStage],
+) -> crate::error::Result<()> {
     for stage in stages {
         match stage {
             PipelineStage::From { stream_name } => {
@@ -1717,15 +1808,33 @@ pub fn apply_pipeline_stages_to_vec(
                 query_vector,
                 threshold,
             } => {
-                records.retain(|r| {
-                    if let Some(val) = evaluate_record_field(r, field)
-                        && let Some(record_vec) = to_vector(&val)
-                        && let Some(sim) = cosine_similarity(&record_vec, query_vector)
-                    {
-                        return sim >= threshold.into_inner();
+                // Strict: a present-but-invalid vector field is an error, never a
+                // silent zero. Records that do not have the field are not candidates.
+                let mut kept = Vec::with_capacity(records.len());
+                for r in records.drain(..) {
+                    let Some(val) = evaluate_record_field(&r, field) else {
+                        continue;
+                    };
+                    let record_vec = to_vector_strict(&val).map_err(|e| {
+                        crate::error::LivenError::Query(format!(
+                            "vector_filter on field '{field}': {e}"
+                        ))
+                    })?;
+                    if record_vec.len() != query_vector.len() {
+                        return Err(crate::error::LivenError::Query(format!(
+                            "vector_filter on field '{field}': dimension mismatch \
+(record has {} int8 value(s), query has {})",
+                            record_vec.len(),
+                            query_vector.len()
+                        )));
                     }
-                    false
-                });
+                    if let Some(sim) = cosine_similarity(&record_vec, query_vector) {
+                        if sim >= threshold.into_inner() {
+                            kept.push(r);
+                        }
+                    }
+                }
+                *records = kept;
             }
             PipelineStage::Get { key } => {
                 records.retain(|r| r.key.as_str() == *key);
@@ -2192,6 +2301,7 @@ pub fn apply_pipeline_stages_to_vec(
             }
         }
     }
+    Ok(())
 }
 
 /// Executes a pipeline query as a continuous live-streaming channel.

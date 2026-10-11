@@ -1413,7 +1413,11 @@ fn json_to_datavalue(val: serde_json::Value) -> DataValue {
             DataValue::String(serde_json::Value::Array(arr).to_string())
         }
         serde_json::Value::Object(obj) => {
-            DataValue::String(serde_json::Value::Object(obj).to_string())
+            if let Some(v) = crate::types::vec_tag_to_vector(&obj) {
+                DataValue::Vector(v)
+            } else {
+                DataValue::String(serde_json::Value::Object(obj).to_string())
+            }
         }
     }
 }
