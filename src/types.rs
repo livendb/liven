@@ -57,6 +57,16 @@ pub enum PipelineStage {
         query_vector: Vec<i8>,
         threshold: OrderedFloat<f64>,
     },
+    /// Top-k vector similarity search.
+    ///
+    /// Returns the `top_k` records whose `field` is most cosine-similar to
+    /// `query_vector` (int8), ordered best-first, each carrying a `_score` field
+    /// in the range `-1.0..=1.0`. Ties are broken by ascending `sequence_id`.
+    VectorSearch {
+        field: String,
+        query_vector: Vec<i8>,
+        top_k: usize,
+    },
     Get {
         key: String,
     },
@@ -356,6 +366,20 @@ impl PipelineStage {
                     .collect::<Vec<_>>()
                     .join(", ");
                 format!("vector_filter(\"{}\", [{}], {})", field, vec_str, threshold)
+            }
+            PipelineStage::VectorSearch {
+                field,
+                query_vector,
+                top_k,
+            } => {
+                // Field is emitted unquoted so the stage round-trips through
+                // `parse_identifier`.
+                let vec_str = query_vector
+                    .iter()
+                    .map(|v| v.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("vector_search({}, [{}], {})", field, vec_str, top_k)
             }
             PipelineStage::Get { key } => format!("get(\"{}\")", key),
             PipelineStage::Map { projections } => {

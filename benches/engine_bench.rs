@@ -541,6 +541,66 @@ fn bench_vector(c: &mut Criterion) {
     group.finish();
 }
 
+// ── Vector search (top-k) ─────────────────────────────────────────────────────
+
+fn bench_vector_search(c: &mut Criterion) {
+    let mut group = c.benchmark_group("vector_search");
+    group
+        .sample_size(10) // one scoped full scan per iteration
+        .measurement_time(Duration::from_secs(3));
+
+    for (n, dims) in [
+        (1_000usize, 128usize),
+        (1_000, 384),
+        (10_000, 128),
+        (10_000, 384),
+    ] {
+        let (engine, _dir) = make_engine(&format!("vsearch_{}_{}", n, dims), 200);
+
+        // Populate in a single batch so setup does not fsync per record.
+        let batch: Vec<(String, String, DataValue)> = (0..n)
+            .map(|i| {
+                let v: Vec<i8> = (0..dims)
+                    .map(|d| (((i * 31 + d * 17) % 255) as i32 - 128) as i8)
+                    .collect();
+                (
+                    "vecs".to_string(),
+                    format!("v_{:08}", i),
+                    DataValue::Vector(v),
+                )
+            })
+            .collect();
+        engine.append_batch(batch).expect("populate vectors");
+
+        let query: Vec<i8> = (0..dims)
+            .map(|d| (((d * 7) % 255) as i32 - 128) as i8)
+            .collect();
+        let q = Query::Pipeline(vec![
+            PipelineStage::From {
+                stream_name: "vecs".to_string(),
+            },
+            PipelineStage::VectorSearch {
+                field: "value".to_string(),
+                query_vector: query,
+                top_k: 10,
+            },
+        ]);
+
+        group.throughput(Throughput::Elements(n as u64));
+        group.bench_with_input(
+            BenchmarkId::new("k10", format!("{}_{}d", n, dims)),
+            &(),
+            |b, _| {
+                b.iter(|| {
+                    let _ = black_box(execute_query(&engine, &q));
+                })
+            },
+        );
+    }
+
+    group.finish();
+}
+
 // ── Codec ─────────────────────────────────────────────────────────────────────
 
 fn bench_codec(c: &mut Criterion) {
@@ -605,6 +665,7 @@ criterion_group! {
         bench_concurrent_append,
         bench_compaction,
         bench_vector,
+        bench_vector_search,
         bench_codec,
 }
 criterion_main!(benches);

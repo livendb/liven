@@ -112,6 +112,7 @@ fn parse_stage(input: &str) -> IResult<&str, PipelineStage> {
         parse_sort_stage,
         parse_page_stage,
         parse_group_stage,
+        parse_vector_search_stage,
     ))(input)
 }
 
@@ -309,6 +310,46 @@ fn parse_filter_stage(input: &str) -> IResult<&str, PipelineStage> {
     let (input, _) = tag("filter")(input)?;
     let (input, expr) = delimited(char('('), ws(parse_filter_expr), char(')'))(input)?;
     Ok((input, PipelineStage::Filter { expr }))
+}
+
+/// Parses `vector_search(field, [<int8>...], k)`. `k` must be a positive integer
+/// (a value of 0 is rejected at execution time with a clear error).
+fn parse_vector_search_stage(input: &str) -> IResult<&str, PipelineStage> {
+    let (input, _) = tag("vector_search")(input)?;
+    let (input, _) = char('(')(input)?;
+    let (input, field) = ws(parse_identifier)(input)?;
+    let (input, _) = char(',')(input)?;
+    let (input, query_val) = ws(parse_data_value)(input)?;
+    let (input, _) = char(',')(input)?;
+    let (input, k_str) = ws(parse_digits)(input)?;
+    let (input, _) = char(')')(input)?;
+
+    let query_vector = match crate::executor::to_vector_strict(&query_val) {
+        Ok(v) => v,
+        Err(_) => {
+            return Err(nom::Err::Error(nom::error::Error::new(
+                input,
+                nom::error::ErrorKind::Verify,
+            )));
+        }
+    };
+    let top_k = match k_str.parse::<usize>() {
+        Ok(k) => k,
+        Err(_) => {
+            return Err(nom::Err::Error(nom::error::Error::new(
+                input,
+                nom::error::ErrorKind::Digit,
+            )));
+        }
+    };
+    Ok((
+        input,
+        PipelineStage::VectorSearch {
+            field,
+            query_vector,
+            top_k,
+        },
+    ))
 }
 
 fn parse_vector_filter_stage(input: &str) -> IResult<&str, PipelineStage> {

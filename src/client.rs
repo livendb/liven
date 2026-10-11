@@ -393,6 +393,28 @@ impl LivenClient {
         .await
     }
 
+    /// Top-k vector similarity search, ordering results best-first and adding a
+    /// `_score` field to each returned record.
+    pub async fn vector_search(
+        &mut self,
+        stream_name: &str,
+        field: &str,
+        query_vector: Vec<i8>,
+        top_k: usize,
+    ) -> io::Result<Vec<Record>> {
+        self.run(&crate::types::Query::Pipeline(vec![
+            crate::types::PipelineStage::From {
+                stream_name: stream_name.to_string(),
+            },
+            crate::types::PipelineStage::VectorSearch {
+                field: field.to_string(),
+                query_vector,
+                top_k,
+            },
+        ]))
+        .await
+    }
+
     /// Enrich records with a left join from another stream.
     pub async fn enrich(
         &mut self,

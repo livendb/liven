@@ -365,6 +365,24 @@ impl Liven {
         )
     }
 
+    /// Top-k vector similarity search on a stream.
+    ///
+    /// Returns the `top_k` records most cosine-similar to `query_vector`, ordered
+    /// best-first, each carrying a `_score` field in `-1.0..=1.0`.
+    pub fn vector_search(
+        &self,
+        stream_name: impl Into<String>,
+        field: impl Into<String>,
+        query_vector: Vec<i8>,
+        top_k: usize,
+    ) -> crate::error::Result<Vec<Record>> {
+        self.run(
+            crate::query::Pipeline::from(stream_name)
+                .vector_search(field, query_vector, top_k)
+                .build(),
+        )
+    }
+
     /// Enrich records with a left join from another stream.
     pub fn enrich(
         &self,

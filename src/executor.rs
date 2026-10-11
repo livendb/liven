@@ -445,6 +445,59 @@ pub fn data_value_kind(v: &DataValue) -> &'static str {
     }
 }
 
+/// A candidate in a bounded top-k vector search.
+///
+/// Ordering is "best is greatest" (higher score wins; ties broken by lower
+/// `sequence_id`), so a `BinaryHeap<Reverse<ScoredCandidate>>` acts as a min-heap
+/// of the *worst* retained candidates and lets us keep memory at O(k).
+#[derive(Debug)]
+struct ScoredCandidate {
+    score: f64,
+    sequence_id: u64,
+    record: Record,
+}
+
+impl PartialEq for ScoredCandidate {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == std::cmp::Ordering::Equal
+    }
+}
+impl Eq for ScoredCandidate {}
+impl Ord for ScoredCandidate {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        ordered_float::OrderedFloat(self.score)
+            .cmp(&ordered_float::OrderedFloat(other.score))
+            .then_with(|| other.sequence_id.cmp(&self.sequence_id))
+    }
+}
+impl PartialOrd for ScoredCandidate {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+/// Attach a `_score` field to a result record.
+///
+/// Object values are merged in place; any other value is wrapped as
+/// `{"value": <value>, "_score": <score>}`.
+fn attach_score(mut record: Record, score: f64) -> Record {
+    let base = datavalue_to_json(&record.value);
+    let mut obj = match base {
+        serde_json::Value::Object(m) => m,
+        other => {
+            let mut m = serde_json::Map::new();
+            m.insert("value".to_string(), other);
+            m
+        }
+    };
+    let score_json = serde_json::Number::from_f64(score)
+        .map(serde_json::Value::Number)
+        .unwrap_or(serde_json::Value::Null);
+    obj.insert("_score".to_string(), score_json);
+    record.value = DataValue::String(serde_json::Value::Object(obj).to_string());
+    record
+}
+
 pub fn cosine_similarity(a: &[i8], b: &[i8]) -> Option<f64> {
     if a.len() != b.len() || a.is_empty() {
         return None;
@@ -1011,6 +1064,21 @@ fn describe_stage(stage: &PipelineStage, engine: &StorageEngine) -> (String, Str
                 field,
                 query_vector.len(),
                 threshold.into_inner()
+            ),
+        ),
+        PipelineStage::VectorSearch {
+            field,
+            query_vector,
+            top_k,
+        } => (
+            "vector_search".to_string(),
+            "O(n * d)".to_string(),
+            format!(
+                "Top-{} cosine similarity on field '{}' (query dim {}), kept in a bounded min-heap of size k. \
+No ANN index — full scan comparison. Adds a `_score` field to each result.",
+                top_k,
+                field,
+                query_vector.len()
             ),
         ),
         PipelineStage::Correlate {
@@ -1835,6 +1903,66 @@ pub fn try_apply_pipeline_stages_to_vec(
                     }
                 }
                 *records = kept;
+            }
+            PipelineStage::VectorSearch {
+                field,
+                query_vector,
+                top_k,
+            } => {
+                if *top_k == 0 {
+                    return Err(crate::error::LivenError::Query(
+                        "vector_search: k must be >= 1".to_string(),
+                    ));
+                }
+                use std::cmp::Reverse;
+                use std::collections::BinaryHeap;
+
+                // Bounded min-heap of the best `top_k` candidates — memory O(k),
+                // not O(matches). Filter stages before this one have already
+                // narrowed `records`.
+                let mut heap: BinaryHeap<Reverse<ScoredCandidate>> =
+                    BinaryHeap::with_capacity(top_k + 1);
+                for r in records.drain(..) {
+                    let Some(val) = evaluate_record_field(&r, field) else {
+                        continue;
+                    };
+                    let record_vec = to_vector_strict(&val).map_err(|e| {
+                        crate::error::LivenError::Query(format!(
+                            "vector_search on field '{field}': {e}"
+                        ))
+                    })?;
+                    if record_vec.len() != query_vector.len() {
+                        return Err(crate::error::LivenError::Query(format!(
+                            "vector_search on field '{field}': dimension mismatch \
+(record has {} int8 value(s), query has {})",
+                            record_vec.len(),
+                            query_vector.len()
+                        )));
+                    }
+                    let score = cosine_similarity(&record_vec, query_vector).unwrap_or(0.0);
+                    heap.push(Reverse(ScoredCandidate {
+                        score,
+                        sequence_id: r.sequence_id,
+                        record: r,
+                    }));
+                    if heap.len() > *top_k {
+                        // Drop the current worst candidate.
+                        heap.pop();
+                    }
+                }
+
+                let mut items: Vec<ScoredCandidate> =
+                    heap.into_iter().map(|Reverse(c)| c).collect();
+                // Best-first: score descending, ties broken by sequence_id ascending.
+                items.sort_by(|a, b| {
+                    ordered_float::OrderedFloat(b.score)
+                        .cmp(&ordered_float::OrderedFloat(a.score))
+                        .then_with(|| a.sequence_id.cmp(&b.sequence_id))
+                });
+                *records = items
+                    .into_iter()
+                    .map(|c| attach_score(c.record, c.score))
+                    .collect();
             }
             PipelineStage::Get { key } => {
                 records.retain(|r| r.key.as_str() == *key);

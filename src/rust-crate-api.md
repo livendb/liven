@@ -314,6 +314,26 @@ Through JSON interfaces (REST/ingest, JSONL import, the embedded `insert` API), 
 Floating-point embeddings are **not** quantized by the core engine; convert them to
 int8 in the client SDK before writing.
 
+### vector_search
+
+Top-k vector similarity search. Returns the `k` records whose vector field is most
+cosine-similar to the query, ordered best-first, each carrying a `_score` field in
+`-1.0..=1.0`. Ties are broken deterministically by ascending `sequence_id`. Results are
+kept in a bounded min-heap, so memory is O(k).
+
+```rust,ignore
+db.vector_search("embeddings", "vector", vec![12, -5, 3], 10)?;
+```
+
+It composes after filters, so metadata can scope the search:
+
+```text
+from("mem") | filter(user_id == "u1") | vector_search(embedding, vec([1, 2, 3]), 10)
+```
+
+Input contract is the same as `vector_filter` (int8; matching dimension), and `k` must
+be at least 1.
+
 ### enrich
 
 Left-join records from another stream.

@@ -167,6 +167,24 @@ impl Pipeline {
         self
     }
 
+    /// Add a top-k vector similarity search stage.
+    ///
+    /// Returns the `top_k` records most cosine-similar to `query_vector`, ordered
+    /// best-first, each carrying a `_score` field in `-1.0..=1.0`.
+    pub fn vector_search(
+        mut self,
+        field: impl Into<String>,
+        query_vector: Vec<i8>,
+        top_k: usize,
+    ) -> Self {
+        self.stages.push(PipelineStage::VectorSearch {
+            field: field.into(),
+            query_vector,
+            top_k,
+        });
+        self
+    }
+
     /// Add a get-by-key stage.
     pub fn get(mut self, key: impl Into<String>) -> Self {
         self.stages.push(PipelineStage::Get { key: key.into() });
