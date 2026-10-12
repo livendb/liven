@@ -121,8 +121,9 @@ pub struct StorageEngine {
     /// Incremented on each segment rollover, independent of the sequence ID.
     pub segment_id_counter: Arc<AtomicU64>,
     /// Serialises operations that do a read-check-then-write.
-    /// Held by: InsertBatch, DeleteKey, PipelineDelete (full scan path),
-    /// PipelineUpdate. NOT held by single Insert or Upsert (last-writer-wins).
+    /// Held by single Insert, single Upsert, InsertBatch, UpsertBatch, Update,
+    /// DeleteKey, PipelineUpdate and PipelineDelete (full-scan path). In other
+    /// words every mutating path takes it, so writers are globally serialised.
     pub write_lock: Arc<Mutex<()>>,
     pub timestamp_indexes: Arc<Mutex<HashMap<String, Arc<timestamp_index::TimestampIndex>>>>,
     /// Handle to the background flusher thread for clean shutdown coordination.

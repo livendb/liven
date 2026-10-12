@@ -1549,8 +1549,8 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> crate::error::Res
             let mut affected_rows = 0;
 
             // Hold write_lock to prevent concurrent Insert/Upsert from racing with this delete.
-            // The same lock is used by InsertBatch. Individual Insert calls do not use it
-            // (last-writer-wins semantics are acceptable for single-record inserts).
+            // The same lock is used by every mutating path, including single Insert and
+            // Upsert (writers are globally serialised).
             let _guard = engine.write_lock.lock().unwrap();
 
             if engine.skipmap.contains_key(&compound_key) {
