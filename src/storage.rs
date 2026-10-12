@@ -690,7 +690,9 @@ impl StorageEngine {
 
                         let node_overhead = compound_key.len() as u64 + 64;
                         if flags & 0x02 != 0 {
-                            // Tombstone — remove from skipmap only; do not add stream to streams_set
+                            // Tombstone — drop the timestamp-index entry, then remove
+                            // from skipmap only; do not add stream to streams_set
+                            self.prune_timestamp_index(stream_name, key);
                             if self.skipmap.remove(&compound_key).is_some() {
                                 self.index_ram_bytes
                                     .fetch_sub(node_overhead, Ordering::SeqCst);
@@ -974,6 +976,13 @@ impl StorageEngine {
         }
 
         let stream_key = crate::storage::key::StreamKey::from_str(key)?;
+
+        // Keep the timestamp index consistent: a tombstone means the key is no
+        // longer live, so drop its entry before the frame is written.
+        if is_tombstone {
+            self.prune_timestamp_index(stream_name, key);
+        }
+
         self.ring_buffer
             .append(stream_name, stream_key, value, is_tombstone)
     }
@@ -1069,6 +1078,12 @@ impl StorageEngine {
             }
         }
 
+        // Keep the timestamp index consistent with the tombstone: drop each key's
+        // live entry before the tombstone frames are queued.
+        for key in keys {
+            self.prune_timestamp_index(stream_name, key);
+        }
+
         let mut stream_keys = Vec::with_capacity(keys.len());
         for key in keys {
             stream_keys.push(crate::storage::key::StreamKey::from_str(key)?);
@@ -1084,6 +1099,24 @@ impl StorageEngine {
             LivenError::Internal(format!("LogRingBuffer coordination error: {}", e))
         })??;
         Ok(records)
+    }
+
+    /// Drops a key's entry from its stream's timestamp index using the key's
+    /// current live pointer. Called when a key is tombstoned (delete, or the
+    /// tombstone half of an upsert/update) so a time-range scan cannot resurrect
+    /// the deleted or superseded record from a stale index entry.
+    fn prune_timestamp_index(&self, stream_name: &str, key: &str) {
+        let compound_key = format!("{}:{}", stream_name, key);
+        let Some(ptr) = self.skipmap.get(&compound_key).map(|e| *e.value()) else {
+            return;
+        };
+        let Ok(rec) = self.read_record(ptr) else {
+            return;
+        };
+        let guard = self.timestamp_indexes.lock().unwrap();
+        if let Some(idx) = guard.get(&rec.stream_name) {
+            idx.remove(rec.timestamp, rec.sequence_id);
+        }
     }
 
     /// Reads a record from disk via its LogPointer using safe positional reads
@@ -1583,6 +1616,10 @@ impl StorageEngine {
 
         // Group rewritten pointers to batch updates
         let mut new_pointers = HashMap::new();
+        // (stream, timestamp, sequence_id) per rewritten key, used to re-point the
+        // per-stream timestamp index at the compacted frame (the timestamp index
+        // stores pointers, which go stale when a segment is rewritten and deleted).
+        let mut rewritten_meta: HashMap<String, (String, i64, u64)> = HashMap::new();
 
         for (compound_key, pointer) in active_pointers_to_rewrite {
             let record = match self.read_record(pointer) {
@@ -1595,6 +1632,19 @@ impl StorageEngine {
                     continue;
                 }
             };
+
+            let new_ptr = LogPointer {
+                segment_id: compacted_segment_id,
+                file_offset: offset,
+            };
+            rewritten_meta.insert(
+                compound_key.clone(),
+                (
+                    record.stream_name.clone(),
+                    record.timestamp,
+                    record.sequence_id,
+                ),
+            );
 
             SERIALIZATION_BUFFER.with(|buf_cell| {
                 let mut local_buf = buf_cell.borrow_mut();
@@ -1618,13 +1668,7 @@ impl StorageEngine {
 
                 comp_file.write_all(&frame_buf).map_err(LivenError::Io)?;
 
-                new_pointers.insert(
-                    compound_key,
-                    LogPointer {
-                        segment_id: compacted_segment_id,
-                        file_offset: offset,
-                    },
-                );
+                new_pointers.insert(compound_key, new_ptr);
 
                 offset += frame_buf.len() as u64;
                 Ok::<(), LivenError>(())
@@ -1644,6 +1688,15 @@ impl StorageEngine {
             };
 
             if should_update {
+                // Re-point the timestamp index at the compacted frame before the old
+                // segment is deleted; otherwise time-range scans would follow stale
+                // pointers into a removed file and silently drop the record.
+                if let Some((stream_name, ts, seq_id)) = rewritten_meta.get(&compound_key) {
+                    let guard = self.timestamp_indexes.lock().unwrap();
+                    if let Some(idx) = guard.get(stream_name) {
+                        idx.insert(*ts, *seq_id, new_ptr);
+                    }
+                }
                 self.skipmap.insert(compound_key, new_ptr);
             }
         }
@@ -1799,6 +1852,14 @@ impl StorageEngine {
                         && rec.flags & 0x02 == 0
                     // Skip tombstones
                     {
+                        // Liveness check: only accept the frame the key currently
+                        // points at. This rejects stale index entries left by a
+                        // supersede/delete (belt-and-braces with the index
+                        // maintenance in append/compact).
+                        let compound = format!("{}:{}", rec.stream_name, rec.key.as_str());
+                        if self.skipmap.get(&compound).map(|e| *e.value()) != Some(ptr) {
+                            continue;
+                        }
                         let dedup_key = (rec.stream_name.clone(), rec.key.to_string());
                         if let Some(&prev_idx) = seen.get(&dedup_key) {
                             records[prev_idx] = rec;
