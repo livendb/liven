@@ -1081,6 +1081,13 @@ No ANN index — full scan comparison. Adds a `_score` field to each result.",
                 query_vector.len()
             ),
         ),
+        PipelineStage::History => (
+            "history".to_string(),
+            "O(n) full scan".to_string(),
+            "Return every version of every key (tombstones and superseded versions included), \
+ordered by ascending sequence_id. Full segment scan: cost is proportional to the whole database."
+                .to_string(),
+        ),
         PipelineStage::Correlate {
             source_stream,
             join_key,
@@ -1295,6 +1302,13 @@ fn has_time_range_filter(stages: &[PipelineStage]) -> Option<(i64, i64)> {
     None
 }
 
+/// True when a pipeline explicitly asks for the history view (`history()`).
+/// History pipelines bypass the live key-index scan and the index-assisted fast
+/// paths, because those paths can only ever see live records.
+fn has_history_stage(stages: &[PipelineStage]) -> bool {
+    stages.iter().any(|s| matches!(s, PipelineStage::History))
+}
+
 /// Executes any full parsed Query on the StorageEngine, returning results or execution errors.
 #[tracing::instrument(skip(engine, query), fields(query_type = ?query.variant_name()))]
 pub fn execute_query(engine: &StorageEngine, query: &Query) -> crate::error::Result<Vec<Record>> {
@@ -1312,7 +1326,9 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> crate::error::Res
             // Fast path: if the pipeline resolves to a single key equality
             // (e.g. from("s").get("k") or from("s") | filter(key == "k")),
             // use the skipmap O(log N) point lookup instead of scanning all segments.
-            if let Some(key) = extract_unique_key_from_pipeline(stages) {
+            // Skipped for history() pipelines, which must see every version.
+            let history = has_history_stage(stages);
+            if !history && let Some(key) = extract_unique_key_from_pipeline(stages) {
                 let stream_name =
                     if let Some(PipelineStage::From { stream_name: sn }) = stages.first() {
                         sn
@@ -1342,7 +1358,8 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> crate::error::Res
 
             // Fast path: time-range filter on timestamp field.
             // Use the per-stream timestamp index for O(log N + K) range scans.
-            if let Some((start_ms, end_ms)) = has_time_range_filter(stages)
+            if !history
+                && let Some((start_ms, end_ms)) = has_time_range_filter(stages)
                 && let Some(PipelineStage::From { stream_name }) = stages.first()
             {
                 let mut records = engine.scan_by_time_range(stream_name, start_ms, end_ms)?;
@@ -1350,13 +1367,20 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> crate::error::Res
                 return Ok(records);
             }
 
-            // Fall through to the full historical scan for general queries.
-            // Scope the scan to the FROM stream: frames from other streams are not
-            // materialized and do not count against max_scan_results.
+            // Default read path: the live key index (`scan_live_stream`) returns
+            // only live records for the FROM stream, in cost proportional to the
+            // stream's live key count — not the whole database. Tombstoned and
+            // superseded versions are never materialized, so vector_filter /
+            // vector_search cannot surface forgotten memories. `history()` opts
+            // back into a full segment scan that returns every version.
             let mut records = match stages.first() {
-                Some(PipelineStage::From { stream_name }) => {
-                    engine.scan_historical_stream(stream_name, usize::MAX)?
+                Some(PipelineStage::From { stream_name }) if history => {
+                    engine.scan_history_stream(stream_name, usize::MAX)?
                 }
+                Some(PipelineStage::From { stream_name }) => {
+                    engine.scan_live_stream(stream_name, usize::MAX)?
+                }
+                _ if history => engine.scan_history_all(usize::MAX)?,
                 _ => engine.scan_historical()?,
             };
             try_apply_pipeline_stages_to_vec(&mut records, engine, stages)?;
@@ -1634,7 +1658,7 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> crate::error::Res
             // Acquire write_lock to prevent concurrent inserts from racing between
             // the historical scan and the append of updated records.
             let _guard = engine.write_lock.lock().unwrap();
-            let mut records = engine.scan_historical_stream(&stream_name, usize::MAX)?;
+            let mut records = engine.scan_live_stream(&stream_name, usize::MAX)?;
             try_apply_pipeline_stages_to_vec(&mut records, engine, pipeline)?;
             let affected_rows = records.len();
             for r in &records {
@@ -1709,7 +1733,7 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> crate::error::Res
                 // Acquire write_lock to prevent concurrent inserts from racing between
                 // the historical scan and the tombstone batch.
                 let _guard = engine.write_lock.lock().unwrap();
-                let mut records = engine.scan_historical_stream(&stream_name, usize::MAX)?;
+                let mut records = engine.scan_live_stream(&stream_name, usize::MAX)?;
                 try_apply_pipeline_stages_to_vec(&mut records, engine, pipeline)?;
 
                 let mut unique_keys = std::collections::HashSet::new();
@@ -1803,13 +1827,18 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> crate::error::Res
                 )));
             }
             // Scope the scan to the FROM stream so the scan limit applies per stream.
+            // Default is the live key index; history() opts into the full segment scan.
             let limit = get_limit_from_stages(pipeline);
+            let history = has_history_stage(pipeline);
             let mut records = match (pipeline.first(), limit) {
+                (Some(PipelineStage::From { stream_name }), l) if history => {
+                    engine.scan_history_stream(stream_name, l.unwrap_or(usize::MAX))?
+                }
                 (Some(PipelineStage::From { stream_name }), Some(l)) => {
-                    engine.scan_historical_stream(stream_name, l)?
+                    engine.scan_live_stream(stream_name, l)?
                 }
                 (Some(PipelineStage::From { stream_name }), None) => {
-                    engine.scan_historical_stream(stream_name, usize::MAX)?
+                    engine.scan_live_stream(stream_name, usize::MAX)?
                 }
                 (_, Some(l)) => engine.scan_historical_limited(l)?,
                 (_, None) => engine.scan_historical()?,
@@ -1822,10 +1851,15 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> crate::error::Res
 
 /// Executes a pipeline query on static historical database records.
 pub fn execute_query_historical(engine: &StorageEngine, stages: &[PipelineStage]) -> Vec<Record> {
+    let history = has_history_stage(stages);
     let mut records = match stages.first() {
-        Some(PipelineStage::From { stream_name }) => engine
-            .scan_historical_stream(stream_name, usize::MAX)
+        Some(PipelineStage::From { stream_name }) if history => engine
+            .scan_history_stream(stream_name, usize::MAX)
             .unwrap_or_default(),
+        Some(PipelineStage::From { stream_name }) => engine
+            .scan_live_stream(stream_name, usize::MAX)
+            .unwrap_or_default(),
+        _ if history => engine.scan_history_all(usize::MAX).unwrap_or_default(),
         _ => engine.scan_historical().unwrap_or_default(),
     };
     apply_pipeline_stages_to_vec(&mut records, engine, stages);
@@ -1858,6 +1892,11 @@ pub fn try_apply_pipeline_stages_to_vec(
         match stage {
             PipelineStage::From { stream_name } => {
                 records.retain(|r| r.stream_name == *stream_name);
+            }
+            PipelineStage::History => {
+                // The history view is realized at scan time (see `execute_query`):
+                // by the time stages run, the buffer already contains every version
+                // (tombstones included). Nothing to do here.
             }
             PipelineStage::Delete => {
                 // With Fix 1, scan_historical no longer returns tombstone frames, so this stage
@@ -2273,11 +2312,8 @@ pub fn try_apply_pipeline_stages_to_vec(
                 // Pre-fetch all records from source_stream into a HashMap keyed by the join field value.
                 // This replaces the O(N × M) double scan with O(N + M) construction + O(K) lookups.
                 let all_source: Vec<Record> = engine
-                    .scan_historical()
-                    .unwrap_or_default()
-                    .into_iter()
-                    .filter(|r| r.stream_name == *source_stream)
-                    .collect();
+                    .scan_live_stream(source_stream, usize::MAX)
+                    .unwrap_or_default();
 
                 // Build a multi-map: join_key_value → Vec<(timestamp, Record)>
                 let mut source_map: std::collections::HashMap<String, Vec<(i64, Record)>> =

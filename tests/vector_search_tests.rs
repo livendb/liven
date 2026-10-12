@@ -122,10 +122,10 @@ fn k_zero_is_an_error() {
 
 #[test]
 fn empty_stream_returns_no_results() {
-    // To get a listed stream with zero live records: append a record, force a segment
-    // rollover, tombstone the record, then compact so the (now inactive) original is
-    // evicted. (A tombstone alone does not remove a record from scans — see
-    // tombstone_compaction_tests.rs — only inactive-segment compaction does.)
+    // A listed stream with zero live records. With the live key-index read path,
+    // tombstoning the record removes it from queries immediately (no compaction
+    // required); the rollover+compaction below is retained to also cover the case
+    // where the original frame has been evicted from an inactive segment.
     let dir = tempfile::Builder::new()
         .prefix("liven_vsearch_empty_")
         .tempdir()

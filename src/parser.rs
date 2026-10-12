@@ -96,6 +96,7 @@ fn parse_stage(input: &str) -> IResult<&str, PipelineStage> {
         parse_from_stage,
         parse_delete_stage,
         parse_trash_stage,
+        parse_history_stage,
         parse_filter_stage,
         parse_vector_filter_stage,
         parse_map_stage,
@@ -304,6 +305,14 @@ fn parse_trash_stage(input: &str) -> IResult<&str, PipelineStage> {
     let (input, _) = tag("trash")(input)?;
     let (input, _) = opt(delimited(char('('), multispace0, char(')')))(input)?;
     Ok((input, PipelineStage::Trash))
+}
+
+/// Parses `history()`, the opt-in view that returns every version of a stream's
+/// records (including tombstones and superseded versions).
+fn parse_history_stage(input: &str) -> IResult<&str, PipelineStage> {
+    let (input, _) = tag("history")(input)?;
+    let (input, _) = opt(delimited(char('('), multispace0, char(')')))(input)?;
+    Ok((input, PipelineStage::History))
 }
 
 fn parse_filter_stage(input: &str) -> IResult<&str, PipelineStage> {

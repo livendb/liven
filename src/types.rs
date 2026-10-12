@@ -135,6 +135,13 @@ pub enum PipelineStage {
     Distinct {
         field: String,
     },
+    /// Opt-in history view: switch the read path from the live key index to a
+    /// full segment scan that returns **every** version of every key — including
+    /// tombstones and superseded (overwritten/deleted) versions — ordered by
+    /// ascending `sequence_id`. Tombstone frames carry `flags & 0x02`; superseded
+    /// versions are identifiable by a repeated `key`. Cost is proportional to the
+    /// whole database, so use sparingly.
+    History,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -381,6 +388,7 @@ impl PipelineStage {
                     .join(", ");
                 format!("vector_search({}, [{}], {})", field, vec_str, top_k)
             }
+            PipelineStage::History => "history()".to_string(),
             PipelineStage::Get { key } => format!("get(\"{}\")", key),
             PipelineStage::Map { projections } => {
                 format!("map({})", projections.join(", "))

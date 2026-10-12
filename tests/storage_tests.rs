@@ -322,9 +322,9 @@ fn test_scan_excludes_tombstone_frames() {
         .append("orders", "k2", DataValue::Null, true)
         .unwrap();
 
-    // scan_historical returns all active frames (k1, k2 original, k3).
-    // The k2 tombstone frame itself is skipped (Fix 1), but the original
-    // active k2 frame remains in the append log and is still returned.
+    // scan_historical is the legacy segment scan (kept for the opt-in history view
+    // and non-`From` fallback). It skips tombstone frames but, because it replays
+    // the raw append log, it still surfaces the pre-delete k2 frame.
     let records = engine.scan_historical().unwrap();
     let order_records: Vec<_> = records
         .iter()
@@ -334,7 +334,7 @@ fn test_scan_excludes_tombstone_frames() {
     assert_eq!(
         order_records.len(),
         3,
-        "scan_historical returns active frames (k1, k2, k3); tombstone frame is skipped"
+        "scan_historical replays the raw log: k1, pre-delete k2, k3 (tombstone frame skipped)"
     );
     assert!(
         order_records.iter().all(|r| r.flags & 0x02 == 0),
@@ -343,18 +343,39 @@ fn test_scan_excludes_tombstone_frames() {
     assert!(order_records.iter().any(|r| r.key.as_str() == "k1"));
     assert!(
         order_records.iter().any(|r| r.key.as_str() == "k2"),
-        "Original k2 active frame must still appear in scan"
+        "Legacy raw scan still shows the pre-delete k2 frame"
     );
     assert!(order_records.iter().any(|r| r.key.as_str() == "k3"));
 
-    // count() via executor returns all active frames
+    // count() via the executor now reads through the live key index, so deleted
+    // keys are excluded: only k1 and k3 remain.
     let query = liven::parser::parse_query(r#"from("orders") | count()"#).unwrap();
     let results = liven::executor::execute_query(&engine, &query).unwrap();
     assert_eq!(results.len(), 1);
     assert_eq!(
         results[0].value,
-        DataValue::UInt(3),
-        "count() returns active frames (k1, k2, k3); tombstone is excluded from scan"
+        DataValue::UInt(2),
+        "count() reads the live index: k2 was deleted, so only k1 and k3 are counted"
+    );
+
+    // history() opts back into the raw-log view, which still contains the
+    // tombstoned k2 frame (flags & 0x02).
+    let history_query = liven::parser::parse_query(r#"from("orders") | history()"#).unwrap();
+    let history = liven::executor::execute_query(&engine, &history_query).unwrap();
+    let history_orders: Vec<_> = history
+        .iter()
+        .filter(|r| r.stream_name == "orders")
+        .collect();
+    assert_eq!(
+        history_orders.len(),
+        4,
+        "history() returns k1, k2, k3 and the k2 tombstone frame"
+    );
+    assert!(
+        history_orders
+            .iter()
+            .any(|r| r.key.as_str() == "k2" && r.flags & 0x02 != 0),
+        "history() must include the tombstone frame for k2"
     );
 
     let _ = std::fs::remove_dir_all(&path);

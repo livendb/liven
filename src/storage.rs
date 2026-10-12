@@ -129,6 +129,10 @@ pub struct StorageEngine {
     flusher_handle: Option<std::thread::JoinHandle<()>>,
     /// Maximum number of records to return from a full scan operation.
     max_scan_results: usize,
+    /// Debug/testing counter: number of on-disk frames read by scans. Used to
+    /// assert that the live (index) scan cost is proportional to the queried
+    /// stream, not the whole database.
+    pub frames_read: AtomicU64,
     /// Group-commit drain window in microseconds.
     /// The flusher waits this long for additional entries before flushing.
     /// Default: 5000 (5ms). Set lower (e.g. 300) for lower-latency single-caller workloads.
@@ -277,6 +281,7 @@ impl StorageEngine {
             timestamp_indexes: timestamp_indexes.clone(),
             flusher_handle: None,
             max_scan_results,
+            frames_read: AtomicU64::new(0),
             commit_drain_window_us: 5000,
             commit_max_batch_size: 2048,
             recovery_mode,
@@ -437,6 +442,7 @@ impl StorageEngine {
             timestamp_indexes,
             flusher_handle: None,
             max_scan_results: 100_000,
+            frames_read: AtomicU64::new(0),
             commit_drain_window_us: 5000,
             commit_max_batch_size: 2048,
             recovery_mode: mode,
@@ -1213,37 +1219,134 @@ impl StorageEngine {
         keys
     }
 
-    /// Scans all historical records from all active/read segments sequentially using safe positional reads.
+    /// Scans all historical records from all segments sequentially using safe
+    /// positional reads (latest live version per key; tombstones skipped).
+    ///
+    /// This is a full-database scan; the default read path is
+    /// [`StorageEngine::scan_live_stream`]. Kept for the opt-in history view.
     #[tracing::instrument(skip(self))]
     pub fn scan_historical(&self) -> crate::error::Result<Vec<Record>> {
-        self.scan_historical_inner(usize::MAX, None)
+        self.scan_segment_frames(usize::MAX, None, false, true)
     }
 
-    /// Scans historical records but stops early once `max_records` have been collected.
-    /// This allows early-termination optimizations for queries with a LIMIT clause.
+    /// Like [`StorageEngine::scan_historical`] but stops early after `max_records`.
     pub fn scan_historical_limited(&self, max_records: usize) -> crate::error::Result<Vec<Record>> {
-        self.scan_historical_inner(max_records, None)
+        self.scan_segment_frames(max_records, None, false, true)
     }
 
-    /// Scans only records belonging to `stream_name`.
-    ///
-    /// Frames from other streams are dropped as soon as their stream name is known
-    /// (from the payload prefix) and are never materialized, so they do not count
-    /// against `max_scan_results`. The global scan limit therefore applies to the
-    /// number of records returned for the *queried* stream.
+    /// Segment-scan limited to `stream_name` (latest live version per key, no tombstones).
     pub fn scan_historical_stream(
         &self,
         stream_name: &str,
         max_records: usize,
     ) -> crate::error::Result<Vec<Record>> {
-        self.scan_historical_inner(max_records, Some(stream_name))
+        self.scan_segment_frames(max_records, Some(stream_name), false, true)
     }
 
-    /// Single shared implementation for unlimited, limited, and stream-scoped scans.
-    fn scan_historical_inner(
+    /// Opt-in history view for `stream_name`: **every** frame, including tombstones
+    /// and superseded versions, in ascending `sequence_id` order.
+    ///
+    /// Cost is proportional to the whole database (full segment scan), so this is
+    /// only used when a query explicitly asks for history.
+    pub fn scan_history_stream(
+        &self,
+        stream_name: &str,
+        max_records: usize,
+    ) -> crate::error::Result<Vec<Record>> {
+        let mut records = self.scan_segment_frames(max_records, Some(stream_name), true, false)?;
+        records.sort_by_key(|r| r.sequence_id);
+        Ok(records)
+    }
+
+    /// Opt-in history view across **all** streams: every frame, including tombstones
+    /// and superseded versions, in ascending `sequence_id` order. Full-database scan.
+    pub fn scan_history_all(&self, max_records: usize) -> crate::error::Result<Vec<Record>> {
+        let mut records = self.scan_segment_frames(max_records, None, true, false)?;
+        records.sort_by_key(|r| r.sequence_id);
+        Ok(records)
+    }
+
+    /// Default read path: return the live records of one stream by ranging over the
+    /// in-memory key index (the skipmap holds one live `LogPointer` per key) and
+    /// reading each record with a positional read.
+    ///
+    /// Cost is proportional to the number of live keys in `stream_name`, **not** to
+    /// the total database size or the number of segments. Results are returned in
+    /// ascending `sequence_id` order (a sort of the stream's records).
+    /// `max_scan_results` is applied to the number of records returned.
+    pub fn scan_live_stream(
+        &self,
+        stream_name: &str,
+        max_records: usize,
+    ) -> crate::error::Result<Vec<Record>> {
+        use std::ops::Bound;
+        let effective_limit = std::cmp::min(max_records, self.max_scan_results);
+        let prefix = format!("{}:", stream_name);
+
+        let mut records: Vec<Record> = Vec::new();
+        for entry in self
+            .skipmap
+            .range::<str, _>((Bound::Included(prefix.as_str()), Bound::Unbounded))
+        {
+            if !entry.key().starts_with(prefix.as_str()) {
+                break; // past this stream's key range
+            }
+            if records.len() >= effective_limit {
+                break;
+            }
+
+            let key = entry.key();
+            let mut pointer = *entry.value();
+            self.frames_read.fetch_add(1, Ordering::Relaxed);
+            let record = match self.read_record(pointer) {
+                Ok(r) => Some(r),
+                Err(_) => {
+                    // Compaction may have relocated the record; retry once with a
+                    // fresh pointer, and give up if it is now gone.
+                    pointer = match self.skipmap.get(key) {
+                        Some(e) => *e.value(),
+                        None => continue,
+                    };
+                    self.frames_read.fetch_add(1, Ordering::Relaxed);
+                    self.read_record(pointer).ok()
+                }
+            };
+            if let Some(rec) = record {
+                // The "stream:" prefix could in principle also match a stream whose
+                // name contains ':' (e.g. "stream:x"), so verify the frame's own
+                // stream name before accepting it.
+                if rec.stream_name == stream_name {
+                    records.push(rec);
+                }
+            }
+        }
+
+        if records.len() >= self.max_scan_results && max_records > self.max_scan_results {
+            return Err(LivenError::Query(format!(
+                "Scan result limit reached ({} records).\n   Refine your query with filter(), limit(), or a key-based lookup.\n   Override with max_scan_results in liven.toml.",
+                self.max_scan_results
+            )));
+        }
+
+        // Deterministic order: ascending sequence_id (a sort of the stream's live
+        // records; O(m log m) for m records in the stream).
+        records.sort_by_key(|r| r.sequence_id);
+        Ok(records)
+    }
+
+    /// Shared segment-scan implementation.
+    ///
+    /// * `stream_filter`  — restrict to one stream (others are dropped before
+    ///   materialization).
+    /// * `include_tombstones` — keep tombstone frames (history view) instead of
+    ///   skipping them.
+    /// * `dedup` — keep only the latest version per (stream, key).
+    fn scan_segment_frames(
         &self,
         max_records: usize,
         stream_filter: Option<&str>,
+        include_tombstones: bool,
+        dedup: bool,
     ) -> crate::error::Result<Vec<Record>> {
         // Apply the global max_scan_results limit if it's lower than the requested max_records
         let effective_limit = std::cmp::min(max_records, self.max_scan_results);
@@ -1319,9 +1422,10 @@ impl StorageEngine {
 
                 let (seq_id, timestamp, type_tag, flags, payload_len, crc32) =
                     decode_frame_header(&header_bytes);
+                self.frames_read.fetch_add(1, Ordering::Relaxed);
 
-                // Skip tombstone frames — do not read payload, do not include in results
-                if flags & 0x02 != 0 {
+                // Tombstone frames are normally skipped; the history view keeps them.
+                if flags & 0x02 != 0 && !include_tombstones {
                     offset += 26 + (payload_len as u64);
                     continue;
                 }
@@ -1391,12 +1495,16 @@ impl StorageEngine {
                 })?;
 
                 if let Some(rec) = payload_record {
-                    let dedup_key = (rec.stream_name.clone(), rec.key.to_string());
-                    if let Some(&prev_idx) = latest_idx.get(&dedup_key) {
-                        // Replace older version of the same key
-                        records[prev_idx] = rec;
+                    if dedup {
+                        let dedup_key = (rec.stream_name.clone(), rec.key.to_string());
+                        if let Some(&prev_idx) = latest_idx.get(&dedup_key) {
+                            // Replace older version of the same key
+                            records[prev_idx] = rec;
+                        } else {
+                            latest_idx.insert(dedup_key, records.len());
+                            records.push(rec);
+                        }
                     } else {
-                        latest_idx.insert(dedup_key, records.len());
                         records.push(rec);
                     }
                 }

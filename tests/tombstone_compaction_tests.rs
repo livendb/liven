@@ -52,7 +52,15 @@ fn test_tombstone_compaction_lifecycle() {
     assert!(engine.get("test_stream", "k1").unwrap().is_none());
     assert!(!engine.skipmap.contains_key(&"test_stream:k1".to_string()));
 
-    // 6. Verify that scan_historical contains only the original record (tombstone frames are skipped)
+    // 6. scan_historical is the legacy raw-log scan (kept for history()/fallback),
+    // so it still surfaces the pre-delete k1 frame. The *query* path, however, now
+    // reads through the live key index and must not return k1 at all.
+    let live_query = liven::parser::parse_query(r#"from("test_stream")"#).unwrap();
+    let live = liven::executor::execute_query(&engine, &live_query).unwrap();
+    assert!(
+        live.iter().all(|r| r.key.as_str() != "k1"),
+        "the live query path must not return a tombstoned key"
+    );
     let historical_1 = engine.scan_historical().unwrap();
     let k1_records: Vec<&Record> = historical_1
         .iter()
@@ -61,7 +69,7 @@ fn test_tombstone_compaction_lifecycle() {
     assert_eq!(
         k1_records.len(),
         1,
-        "scan_historical must exclude tombstone frames — only the active record should appear"
+        "scan_historical (legacy raw scan) excludes tombstone frames — only the active record appears"
     );
     assert_eq!(
         k1_records[0].flags, 0x01,
