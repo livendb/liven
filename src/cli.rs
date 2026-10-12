@@ -319,16 +319,18 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
             } else {
                 storage::RecoveryMode::Default
             };
-            let mut engine = storage::StorageEngine::new_with_recovery_mode(
+            // Pass the configured limits into construction so *recovery* honours
+            // them; otherwise a DB with >32 streams or a >16 MB index fails to open.
+            let mut engine = storage::StorageEngine::new_with_limits(
                 data_directory,
                 max_segment_size as u64,
                 recovery_mode,
+                config.limits.max_concurrent_streams,
+                config.limits.max_index_ram_mb as u64 * 1024 * 1024,
+                config.limits.max_open_file_descriptors,
             )?;
 
-            // Apply configuration limits
-            engine.set_max_streams(config.limits.max_concurrent_streams);
-            engine.set_max_index_ram_bytes(config.limits.max_index_ram_mb as u64 * 1024 * 1024);
-            engine.set_max_fds(config.limits.max_open_file_descriptors);
+            // max_scan_results is a query-time limit, not a recovery limit.
             engine.set_max_scan_results(config.limits.max_scan_results);
 
             let engine = Arc::new(engine);

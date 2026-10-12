@@ -180,27 +180,46 @@ impl StorageEngine {
     }
 
     /// Like `new()`, but with an explicit `RecoveryMode`.
-    /// Use `RecoveryMode::Strict` to fail hard on any corruption during recovery,
-    /// or `RecoveryMode::Repair` to auto-backup and truncate.
+    /// Uses the standalone defaults for the limits that recovery enforces
+    /// (see [`StorageEngine::new_with_limits`]).
     pub fn new_with_recovery_mode<P: AsRef<Path>>(
         data_dir: P,
         max_segment_size: u64,
         recovery_mode: RecoveryMode,
     ) -> crate::error::Result<Self> {
+        Self::new_with_limits(
+            data_dir,
+            max_segment_size,
+            recovery_mode,
+            32,
+            16 * 1024 * 1024,
+            64,
+        )
+    }
+
+    /// Opens the database and runs recovery with the supplied limits already in
+    /// effect.
+    ///
+    /// `recover()` rejects a database whose stream count or index RAM exceeds
+    /// `max_streams` / `max_index_ram_bytes`, so those limits must be known
+    /// **before** recovery runs. Passing them here (instead of calling
+    /// `set_max_streams` / `set_max_index_ram_bytes` afterwards) is what lets a
+    /// database that is larger than the standalone defaults reopen successfully.
+    pub fn new_with_limits<P: AsRef<Path>>(
+        data_dir: P,
+        max_segment_size: u64,
+        recovery_mode: RecoveryMode,
+        max_streams: usize,
+        max_index_ram_bytes: u64,
+        max_fds: usize,
+    ) -> crate::error::Result<Self> {
         let path = data_dir.as_ref().to_path_buf();
         fs::create_dir_all(&path).map_err(LivenError::Io)?;
 
-        // Standalone defaults — no file system read from liven.toml.
-        // The server binary calls set_max_streams, set_max_index_ram_bytes,
-        // and set_max_fds after construction. Embedded users configure
-        // via LivenConfig.
         let max_connections: usize = 10000;
         let broadcast_capacity: usize = 4096;
         let sync_mode: String = "always".to_string();
         let sync_interval_ms: u64 = 100;
-        let max_streams: usize = 32;
-        let max_fds: usize = 64;
-        let max_index_ram_bytes: u64 = 16 * 1024 * 1024;
         let max_scan_results: usize = 100_000;
 
         let conn_semaphore = Arc::new(tokio::sync::Semaphore::new(max_connections));

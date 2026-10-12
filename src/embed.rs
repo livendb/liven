@@ -92,10 +92,17 @@ impl Liven {
         config: LivenConfig,
     ) -> crate::error::Result<Self> {
         let segment_size = config.max_segment_mb as u64 * 1024 * 1024;
-        let mut engine = StorageEngine::new(path, segment_size)?;
-        engine.set_max_streams(config.max_streams);
-        engine.set_max_index_ram_bytes(config.max_index_ram_mb as u64 * 1024 * 1024);
-        engine.set_max_fds(config.max_open_fds);
+        // Supplying the limits up front lets recovery honour them, so a database
+        // larger than the standalone defaults can be reopened (see
+        // StorageEngine::new_with_limits).
+        let mut engine = StorageEngine::new_with_limits(
+            path,
+            segment_size,
+            crate::storage::RecoveryMode::Default,
+            config.max_streams,
+            config.max_index_ram_mb as u64 * 1024 * 1024,
+            config.max_open_fds,
+        )?;
         engine.set_max_scan_results(config.max_scan_results);
         engine.compaction_threshold_segments = config.compaction_threshold_segments;
         engine.compaction_threshold_bytes = config.compaction_threshold_bytes;
