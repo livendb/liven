@@ -367,12 +367,14 @@ impl PipelineStage {
                 query_vector,
                 threshold,
             } => {
+                // Field is emitted unquoted so the stage round-trips through
+                // `parse_identifier` (which only accepts bare identifiers).
                 let vec_str = query_vector
                     .iter()
                     .map(|v| v.to_string())
                     .collect::<Vec<_>>()
                     .join(", ");
-                format!("vector_filter(\"{}\", [{}], {})", field, vec_str, threshold)
+                format!("vector_filter({}, [{}], {})", field, vec_str, threshold)
             }
             PipelineStage::VectorSearch {
                 field,

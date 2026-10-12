@@ -235,3 +235,28 @@ fn float_query_vector_rejected_at_parse() {
         "float query vectors must be rejected"
     );
 }
+
+#[test]
+fn vector_filter_round_trips_through_dsl() {
+    let stages = vec![
+        PipelineStage::From {
+            stream_name: "emb".to_string(),
+        },
+        PipelineStage::VectorFilter {
+            field: "embedding".to_string(),
+            query_vector: vec![12, -5, 9],
+            threshold: ordered_float::OrderedFloat(0.85),
+        },
+    ];
+    let dsl = stages
+        .iter()
+        .map(|s| s.to_dsl_string())
+        .collect::<Vec<_>>()
+        .join(" | ");
+    assert_eq!(
+        dsl, r#"from("emb") | vector_filter(embedding, [12, -5, 9], 0.85)"#,
+        "the field must be emitted unquoted so it reparses"
+    );
+    let parsed = parse_pipeline(&dsl).expect("vector_filter DSL round-trips");
+    assert_eq!(parsed, stages);
+}
