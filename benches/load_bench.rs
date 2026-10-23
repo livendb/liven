@@ -60,6 +60,7 @@ struct Args {
     data_dir: Option<PathBuf>,
     skip_insert: bool,
     keep_data: bool,
+    tag: String,
 }
 
 impl Default for Args {
@@ -83,6 +84,7 @@ impl Default for Args {
             data_dir: None,
             skip_insert: false,
             keep_data: false,
+            tag: String::new(),
         }
     }
 }
@@ -158,6 +160,7 @@ fn parse_args() -> Result<Args, String> {
                     .map_err(|e| format!("{e}"))?
             }
             "--data-dir" => a.data_dir = Some(PathBuf::from(next("--data-dir")?)),
+            "--tag" => a.tag = next("--tag")?,
             "--skip-insert" => a.skip_insert = true,
             "--keep-data" => a.keep_data = true,
             "--mixed" => a.mixed = true,
@@ -218,6 +221,7 @@ fn print_help() {
          --max-index-ram-mb N   explicit index budget (default 1024)\n\
          --mixed                run optional 90/10 mixed phase\n\
          --data-dir PATH        use an existing data dir (for profiling)\n\
+         --tag NAME             suffix for output filenames\n\
          --skip-insert          skip insert/recover, use --data-dir\n\
          --keep-data            keep the temporary data dir\n\
          --help                 show this help\n"
@@ -491,6 +495,7 @@ struct Meta {
     os: String,
     filesystem: String,
     storage: String,
+    tag: String,
     args: String,
 }
 
@@ -1315,7 +1320,14 @@ fn print_summary(result: &RunResult) {
 fn write_outputs(result: &RunResult) -> std::io::Result<(PathBuf, PathBuf)> {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("bench-results");
     std::fs::create_dir_all(&dir)?;
-    let stem = format!("{}-{}", result.meta.date, result.meta.commit);
+    let stem = if result.meta.tag.is_empty() {
+        format!("{}-{}", result.meta.date, result.meta.commit)
+    } else {
+        format!(
+            "{}-{}-{}",
+            result.meta.date, result.meta.commit, result.meta.tag
+        )
+    };
     let json_path = dir.join(format!("{stem}.json"));
     let md_path = dir.join(format!("{stem}.md"));
     std::fs::write(&json_path, serde_json::to_string_pretty(result).unwrap())?;
@@ -1601,6 +1613,7 @@ fn main() {
         os: os_version(),
         filesystem: fs_type(&data_dir),
         storage: storage_type(),
+        tag: args.tag.clone(),
         args: format!("{args:?}"),
     };
 
