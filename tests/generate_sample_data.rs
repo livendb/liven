@@ -1,10 +1,13 @@
-#[allow(unused_imports)]
-use fs2::FileExt;
 use liven::storage::StorageEngine;
 use liven::types::{DataValue, parse_json_to_datavalue};
-use std::fs;
 
-fn post_http_json(addr: &str, path: &str, json_payload: &str) -> Result<(), String> {
+/// Sends a JSON POST and returns the raw response text.
+fn http_post_json(
+    addr: &str,
+    path: &str,
+    extra_headers: &[(&str, &str)],
+    json_payload: &str,
+) -> Result<String, String> {
     use std::io::{Read, Write};
     use std::net::TcpStream;
     use std::time::Duration;
@@ -17,16 +20,23 @@ fn post_http_json(addr: &str, path: &str, json_payload: &str) -> Result<(), Stri
         .set_write_timeout(Some(Duration::from_secs(5)))
         .map_err(|e| e.to_string())?;
 
+    let mut headers = String::new();
+    for (name, value) in extra_headers {
+        headers.push_str(&format!("{}: {}\r\n", name, value));
+    }
+
     let request = format!(
         "POST {} HTTP/1.1\r\n\
          Host: {}\r\n\
          Content-Type: application/json\r\n\
          Content-Length: {}\r\n\
-         Connection: close\r\n\r\n\
+         Connection: close\r\n\
+         {}\r\n\
          {}",
         path,
         addr,
         json_payload.len(),
+        headers,
         json_payload
     );
 
@@ -39,11 +49,78 @@ fn post_http_json(addr: &str, path: &str, json_payload: &str) -> Result<(), Stri
         .read_to_string(&mut response)
         .map_err(|e| format!("Failed to read response: {}", e))?;
 
+    Ok(response)
+}
+
+fn post_http_json(
+    addr: &str,
+    path: &str,
+    extra_headers: &[(&str, &str)],
+    json_payload: &str,
+) -> Result<(), String> {
+    let response = http_post_json(addr, path, extra_headers, json_payload)?;
     if response.contains("200 OK") {
         Ok(())
     } else {
         Err(format!("Server returned error: {}", response))
     }
+}
+
+/// True when something is already listening on the native wire port.
+fn server_is_listening() -> bool {
+    use std::net::{TcpStream, ToSocketAddrs};
+    use std::time::Duration;
+
+    let Ok(mut addrs) = "127.0.0.1:43121".to_socket_addrs() else {
+        return false;
+    };
+    let Some(addr) = addrs.next() else {
+        return false;
+    };
+    TcpStream::connect_timeout(&addr, Duration::from_millis(300)).is_ok()
+}
+
+/// The bootstrap root key: on a fresh database it is the master key.
+fn admin_key() -> Option<String> {
+    if let Ok(key) = std::env::var("LIVEN_SECURITY_MASTER_KEY") {
+        let key = key.trim().to_string();
+        if !key.is_empty() {
+            return Some(key);
+        }
+    }
+    std::fs::read_to_string("./liven.key")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// Exchanges the root key for a session cookie via `/api/system/auth/login`.
+fn login_session(addr: &str, key: &str) -> Result<String, String> {
+    let payload = serde_json::json!({ "token": key }).to_string();
+    let response = http_post_json(addr, "/api/system/auth/login", &[], &payload)?;
+    if !response.contains("200 OK") {
+        return Err(format!(
+            "Login rejected by {}: {}",
+            addr,
+            response.lines().last().unwrap_or("")
+        ));
+    }
+    for line in response.lines() {
+        let Some(rest) = line
+            .strip_prefix("set-cookie: ")
+            .or_else(|| line.strip_prefix("Set-Cookie: "))
+        else {
+            continue;
+        };
+        if let Some(value) = rest
+            .split(';')
+            .next()
+            .and_then(|c| c.trim().strip_prefix("liven_session="))
+        {
+            return Ok(value.to_string());
+        }
+    }
+    Err("Login succeeded but no liven_session cookie was returned".to_string())
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -52,6 +129,7 @@ enum AppendTarget {
     Http {
         addr: String,
         batch: Vec<serde_json::Value>,
+        session: Option<String>,
     },
 }
 
@@ -136,11 +214,20 @@ impl AppendTarget {
     }
 
     fn flush(&mut self) -> Result<(), liven::error::LivenError> {
-        if let AppendTarget::Http { addr, batch } = self
+        if let AppendTarget::Http {
+            addr,
+            batch,
+            session,
+        } = self
             && !batch.is_empty()
         {
+            let cookie = session.as_ref().map(|s| format!("liven_session={}", s));
+            let headers: Vec<(&str, &str)> = match cookie.as_deref() {
+                Some(value) => vec![("Cookie", value)],
+                None => Vec::new(),
+            };
             let json_str = serde_json::to_string(batch).map_err(|e| e.to_string())?;
-            post_http_json(addr, "/api/ingest", &json_str)
+            post_http_json(addr, "/api/ingest", &headers, &json_str)
                 .map_err(liven::error::LivenError::Storage)?;
             batch.clear();
         }
@@ -163,37 +250,37 @@ impl AppendTarget {
 fn test_generate_sample_data() {
     let target_dir = std::env::var("LIVEN_DATA_DIR").unwrap_or_else(|_| "./data".to_string());
 
-    // Detect if the directory is locked by trying to obtain try_lock_shared on any existing .liven segments
-    let is_locked = if let Ok(entries) = fs::read_dir(&target_dir) {
-        let mut locked = false;
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_file()
-                && path.extension().and_then(|s| s.to_str()) == Some("liven")
-                && let Ok(file) = fs::File::open(&path)
-                && file.try_lock_shared().is_err()
-            {
-                locked = true;
-                break;
-            }
-        }
-        locked
-    } else {
-        false
-    };
-
-    let mut target = if is_locked {
+    let mut target = if server_is_listening() {
+        const UI_ADDR: &str = "127.0.0.1:43120";
         println!(
-            "Active database directory '{}' is locked by a running server. Pushing sample data directly to server HTTP endpoint.",
-            target_dir
+            "A LIVEN server is running; pushing sample data through {} so the live index sees it.",
+            UI_ADDR
         );
+        let session = match admin_key() {
+            Some(key) => match login_session(UI_ADDR, &key) {
+                Ok(session) => Some(session),
+                Err(e) => {
+                    println!(
+                        "  ! login failed ({e}); trying an unauthenticated ingest (security.mode = none)"
+                    );
+                    None
+                }
+            },
+            None => {
+                println!(
+                    "  ! no LIVEN_SECURITY_MASTER_KEY and no ./liven.key found; trying an unauthenticated ingest"
+                );
+                None
+            }
+        };
         AppendTarget::Http {
-            addr: "127.0.0.1:43120".to_string(),
+            addr: UI_ADDR.to_string(),
             batch: Vec::new(),
+            session,
         }
     } else {
         println!(
-            "Writing sample data directly to active database directory: {}",
+            "No server listening on 127.0.0.1:43121; writing sample data directly to database directory: {}",
             target_dir
         );
         let engine = StorageEngine::new(&target_dir, 10 * 1024 * 1024)
