@@ -61,12 +61,17 @@ pub mod timestamp_index;
 /// - The resulting DataValue variants do not borrow from the original payload
 pub trait PositionalReader {
     fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> std::io::Result<()>;
+    fn read_at(&self, buf: &mut [u8], offset: u64) -> std::io::Result<usize>;
 }
 
 #[cfg(unix)]
 impl PositionalReader for File {
     fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> std::io::Result<()> {
         std::os::unix::fs::FileExt::read_exact_at(self, buf, offset)
+    }
+
+    fn read_at(&self, buf: &mut [u8], offset: u64) -> std::io::Result<usize> {
+        std::os::unix::fs::FileExt::read_at(self, buf, offset)
     }
 }
 
@@ -86,6 +91,11 @@ impl PositionalReader for File {
             total_read += read;
         }
         Ok(())
+    }
+
+    fn read_at(&self, buf: &mut [u8], offset: u64) -> std::io::Result<usize> {
+        use std::os::windows::fs::FileExt;
+        self.seek_read(buf, offset)
     }
 }
 
@@ -177,6 +187,35 @@ fn decode_frame_header(h: &[u8]) -> (u64, i64, u8, u8, usize, u32) {
     let payload_len = u32::from_be_bytes([h[18], h[19], h[20], h[21]]) as usize;
     let crc32 = u32::from_be_bytes([h[22], h[23], h[24], h[25]]);
     (seq_id, timestamp, type_tag, flags, payload_len, crc32)
+}
+
+fn decode_frame_payload(
+    payload: &[u8],
+    declared_crc: u32,
+    segment_id: u64,
+    offset: u64,
+    seq_id: u64,
+    timestamp: i64,
+    type_tag: u8,
+    flags: u8,
+) -> crate::error::Result<Record> {
+    let actual_crc = crc32fast::hash(payload);
+    if actual_crc != declared_crc {
+        return Err(LivenError::CrcMismatch { segment_id, offset });
+    }
+
+    let (stream_name, key, value) = deserialize_payload_borrowed(payload, type_tag)?;
+    let stream_key = crate::storage::key::StreamKey::from_str(key)?;
+
+    Ok(Record {
+        sequence_id: seq_id,
+        timestamp,
+        type_tag,
+        flags,
+        stream_name: stream_name.to_string(),
+        key: stream_key,
+        value,
+    })
 }
 
 impl StorageEngine {
@@ -1119,22 +1158,26 @@ impl StorageEngine {
         }
     }
 
-    /// Reads a record from disk via its LogPointer using safe positional reads
+    /// Reads a record from disk via its LogPointer using safe positional reads.
+    ///
+    /// A normal small frame is fetched with a single `pread`: a fixed-size chunk
+    /// covers the 26-byte header and the payload. Larger frames fall back to a
+    /// payload read, and oversized/corrupt headers get an fstat bounds check.
     pub fn read_record(&self, pointer: LogPointer) -> crate::error::Result<Record> {
         let file = self.get_or_load_file_handle(pointer.segment_id)?;
         let offset = pointer.file_offset;
 
-        let mut header_buf = [0u8; 26];
-        if let Err(e) = file.read_exact_at(&mut header_buf, offset) {
-            return if e.kind() == std::io::ErrorKind::UnexpectedEof {
-                Err(LivenError::PointerOutOfBounds {
-                    segment_id: pointer.segment_id,
-                    offset,
-                })
-            } else {
-                Err(LivenError::Io(e))
-            };
+        const HEADER_LEN: usize = 26;
+        const READ_CHUNK: usize = 512;
+        let mut chunk = [0u8; READ_CHUNK];
+        let n = file.read_at(&mut chunk, offset).map_err(LivenError::Io)?;
+        if n < HEADER_LEN {
+            return Err(LivenError::PointerOutOfBounds {
+                segment_id: pointer.segment_id,
+                offset,
+            });
         }
+        let header_buf = &chunk[..HEADER_LEN];
 
         let seq_id = u64::from_be_bytes([
             header_buf[0],
@@ -1171,11 +1214,13 @@ impl StorageEngine {
             header_buf[25],
         ]);
 
+        let frame_len = HEADER_LEN + payload_len;
+
         // Normal frames are bounded by the segment size; only large or corrupt
         // headers need an fstat to avoid a huge speculative allocation.
         if payload_len as u64 > self.max_segment_size {
             let file_len = file.metadata().map_err(LivenError::Io)?.len();
-            if offset + 26 + payload_len as u64 > file_len {
+            if offset + frame_len as u64 > file_len {
                 return Err(LivenError::PayloadOutOfBounds {
                     segment_id: pointer.segment_id,
                     offset,
@@ -1183,14 +1228,27 @@ impl StorageEngine {
             }
         }
 
-        let record = READ_STAGING_BUFFER.with(|buf_cell| {
+        if frame_len <= n {
+            return decode_frame_payload(
+                &chunk[HEADER_LEN..frame_len],
+                crc32,
+                pointer.segment_id,
+                offset,
+                seq_id,
+                timestamp,
+                type_tag,
+                flags,
+            );
+        }
+
+        READ_STAGING_BUFFER.with(|buf_cell| {
             let mut local_buf = buf_cell.borrow_mut();
             if local_buf.len() < payload_len {
                 local_buf.resize(payload_len, 0);
             }
             let target_slice = &mut local_buf[..payload_len];
 
-            if let Err(e) = file.read_exact_at(target_slice, offset + 26) {
+            if let Err(e) = file.read_exact_at(target_slice, offset + HEADER_LEN as u64) {
                 return if e.kind() == std::io::ErrorKind::UnexpectedEof {
                     Err(LivenError::PayloadOutOfBounds {
                         segment_id: pointer.segment_id,
@@ -1201,29 +1259,17 @@ impl StorageEngine {
                 };
             }
 
-            let actual_crc = crc32fast::hash(target_slice);
-            if actual_crc != crc32 {
-                return Err(LivenError::CrcMismatch {
-                    segment_id: pointer.segment_id,
-                    offset,
-                });
-            }
-
-            let (stream_name, key, value) = deserialize_payload_borrowed(target_slice, type_tag)?;
-            let stream_key = crate::storage::key::StreamKey::from_str(key)?;
-
-            Ok(Record {
-                sequence_id: seq_id,
+            decode_frame_payload(
+                target_slice,
+                crc32,
+                pointer.segment_id,
+                offset,
+                seq_id,
                 timestamp,
                 type_tag,
                 flags,
-                stream_name: stream_name.to_string(),
-                key: stream_key,
-                value,
-            })
-        })?;
-
-        Ok(record)
+            )
+        })
     }
 
     /// Performs complete point-in-time lookup for a stream key with zero stack/heap string allocations
