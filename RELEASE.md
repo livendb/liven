@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - Rust toolchain (stable) — `rustup install stable`
-- Node.js 20+ and npm — for building the embedded web UI
+- Node.js 24+ and pnpm 11 (pnpm 11 loads `node:sqlite`) — for building the embedded web UI
 - `cargo-deb` — `cargo install cargo-deb`
 - `cargo-generate-rpm` — `cargo install cargo-generate-rpm`
 - `cargo-wix` — `cargo install cargo-wix` (Windows only)
@@ -45,9 +45,11 @@ cargo publish
 
 > **Note:** The `server` feature embeds a Web UI via `rust-embed`.
 > Before publishing, ensure `ui/dist/` is built:
+>
 > ```bash
 > cd ui && pnpm install --frozen-lockfile && pnpm build && cd ..
 > ```
+>
 > Or publish with `--no-default-features` if the dashboard is not needed.
 
 ## Step 4: Build distribution packages
@@ -130,8 +132,10 @@ docker push liven/liven:latest
 
 The GitHub Actions workflows in `.github/workflows/` handle all of the above
 automatically on push to main/master:
+
 - `build.yml` — builds, tests, and packages for Linux/macOS/Windows
 - `docker.yml` — builds and pushes Docker images to GHCR
 
 The CI requires the following secrets:
+
 - `GITHUB_TOKEN` (provided automatically by GitHub Actions)
