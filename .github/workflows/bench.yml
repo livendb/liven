@@ -238,9 +238,9 @@ jobs:
         with:
           name: load-bench-${{ github.run_id }}
           path: |
-            bench-results/*.log
-            bench-results/*.json
-            bench-results/*.md
+            bench-results/ci-*.log
+            bench-results/*ci-*.json
+            bench-results/*ci-*.md
           if-no-files-found: warn
           retention-days: 30
 
@@ -256,7 +256,7 @@ jobs:
             echo "- records: \`${BENCH_RECORDS}\`, reads: \`${BENCH_READS}\`, threads: \`${BENCH_THREADS}\`"
             echo "- mode: \`${BENCH_MODE}\`, warm: \`${BENCH_WARM}\`, pattern: \`${BENCH_PATTERN}\`, runs: \`${BENCH_RUNS}\`"
             echo ""
-            for f in bench-results/*.md; do
+            for f in bench-results/*ci-*.md; do
               [ -e "$f" ] || continue
               echo "### ${f}"
               cat "$f"

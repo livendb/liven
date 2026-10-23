@@ -56,7 +56,7 @@ fn orders_by_score_descending_with_sequence_tiebreak() {
     // Scores are descending and match the analytic values.
     let s: Vec<f64> = hits.iter().map(score_of).collect();
     assert!((s[0] - 1.0).abs() < 1e-9);
-    assert!((s[1] - 0.70710678).abs() < 1e-6);
+    assert!((s[1] - std::f64::consts::FRAC_1_SQRT_2).abs() < 1e-6);
     assert!(s[0] >= s[1] && s[1] >= s[2]);
 }
 
