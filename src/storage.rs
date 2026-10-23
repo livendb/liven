@@ -1277,11 +1277,12 @@ impl StorageEngine {
         let mut key_buf = [0u8; 512];
         let combined_len = stream_name.len() + 1 + key.len();
         let lookup_key = if combined_len <= 512 {
-            let mut cursor = std::io::Cursor::new(&mut key_buf[..]);
-            use std::io::Write;
-            let _ = write!(cursor, "{}:{}", stream_name, key);
-            let pos = cursor.position() as usize;
-            std::str::from_utf8(&key_buf[..pos]).unwrap_or("")
+            key_buf[..stream_name.len()].copy_from_slice(stream_name.as_bytes());
+            key_buf[stream_name.len()] = b':';
+            key_buf[stream_name.len() + 1..combined_len].copy_from_slice(key.as_bytes());
+            // SAFETY: both inputs are `&str` and ':' is ASCII, so the concatenation
+            // is valid UTF-8. The slice is bounded by `combined_len <= key_buf.len()`.
+            unsafe { std::str::from_utf8_unchecked(&key_buf[..combined_len]) }
         } else {
             &format!("{}:{}", stream_name, key)
         };
