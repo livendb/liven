@@ -1122,19 +1122,19 @@ impl StorageEngine {
     /// Reads a record from disk via its LogPointer using safe positional reads
     pub fn read_record(&self, pointer: LogPointer) -> crate::error::Result<Record> {
         let file = self.get_or_load_file_handle(pointer.segment_id)?;
-        let file_len = file.metadata().map_err(LivenError::Io)?.len();
         let offset = pointer.file_offset;
 
-        if offset + 26 > file_len {
-            return Err(LivenError::PointerOutOfBounds {
-                segment_id: pointer.segment_id,
-                offset,
-            });
-        }
-
         let mut header_buf = [0u8; 26];
-        file.read_exact_at(&mut header_buf, offset)
-            .map_err(LivenError::Io)?;
+        if let Err(e) = file.read_exact_at(&mut header_buf, offset) {
+            return if e.kind() == std::io::ErrorKind::UnexpectedEof {
+                Err(LivenError::PointerOutOfBounds {
+                    segment_id: pointer.segment_id,
+                    offset,
+                })
+            } else {
+                Err(LivenError::Io(e))
+            };
+        }
 
         let seq_id = u64::from_be_bytes([
             header_buf[0],
@@ -1171,11 +1171,16 @@ impl StorageEngine {
             header_buf[25],
         ]);
 
-        if offset + 26 + (payload_len as u64) > file_len {
-            return Err(LivenError::PayloadOutOfBounds {
-                segment_id: pointer.segment_id,
-                offset,
-            });
+        // Normal frames are bounded by the segment size; only large or corrupt
+        // headers need an fstat to avoid a huge speculative allocation.
+        if payload_len as u64 > self.max_segment_size {
+            let file_len = file.metadata().map_err(LivenError::Io)?.len();
+            if offset + 26 + payload_len as u64 > file_len {
+                return Err(LivenError::PayloadOutOfBounds {
+                    segment_id: pointer.segment_id,
+                    offset,
+                });
+            }
         }
 
         let record = READ_STAGING_BUFFER.with(|buf_cell| {
@@ -1185,8 +1190,16 @@ impl StorageEngine {
             }
             let target_slice = &mut local_buf[..payload_len];
 
-            file.read_exact_at(target_slice, offset + 26)
-                .map_err(LivenError::Io)?;
+            if let Err(e) = file.read_exact_at(target_slice, offset + 26) {
+                return if e.kind() == std::io::ErrorKind::UnexpectedEof {
+                    Err(LivenError::PayloadOutOfBounds {
+                        segment_id: pointer.segment_id,
+                        offset,
+                    })
+                } else {
+                    Err(LivenError::Io(e))
+                };
+            }
 
             let actual_crc = crc32fast::hash(target_slice);
             if actual_crc != crc32 {
