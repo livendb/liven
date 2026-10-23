@@ -1,11 +1,12 @@
 import React, { useState } from "react";
+import { errorMessage } from "../utils/errors";
 import CodeMirror from "@uiw/react-codemirror";
 import {
   autocompletion,
   CompletionContext,
   CompletionResult,
 } from "@codemirror/autocomplete";
-import { StreamLanguage } from "@codemirror/language";
+import { StreamLanguage, StringStream } from "@codemirror/language";
 import {
   Terminal,
   HelpCircle,
@@ -106,7 +107,7 @@ const getPageNumbers = (currentPage: number, totalPages: number) => {
 };
 
 const livenLanguage = StreamLanguage.define({
-  token(stream) {
+  token(stream: StringStream) {
     if (stream.eatSpace()) return null;
 
     // Strings
@@ -146,7 +147,7 @@ const livenLanguage = StreamLanguage.define({
     if (stream.match(/^\|/)) return "operator";
 
     // Variables (unquoted names, e.g. amount, status)
-    if (stream.match(/^[a-zA-Z_][a-zA-Z0-9_\-]*/)) return "variable";
+    if (stream.match(/^[a-zA-Z_][a-zA-Z0-9_-]*/)) return "variable";
 
     // Single character fallback
     stream.next();
@@ -162,7 +163,7 @@ function getQueryCompletions(streams: string[]) {
       context.pos,
     );
     const matchStream = before.match(
-      /(?:from|drop)\s*\(\s*["']([a-zA-Z0-9_\-]*)$/,
+      /(?:from|drop)\s*\(\s*["']([a-zA-Z0-9_-]*)$/,
     );
     if (matchStream) {
       const typed = matchStream[1];
@@ -588,7 +589,9 @@ export default function QueryConsole({
             try {
               const data = JSON.parse(recs[0].value);
               affected = data.affected_rows || 0;
-            } catch {}
+            } catch {
+              // ignore malformed status payload
+            }
           }
 
           let logMsg = `Pipeline query success: returned ${recs.length} matches in ${elapsed}ms`;
@@ -614,9 +617,13 @@ export default function QueryConsole({
             "error",
           );
         }
-      } catch (e: any) {
-        setQueryError(`Query Failed: ${e.message}`);
-        addActivity(`Pipeline query failed: ${e.message}`, "query", "error");
+      } catch (e) {
+        setQueryError(`Query Failed: ${errorMessage(e, "Unknown error")}`);
+        addActivity(
+          `Pipeline query failed: ${errorMessage(e, "Unknown error")}`,
+          "query",
+          "error",
+        );
       } finally {
         setIsQueryRunning(false);
       }
@@ -645,7 +652,7 @@ export default function QueryConsole({
   if (isMutationStatus) {
     try {
       mutationData = JSON.parse(firstResult.value as string);
-    } catch (e) {
+    } catch {
       // ignore
     }
   }
@@ -655,7 +662,7 @@ export default function QueryConsole({
     if (q.toLowerCase().startsWith("drop ")) {
       return q.substring(5).trim();
     }
-    const match = q.match(/^([a-zA-Z0-9_\-]+)\./);
+    const match = q.match(/^([a-zA-Z0-9_-]+)\./);
     if (match) {
       return match[1];
     }

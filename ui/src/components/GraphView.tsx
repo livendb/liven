@@ -1,5 +1,6 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import ForceGraph3D from "react-force-graph-3d";
+import type { ForceGraphMethods, NodeObject } from "react-force-graph-3d";
 import type { Record as LivenRecord } from "../types";
 import { ZoomIn, ZoomOut, Maximize } from "lucide-react";
 
@@ -23,6 +24,38 @@ interface GraphData {
   links: GraphLink[];
 }
 
+interface RenderedNode {
+  id: string;
+  name: string;
+  val: number;
+  color: string;
+  group: string;
+  x?: number;
+  y?: number;
+  z?: number;
+}
+
+interface SelectedNode {
+  id: string;
+  name?: string;
+  group?: string;
+  color?: string;
+  value?: unknown;
+}
+
+/** Values arrive either raw or wrapped in a tagged enum ({"String": ...}). */
+interface EngineTaggedValue {
+  String?: string;
+  Int?: number;
+  UInt?: number;
+  Float?: number;
+  Bool?: boolean;
+  Null?: null;
+  Binary?: string;
+  Array?: unknown[];
+  Vector?: number[];
+}
+
 const STREAM_COLORS: Record<string, string> = {
   prompts: "#10b981",
   responses: "#3b82f6",
@@ -43,6 +76,29 @@ function getStreamColor(stream: string): string {
   return STREAM_COLORS[stream] || "#6b7280";
 }
 
+/** Unwraps a tagged engine value ({"String": ...}) into its plain form. */
+function unwrapEngineValue(val: unknown): unknown {
+  if (!val || typeof val !== "object") return val;
+  const tagged = val as EngineTaggedValue;
+  if (tagged.String !== undefined) {
+    try {
+      return JSON.parse(tagged.String);
+    } catch {
+      return tagged.String;
+    }
+  }
+  if (tagged.Int !== undefined) return tagged.Int;
+  if (tagged.UInt !== undefined) return tagged.UInt;
+  if (tagged.Float !== undefined) return tagged.Float;
+  if (tagged.Bool !== undefined) return tagged.Bool;
+  if (tagged.Null !== undefined) return null;
+  if (tagged.Binary !== undefined) return "[Binary Data]";
+  if (tagged.Array !== undefined) return tagged.Array;
+  if (tagged.Vector !== undefined)
+    return `[Vector: ${tagged.Vector.length} dimensions]`;
+  return val;
+}
+
 function extractGraphData(records: LivenRecord[]): GraphData {
   const nodesMap = new Map<string, GraphNode>();
   const linksMap = new Map<string, GraphLink>();
@@ -57,18 +113,22 @@ function extractGraphData(records: LivenRecord[]): GraphData {
       record,
     });
 
-    let valueObj: any = record.value;
-    if (valueObj && typeof valueObj === "object" && "String" in valueObj) {
-      try {
-        valueObj = JSON.parse(valueObj.String);
-      } catch {
-        continue;
+    let valueObj: unknown = record.value;
+    if (valueObj && typeof valueObj === "object") {
+      const tagged = valueObj as EngineTaggedValue;
+      if (tagged.String !== undefined) {
+        try {
+          valueObj = JSON.parse(tagged.String);
+        } catch {
+          continue;
+        }
       }
     }
 
     if (!valueObj || typeof valueObj !== "object") continue;
+    const value = valueObj as Record<string, unknown>;
 
-    const userId = valueObj.user_id;
+    const userId = value.user_id;
     if (userId && typeof userId === "string") {
       const userIdKey = `user:${userId}`;
       if (!nodesMap.has(userIdKey)) {
@@ -92,8 +152,10 @@ function extractGraphData(records: LivenRecord[]): GraphData {
       }
     }
 
-    for (let i = 1; i <= valueObj.correlated_count; i++) {
-      const correlated = valueObj[`correlated_${i}`];
+    const correlatedCount = Number(value.correlated_count ?? 0);
+    for (let i = 1; i <= correlatedCount; i++) {
+      const correlated = value[`correlated_${i}`] as
+        { login_id?: string; device?: string } | undefined;
       if (correlated && correlated.login_id) {
         const loginKey = correlated.login_id;
         if (!nodesMap.has(loginKey)) {
@@ -160,11 +222,11 @@ interface GraphViewProps {
   records: LivenRecord[];
 }
 
-function getNodeColor(node: any): string {
-  return STREAM_COLORS[node.group] || "#6b7280";
+function getNodeColor(node: NodeObject): string {
+  return STREAM_COLORS[String(node.group ?? "")] || "#6b7280";
 }
 
-function getNodeSize(node: any): number {
+function getNodeSize(node: NodeObject): number {
   switch (node.group) {
     case "transactions":
       return 8;
@@ -182,19 +244,19 @@ function NodeDetailPanel({
   node,
   onClose,
 }: {
-  node: any;
+  node: SelectedNode;
   onClose: () => void;
 }) {
   // Format JSON object as readable HTML
-  const formatJSONAsHTML = (obj: Record<string, any>): React.ReactNode => {
+  const formatJSONAsHTML = (obj: Record<string, unknown>): React.ReactNode => {
     return (
       <div className="space-y-2 bg-gray-50 dark:bg-gray-800/30 rounded-lg p-3 font-mono text-xs">
         {Object.entries(obj).map(([key, value]) => {
-          let displayValue: React.ReactNode = value;
+          let displayValue: React.ReactNode;
 
           // If value is an object, recursively format it
           if (value && typeof value === "object" && !Array.isArray(value)) {
-            displayValue = formatJSONAsHTML(value);
+            displayValue = formatJSONAsHTML(value as Record<string, unknown>);
           }
           // If value is an array
           else if (Array.isArray(value)) {
@@ -254,7 +316,7 @@ function NodeDetailPanel({
   };
 
   const formatValue = (
-    value: any,
+    value: unknown,
   ): { label: string; display: string | React.ReactNode } => {
     if (value === null || value === undefined) {
       return { label: "Value", display: "null" };
@@ -273,7 +335,10 @@ function NodeDetailPanel({
     }
 
     if (typeof value === "object") {
-      return { label: "Data", display: formatObject(value) };
+      return {
+        label: "Data",
+        display: formatObject(value as Record<string, unknown>),
+      };
     }
 
     if (typeof value === "number") {
@@ -287,13 +352,13 @@ function NodeDetailPanel({
     return { label: "Value", display: String(value) };
   };
 
-  const formatObject = (obj: Record<string, any>): React.ReactNode => {
+  const formatObject = (obj: Record<string, unknown>): React.ReactNode => {
     const excludeFields = ["correlated_count", "timestamp", "txn_id"];
 
     // Separate regular fields from correlated fields and JSON objects
-    const regularEntries: [string, any][] = [];
-    const correlatedEntries: [string, any][] = [];
-    const jsonEntries: [string, any][] = [];
+    const regularEntries: [string, unknown][] = [];
+    const correlatedEntries: [string, unknown][] = [];
+    const jsonEntries: [string, unknown][] = [];
 
     Object.entries(obj).forEach(([key, val]) => {
       if (excludeFields.includes(key)) return;
@@ -366,7 +431,7 @@ function NodeDetailPanel({
                 <span className="text-gray-400 dark:text-gray-500 text-xs uppercase tracking-wide block mb-2">
                   {key}:
                 </span>
-                {formatJSONAsHTML(val)}
+                {formatJSONAsHTML(val as Record<string, unknown>)}
               </div>
             ))}
           </div>
@@ -381,9 +446,19 @@ function NodeDetailPanel({
             <div className="flex flex-wrap gap-2">
               {correlatedEntries.map(([key, val]) => {
                 const isObject = typeof val === "object" && val !== null;
-                const device = isObject ? val.device : null;
-                const loginId = isObject ? val.login_id : null;
-                const ip = isObject ? val.ip : null;
+                const details = val as Record<string, unknown>;
+                const device =
+                  isObject && typeof details.device === "string"
+                    ? details.device
+                    : null;
+                const loginId =
+                  isObject && typeof details.login_id === "string"
+                    ? details.login_id
+                    : null;
+                const ip =
+                  isObject && typeof details.ip === "string"
+                    ? details.ip
+                    : null;
 
                 const tooltipParts = [];
                 if (loginId) tooltipParts.push(`login: ${loginId}`);
@@ -458,7 +533,7 @@ function NodeDetailPanel({
       {/* Fixed Header with Close Button */}
       <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-800 shrink-0">
         <div className="flex items-center gap-2">
-          <span className="text-xl">{getNodeIcon(node.group)}</span>
+          <span className="text-xl">{getNodeIcon(node.group ?? "")}</span>
           <h3
             className="font-bold"
             style={{ color: node.color || getNodeColor(node) }}
@@ -531,9 +606,9 @@ function NodeDetailPanel({
 }
 
 export default function GraphView({ records }: GraphViewProps) {
-  const fgRef = useRef<any>();
+  const fgRef = useRef<ForceGraphMethods | undefined>(undefined);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [selectedNode, setSelectedNode] = useState<any>(null);
+  const [selectedNode, setSelectedNode] = useState<SelectedNode | null>(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 500 });
   const stabilizedRef = useRef(false);
 
@@ -569,57 +644,48 @@ export default function GraphView({ records }: GraphViewProps) {
     stabilizedRef.current = false;
   }, [graphData]);
 
+  // react-force-graph mutates the node objects in place to add x/y/z.
+  const formattedGraphData: { nodes: RenderedNode[]; links: GraphLink[] } =
+    useMemo(
+      () => ({
+        nodes: graphData.nodes.map((node) => ({
+          id: node.id,
+          name: node.label,
+          val: node.val,
+          color: node.color,
+          group: node.stream,
+        })),
+        links: graphData.links.map((link) => ({
+          source: link.source,
+          target: link.target,
+          label: link.label,
+        })),
+      }),
+      [graphData],
+    );
+
   const handleEngineStop = useCallback(() => {
     if (!fgRef.current || stabilizedRef.current) return;
     stabilizedRef.current = true;
   }, []);
 
   const handleNodeClick = useCallback(
-    (node: any) => {
+    (node: NodeObject) => {
       if (!fgRef.current || !node) return;
 
-      let val = records.filter((item) => item.key == node.id)[0]?.value;
-      let parsedValue = null;
-
-      if (val) {
-        if (val.hasOwnProperty("String")) {
-          try {
-            parsedValue = JSON.parse(val.String);
-          } catch {
-            parsedValue = val.String;
-          }
-        } else if (val.hasOwnProperty("Int")) {
-          parsedValue = val.Int;
-        } else if (val.hasOwnProperty("UInt")) {
-          parsedValue = val.UInt;
-        } else if (val.hasOwnProperty("Float")) {
-          parsedValue = val.Float;
-        } else if (val.hasOwnProperty("Bool")) {
-          parsedValue = val.Bool;
-        } else if (val.hasOwnProperty("Null")) {
-          parsedValue = null;
-        } else if (val.hasOwnProperty("Binary")) {
-          parsedValue = "[Binary Data]";
-        } else if (val.hasOwnProperty("Array")) {
-          parsedValue = val.Array;
-        } else if (val.hasOwnProperty("Vector")) {
-          parsedValue = `[Vector: ${val.Vector.length} dimensions]`;
-        } else {
-          parsedValue = val;
-        }
-
-        setSelectedNode({ ...node, value: parsedValue });
+      const id = String(node.id);
+      const val = records.find((item) => item.key === id)?.value;
+      if (val !== undefined) {
+        setSelectedNode({
+          id,
+          name: typeof node.name === "string" ? node.name : id,
+          group: typeof node.group === "string" ? node.group : undefined,
+          color: typeof node.color === "string" ? node.color : undefined,
+          value: unwrapEngineValue(val),
+        });
       } else {
-        setSelectedNode(node);
+        setSelectedNode(null);
       }
-
-      const distance = 40;
-      const distRatio = 1 + distance / Math.hypot(node.x, node.y, node.z);
-      fgRef.current.cameraPosition(
-        { x: node.x * distRatio, y: node.y * distRatio, z: node.z * distRatio },
-        node,
-        500,
-      );
     },
     [records],
   );
@@ -670,8 +736,12 @@ export default function GraphView({ records }: GraphViewProps) {
     let minZ = Infinity,
       maxZ = -Infinity;
 
-    nodes.forEach((node: any) => {
-      if (node.x !== undefined) {
+    nodes.forEach((node) => {
+      if (
+        node.x !== undefined &&
+        node.y !== undefined &&
+        node.z !== undefined
+      ) {
         minX = Math.min(minX, node.x);
         maxX = Math.max(maxX, node.x);
         minY = Math.min(minY, node.y);
@@ -700,7 +770,7 @@ export default function GraphView({ records }: GraphViewProps) {
       { x: centerX, y: centerY, z: centerZ },
       500,
     );
-  }, [graphData]);
+  }, [formattedGraphData]);
 
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
@@ -715,21 +785,6 @@ export default function GraphView({ records }: GraphViewProps) {
   if (graphData.nodes.length === 0 || dimensions.width === 0) {
     return null;
   }
-
-  const formattedGraphData = {
-    nodes: graphData.nodes.map((node) => ({
-      id: node.id,
-      name: node.label,
-      val: node.val,
-      color: node.color,
-      group: node.stream,
-    })),
-    links: graphData.links.map((link) => ({
-      source: link.source,
-      target: link.target,
-      label: link.label,
-    })),
-  };
 
   return (
     <div

@@ -1,0 +1,4 @@
+overrides:
+  # tailwindcss 3 and postcss-nested pin postcss-selector-parser 6.x, which is
+  # affected by GHSA-rj75-hqrm-r3gf. 7.x keeps the same CommonJS entry point.
+  postcss-selector-parser: ^7.1.6

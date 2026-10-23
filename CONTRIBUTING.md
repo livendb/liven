@@ -14,7 +14,7 @@ cargo test
 For the full stack (including the web dashboard):
 
 ```bash
-cd ui && npm ci --legacy-peer-deps && npm run build && cd ..
+cd ui && pnpm install --frozen-lockfile && pnpm build && cd ..
 cargo build --release
 ```
 

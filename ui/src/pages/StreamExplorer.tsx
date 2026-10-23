@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useMemo } from "react";
+import { errorMessage } from "../utils/errors";
 import CodeMirror from "@uiw/react-codemirror";
 import { json } from "@codemirror/lang-json";
 import {
@@ -168,10 +169,10 @@ export default function StreamExplorer({
 
       setIsDeleteModalOpen(false);
       setDeleteConfirmText("");
-    } catch (e: any) {
-      setDeleteError(`Deletion failed: ${e.message}`);
+    } catch (e) {
+      setDeleteError(`Deletion failed: ${errorMessage(e, "Unknown error")}`);
       addActivity(
-        `Failed to drop stream "${selectedStream}": ${e.message}`,
+        `Failed to drop stream "${selectedStream}": ${errorMessage(e, "Unknown error")}`,
         "stream",
         "error",
       );
@@ -180,25 +181,24 @@ export default function StreamExplorer({
     }
   };
 
-  // Dynamic pre-validation for bulk importer
-  useEffect(() => {
-    if (!importFileContent.trim()) {
-      setImportError("");
-      return;
-    }
+  // Dynamic pre-validation for bulk importer. Derived during render so typing
+  // does not trigger an extra state update round-trip.
+  const importSyntaxError = useMemo(() => {
+    if (!importFileContent.trim()) return "";
     const lines = importFileContent.split("\n");
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i].trim();
       if (!line) continue;
       try {
         JSON.parse(line);
-      } catch (err: any) {
-        setImportError(`JSONL Syntax Error (Line ${i + 1}): ${err.message}`);
-        return;
+      } catch (err) {
+        return `JSONL Syntax Error (Line ${i + 1}): ${errorMessage(err, "invalid JSON")}`;
       }
     }
-    setImportError("");
+    return "";
   }, [importFileContent]);
+
+  const displayImportError = importError || importSyntaxError;
 
   // Handle uploaded text files
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -220,7 +220,7 @@ export default function StreamExplorer({
   // Bulk Ingestion Ingester
   const handleBulkImport = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (importError) return;
+    if (displayImportError) return;
     if (!importFileContent.trim()) {
       setImportError("Import payload cannot be empty.");
       return;
@@ -235,7 +235,7 @@ export default function StreamExplorer({
     );
 
     try {
-      const batch: any[] = [];
+      const batch: unknown[] = [];
 
       const lines = importFileContent.split("\n");
       for (let i = 0; i < lines.length; i++) {
@@ -289,9 +289,9 @@ export default function StreamExplorer({
           "error",
         );
       }
-    } catch (e: any) {
-      setImportError(e.message);
-      addActivity(`Bulk ingestion failed: ${e.message}`, "storage", "error");
+    } catch (e) {
+      setImportError(errorMessage(e, "Bulk ingestion failed"));
+      addActivity(`Bulk ingestion failed: ${errorMessage(e, "Unknown error")}`, "storage", "error");
     } finally {
       setIsSubmitting(false);
     }
@@ -342,10 +342,10 @@ export default function StreamExplorer({
         "query",
         "success",
       );
-    } catch (e: any) {
-      alert(`Export failed: ${e.message}`);
+    } catch (e) {
+      alert(`Export failed: ${errorMessage(e, "Unknown error")}`);
       addActivity(
-        `Failed to export stream "${selectedStream}": ${e.message}`,
+        `Failed to export stream "${selectedStream}": ${errorMessage(e, "Unknown error")}`,
         "query",
         "error",
       );
@@ -724,7 +724,7 @@ export default function StreamExplorer({
                   />
                 </div>
 
-                {importError && (
+                {displayImportError && (
                   <div
                     className={`flex items-start gap-3 p-4 border rounded-2xl text-xs mb-6 animate-shake ${
                       resolvedTheme === "dark"
@@ -734,7 +734,7 @@ export default function StreamExplorer({
                   >
                     <XCircle className="w-4 h-4 shrink-0" />
                     <span className="font-mono text-[11px] leading-normal">
-                      {importError}
+                      {displayImportError}
                     </span>
                   </div>
                 )}
@@ -766,7 +766,7 @@ export default function StreamExplorer({
                 <button
                   type="submit"
                   disabled={
-                    isSubmitting || !!importError || !importFileContent.trim()
+                    isSubmitting || !!displayImportError || !importFileContent.trim()
                   }
                   className="px-6 py-2.5 rounded bg-primary hover:bg-primary-hover text-white text-xs font-bold active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 "
                 >

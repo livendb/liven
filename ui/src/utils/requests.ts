@@ -151,7 +151,7 @@ export async function fetchStreams(): Promise<string[]> {
 }
 
 // 7. Query execution helper
-export async function executeQuery(queryStr: string): Promise<any[]> {
+export async function executeQuery(queryStr: string): Promise<unknown[]> {
   const res = await fetch(getDbApiUrl("/api/query"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -168,7 +168,7 @@ export async function executeQuery(queryStr: string): Promise<any[]> {
 // 8. Ingestion helper
 export async function executeIngest(
   streamName: string,
-  records: any[],
+  records: unknown[],
 ): Promise<{ count: number }> {
   const res = await fetch(getDbApiUrl("/api/ingest"), {
     method: "POST",

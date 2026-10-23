@@ -54,8 +54,14 @@ export default function TelemetryChart({
   const uplotRef = useRef<uPlot | null>(null);
 
   // Store currentTime in a ref so uPlot's axis splits & hooks can access the latest time dynamically
-  const currentTimeRef = useRef<number>(Date.now());
-  currentTimeRef.current = Date.now();
+  const currentTimeRef = useRef<number>(0);
+  useEffect(() => {
+    currentTimeRef.current = Date.now();
+    const id = setInterval(() => {
+      currentTimeRef.current = Date.now();
+    }, 1000);
+    return () => clearInterval(id);
+  }, []);
 
   // Top-Right Legend Value Display Refs
   const legendReadsRef = useRef<HTMLSpanElement>(null);

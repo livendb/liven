@@ -1,3 +1,6 @@
+export type JsonValue =
+  string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
+
 export interface Record {
   sequence_id: number;
   timestamp: number;
@@ -5,7 +8,7 @@ export interface Record {
   flags: number;
   stream_name: string;
   key: string;
-  value: any;
+  value: JsonValue;
 }
 
 export interface Metrics {

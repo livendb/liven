@@ -2,10 +2,10 @@
 FROM node:24-bookworm AS ui-builder
 
 WORKDIR /ui
-COPY ui/package.json ui/package-lock.json ./
-RUN npm ci --legacy-peer-deps
+COPY ui/package.json ui/pnpm-lock.yaml ui/pnpm-workspace.yaml ./
+RUN corepack enable && corepack prepare pnpm@11.8.0 --activate && pnpm install --frozen-lockfile
 COPY ui .
-RUN npm run build
+RUN pnpm build
 
 FROM rust:latest AS builder
 

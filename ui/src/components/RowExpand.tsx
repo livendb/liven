@@ -1,4 +1,5 @@
 import { useState } from "react";
+import hljs from "highlight.js";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { Record } from "../types";
 import { parseStringifiedJson } from "../utils/api";

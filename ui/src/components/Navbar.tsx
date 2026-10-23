@@ -10,7 +10,7 @@ import {
   X,
   LogOut,
 } from "lucide-react";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 
 export interface NavbarProps {
   activeTab: "dashboard" | "query" | "explorer" | "security";
@@ -36,24 +36,25 @@ export default function Navbar({
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [apiVersion, setApiVersion] = useState<string | null>(null);
 
-  // Fetch version from the API /config endpoint
-  const fetchConfig = useCallback(async () => {
-    try {
-      const res = await fetch("/config");
-      if (res.ok) {
+  // Fetch version from the API /config endpoint once on mount
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/config");
+        if (!res.ok || cancelled) return;
         const data = await res.json();
-        if (data.version) {
+        if (!cancelled && data.version) {
           setApiVersion(data.version);
         }
+      } catch {
+        // Ignore fetch errors — fall back to hardcoded version
       }
-    } catch {
-      // Ignore fetch errors — fall back to hardcoded version
-    }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
-
-  useEffect(() => {
-    fetchConfig();
-  }, [fetchConfig]);
 
   // Debug: Log when userRole changes
   useEffect(() => {

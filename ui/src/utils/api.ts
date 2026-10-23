@@ -10,7 +10,7 @@ export const getDbApiUrl = (path: string): string => {
 };
 
 // Helper function to recursively parse any stringified JSON
-export function parseStringifiedJson(val: any): any {
+export function parseStringifiedJson(val: unknown): unknown {
   if (typeof val === "string") {
     const trimmed = val.trim();
     if (
@@ -18,7 +18,7 @@ export function parseStringifiedJson(val: any): any {
       (trimmed.startsWith("[") && trimmed.endsWith("]"))
     ) {
       try {
-        const parsed = JSON.parse(trimmed);
+        const parsed: unknown = JSON.parse(trimmed);
         return parseStringifiedJson(parsed);
       } catch {
         return val;
@@ -30,9 +30,9 @@ export function parseStringifiedJson(val: any): any {
     return val.map(parseStringifiedJson);
   }
   if (val !== null && typeof val === "object") {
-    const res: { [key: string]: any } = {};
+    const res: Record<string, unknown> = {};
     for (const key of Object.keys(val)) {
-      res[key] = parseStringifiedJson(val[key]);
+      res[key] = parseStringifiedJson((val as Record<string, unknown>)[key]);
     }
     return res;
   }

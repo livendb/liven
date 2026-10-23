@@ -46,7 +46,7 @@ cargo publish
 > **Note:** The `server` feature embeds a Web UI via `rust-embed`.
 > Before publishing, ensure `ui/dist/` is built:
 > ```bash
-> cd ui && npm ci --legacy-peer-deps && npm run build && cd ..
+> cd ui && pnpm install --frozen-lockfile && pnpm build && cd ..
 > ```
 > Or publish with `--no-default-features` if the dashboard is not needed.
 

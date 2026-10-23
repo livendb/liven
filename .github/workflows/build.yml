@@ -23,19 +23,24 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: "11.8.0"
+
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
           node-version: "24"
-          cache: "npm"
-          cache-dependency-path: "ui/package-lock.json"
+          cache: "pnpm"
+          cache-dependency-path: "ui/pnpm-lock.yaml"
 
       - name: Install UI dependencies & Build Frontend
         working-directory: ui
         shell: bash
         run: |
-          npm ci --legacy-peer-deps
-          npm run build
+          pnpm install --frozen-lockfile
+          pnpm build
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -120,19 +125,24 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: "11.8.0"
+
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
           node-version: "24"
-          cache: "npm"
-          cache-dependency-path: "ui/package-lock.json"
+          cache: "pnpm"
+          cache-dependency-path: "ui/pnpm-lock.yaml"
 
       - name: Install UI dependencies & Build Frontend
         working-directory: ui
         shell: bash
         run: |
-          npm ci --legacy-peer-deps
-          npm run build
+          pnpm install --frozen-lockfile
+          pnpm build
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable

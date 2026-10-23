@@ -14,6 +14,7 @@ import Login from "./pages/Login";
 // Types, Constants & Helpers
 import { Record, Metrics, ActivityLog } from "./types";
 import { getDbApiUrl, setDbPort } from "./utils/api";
+import { errorMessage } from "./utils/errors";
 import { fetchAuthStatus, submitSystemLogout } from "./utils/requests";
 
 export default function App() {
@@ -32,40 +33,36 @@ export default function App() {
     window.fetch = async (input, init) => {
       init = init || {};
       init.credentials = "include";
-      try {
-        const response = await originalFetch(input, init);
-        if (response.status === 401) {
-          const urlStr =
-            typeof input === "string"
-              ? input
-              : input instanceof Request
-                ? input.url
-                : "";
-          // Exclude check-auth, login and config endpoints to prevent loop
-          if (
-            !urlStr.includes("/api/system/auth/status") &&
-            !urlStr.includes("/api/system/auth/login") &&
-            !urlStr.includes("/api/system/config")
-          ) {
-            setIsAuthenticated(false);
-          }
-        } else if (response.status === 403) {
-          // Authenticated but insufficient role capability — do NOT log out
-          // or redirect. Surface the error to the user instead.
-          let message = "You don't have permission to perform this action.";
-          try {
-            const cloned = response.clone();
-            const text = await cloned.text();
-            if (text) message = text;
-          } catch {
-            // ignore — fall back to default message
-          }
-          setCapabilityError(message);
+      const response = await originalFetch(input, init);
+      if (response.status === 401) {
+        const urlStr =
+          typeof input === "string"
+            ? input
+            : input instanceof Request
+              ? input.url
+              : "";
+        // Exclude check-auth, login and config endpoints to prevent loop
+        if (
+          !urlStr.includes("/api/system/auth/status") &&
+          !urlStr.includes("/api/system/auth/login") &&
+          !urlStr.includes("/api/system/config")
+        ) {
+          setIsAuthenticated(false);
         }
-        return response;
-      } catch (err) {
-        throw err;
+      } else if (response.status === 403) {
+        // Authenticated but insufficient role capability — do NOT log out
+        // or redirect. Surface the error to the user instead.
+        let message = "You don't have permission to perform this action.";
+        try {
+          const cloned = response.clone();
+          const text = await cloned.text();
+          if (text) message = text;
+        } catch {
+          // ignore — fall back to default message
+        }
+        setCapabilityError(message);
       }
+      return response;
     };
     return () => {
       window.fetch = originalFetch;
@@ -126,12 +123,8 @@ export default function App() {
     const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
 
     const updateTheme = () => {
-      let active: "light" | "dark" = "light";
-      if (theme === "system") {
-        active = mediaQuery.matches ? "dark" : "light";
-      } else {
-        active = theme;
-      }
+      const active: "light" | "dark" =
+        theme === "system" ? (mediaQuery.matches ? "dark" : "light") : theme;
       setResolvedTheme(active);
 
       if (active === "dark") {
@@ -297,30 +290,9 @@ export default function App() {
     }
   }, [authChecking, location, userRole]);
 
-  // Manage WebSocket connection and fetch initial streams when authenticated
-  useEffect(() => {
-    if (isAuthenticated) {
-      connectWS();
-      fetchStreams();
-    } else {
-      if (wsRef.current) {
-        wsRef.current.close();
-        wsRef.current = null;
-      }
-      setWsConnected(false);
-    }
-
-    return () => {
-      if (wsRef.current) {
-        wsRef.current.close();
-        wsRef.current = null;
-      }
-    };
-  }, [isAuthenticated]);
-
   // Slide charts forward with 0s if WS disconnected
   useEffect(() => {
-    let fallbackInterval: any = null;
+    let fallbackInterval: ReturnType<typeof setInterval> | null = null;
     if (!wsConnected) {
       fallbackInterval = setInterval(() => {
         setIngestChart((prev) => [...prev.slice(1), 0]);
@@ -473,13 +445,6 @@ export default function App() {
     }
   };
 
-  // Browse records in selected stream
-  useEffect(() => {
-    if (selectedStream) {
-      loadStreamRecords();
-    }
-  }, [selectedStream]);
-
   const loadStreamRecords = async () => {
     try {
       // Execute a quick scan query for the specific stream
@@ -509,6 +474,37 @@ export default function App() {
       );
     }
   };
+
+  // Manage WebSocket connection and fetch initial streams when authenticated.
+  // Placed after connectWS/fetchStreams so the callbacks are declared first.
+  useEffect(() => {
+    if (isAuthenticated) {
+      // Deferred one microtask: both callbacks set state after their awaits,
+      // and running them inline trips the cascading-render lint rule.
+      void Promise.resolve().then(() => {
+        connectWS();
+        fetchStreams();
+      });
+    } else if (wsRef.current) {
+      // onclose flips wsConnected back to false.
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+    };
+  }, [isAuthenticated]);
+
+  // Browse records in selected stream
+  useEffect(() => {
+    if (selectedStream) {
+      void Promise.resolve().then(() => loadStreamRecords());
+    }
+  }, [selectedStream]);
 
   const sendHeartbeat = async () => {
     try {
@@ -649,10 +645,10 @@ export default function App() {
                 "server",
                 "info",
               );
-            } catch (err: any) {
+            } catch (err) {
               console.error("Logout failed:", err);
               addActivity(
-                `Failed to gracefully terminate auth session: ${err.message}`,
+                `Failed to gracefully terminate auth session: ${errorMessage(err, "Unknown error")}`,
                 "server",
                 "error",
               );

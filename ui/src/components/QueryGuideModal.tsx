@@ -143,9 +143,9 @@ export default function QueryGuideModal({
                       <span className="font-bold text-slate-900 dark:text-slate-100 text-[15px] tracking-tight">
                         {sample.title}
                       </span>
-                      {(sample as any).badge && (
+                      {sample.badge && (
                         <span className="text-[10px] font-extrabold uppercase tracking-widest px-2 py-0.5 rounded-sm bg-zinc-200 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 shrink-0">
-                          {(sample as any).badge}
+                          {sample.badge}
                         </span>
                       )}
                     </div>

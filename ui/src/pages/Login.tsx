@@ -1,3 +1,4 @@
+import { errorMessage } from "../utils/errors";
 import { useState, useEffect } from "react";
 import { Eye, EyeOff, Sun, Moon, Monitor } from "lucide-react";
 import { submitSystemLogin } from "../utils/requests";
@@ -16,10 +17,7 @@ export default function Login({ onLoginSuccess }: LoginProps) {
   // Initialize theme from localStorage or system class list
   const [theme, setTheme] = useState<"light" | "dark" | "system">(() => {
     const saved = localStorage.getItem("liven-theme") as
-      | "light"
-      | "dark"
-      | "system"
-      | null;
+      "light" | "dark" | "system" | null;
     return saved || "dark";
   });
 
@@ -30,12 +28,8 @@ export default function Login({ onLoginSuccess }: LoginProps) {
     const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
 
     const updateTheme = () => {
-      let active: "light" | "dark" = "light";
-      if (theme === "system") {
-        active = mediaQuery.matches ? "dark" : "light";
-      } else {
-        active = theme;
-      }
+      const active: "light" | "dark" =
+        theme === "system" ? (mediaQuery.matches ? "dark" : "light") : theme;
       setResolvedTheme(active);
 
       if (active === "dark") {
@@ -79,9 +73,9 @@ export default function Login({ onLoginSuccess }: LoginProps) {
       setTimeout(() => {
         onLoginSuccess();
       }, 800);
-    } catch (err: any) {
+    } catch (err) {
       console.error(err);
-      setError(err.message || "Authentication failed. Invalid auth key");
+      setError(errorMessage(err, "Authentication failed. Invalid auth key"));
     } finally {
       setLoading(false);
     }

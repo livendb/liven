@@ -1,5 +1,6 @@
 import { Record } from "../types";
 import { parseStringifiedJson } from "../utils/api";
+import type { JsonValue } from "../types";
 
 export interface PrettifiedGridViewProps {
   records: Record[];
@@ -11,12 +12,12 @@ export default function PrettifiedGridView({
 }: PrettifiedGridViewProps) {
   // 1. Map and parse all records
   const parsedRecords = records.map((rec) => {
-    let parsed: any = null;
+    let parsed: JsonValue = null;
     let isObject = false;
 
     if (!(rec.flags & 0x02)) {
       try {
-        parsed = parseStringifiedJson(rec.value);
+        parsed = parseStringifiedJson(rec.value) as JsonValue;
         isObject =
           typeof parsed === "object" &&
           parsed !== null &&
@@ -37,7 +38,7 @@ export default function PrettifiedGridView({
   const dynamicKeysSet = new Set<string>();
   parsedRecords.forEach((item) => {
     if (item.isObject) {
-      Object.keys(item.parsed).forEach((k) => {
+      Object.keys(item.parsed as { [key: string]: JsonValue }).forEach((k) => {
         dynamicKeysSet.add(k);
       });
     }
@@ -70,7 +71,7 @@ export default function PrettifiedGridView({
       );
     }
 
-    const value = item.parsed[colKey];
+    const value = (item.parsed as { [key: string]: JsonValue })[colKey];
     if (value === undefined) {
       return (
         <span className="text-zinc-350 dark:text-zinc-700 font-medium select-none">
@@ -283,7 +284,7 @@ export default function PrettifiedGridView({
                 ) : (
                   <div className="space-y-1">
                     {dynamicColumns.map((col) => {
-                      const val = item.parsed[col];
+                      const val = (item.parsed as { [key: string]: JsonValue })[col];
                       if (val === undefined) return null;
                       return (
                         <div

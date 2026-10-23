@@ -1,3 +1,4 @@
+import { errorMessage } from "../utils/errors";
 import { useState, useEffect } from "react";
 import {
   Key,
@@ -91,16 +92,20 @@ export default function Security({
         return a.key_id.localeCompare(b.key_id);
       });
       setKeys(sortedKeys);
-    } catch (err: any) {
+    } catch (err) {
       console.error(err);
-      setError(err.message || "Failed to load security assets from cluster.");
+      setError(
+        errorMessage(err, "Failed to load security assets from cluster."),
+      );
     } finally {
       if (!silent) setLoading(false);
     }
   };
 
   useEffect(() => {
-    loadConfigAndKeys();
+    // Defer one microtask so the loader's synchronous state updates do not run
+    // inside the effect body (React flags that as a cascading render).
+    void Promise.resolve().then(() => loadConfigAndKeys());
   }, []);
 
   // Open revoke confirmation
@@ -121,10 +126,10 @@ export default function Security({
       );
       setKeyToRevoke(null);
       await loadConfigAndKeys(true);
-    } catch (err: any) {
+    } catch (err) {
       console.error(err);
       addActivity(
-        `Failed to revoke key "${keyToRevoke}": ${err.message || "Unknown error"}`,
+        `Failed to revoke key "${keyToRevoke}": ${errorMessage(err, "Unknown error")}`,
         "server",
         "error",
       );
@@ -154,11 +159,11 @@ export default function Security({
       );
       setKeyToChangeRole(null);
       await loadConfigAndKeys(true);
-    } catch (err: any) {
+    } catch (err) {
       console.error(err);
-      setChangeRoleError(err.message || "Failed to change role.");
+      setChangeRoleError(errorMessage(err, "Failed to change role."));
       addActivity(
-        `Failed to change role for key "${keyToChangeRole.key_id}": ${err.message || "Unknown error"}`,
+        `Failed to change role for key "${keyToChangeRole.key_id}": ${errorMessage(err, "Unknown error")}`,
         "server",
         "error",
       );
@@ -189,10 +194,10 @@ export default function Security({
         "success",
       );
       // Keep modal open to show the raw key exactly once
-    } catch (err: any) {
+    } catch (err) {
       console.error(err);
       setGenError(
-        err.message || "Failed to generate key. Ensure ID is unique.",
+        errorMessage(err, "Failed to generate key. Ensure ID is unique."),
       );
     } finally {
       setGenLoading(false);
@@ -275,7 +280,7 @@ export default function Security({
                       value={newKeyId}
                       onChange={(e) =>
                         setNewKeyId(
-                          e.target.value.replace(/[^a-zA-Z0-9_\-]/g, ""),
+                          e.target.value.replace(/[^a-zA-Z0-9_-]/g, ""),
                         )
                       }
                       maxLength={64}
