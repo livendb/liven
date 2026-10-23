@@ -50,6 +50,10 @@ pub struct SessionInfo {
     /// key (if that feature is ever added) won't take effect until the
     /// session is recreated.
     pub role: String,
+    /// BLAKE3 hash of the auth key this session was created from. Connections
+    /// opened with this session are registered against this hash so the
+    /// revocation checker can find the underlying key.
+    pub auth_key_hash: String,
     pub last_seen: std::time::Instant,
 }
 
@@ -115,6 +119,9 @@ pub struct ClientIdentity {
 pub struct ActiveNativeConnection {
     pub auth_key_hash: String,
     pub role: String,
+    /// Set for web-dashboard sessions so cleanup can target one browser tab;
+    /// None for native TCP clients, which are tracked by auth key hash.
+    pub session_id: Option<String>,
     pub close_tx: Option<tokio::sync::oneshot::Sender<()>>,
 }
 
@@ -184,6 +191,21 @@ pub fn lookup_role_for_key_id(engine: &StorageEngine, key_id: &str) -> Option<St
         }
     }
     None
+}
+
+/// Resolves the auth-key hash a dashboard session was created from.
+///
+/// The revocation checker looks this hash up in `auth_keys`, so it must be the
+/// hash of the auth key presented at login — never a hash of the session id,
+/// which never appears in `auth_keys` and would make every dashboard connection
+/// look revoked.
+fn session_auth_key_hash(state: &ServerState, session_token: &str) -> Option<String> {
+    state
+        .sessions
+        .lock()
+        .unwrap()
+        .get(session_token)
+        .map(|s| s.auth_key_hash.clone())
 }
 
 pub fn kill_active_connections_for_hash(state: &ServerState, hash: &str) {
@@ -649,6 +671,7 @@ pub async fn run_server(
                                                             )
                                                             .unwrap_or_default(),
                                                             close_tx: Some(close_tx),
+                                                            session_id: None,
                                                         });
                                                     }
                                                     handle_connection(
@@ -754,6 +777,7 @@ pub async fn run_server(
                                                         auth_key_hash: auth_rec.auth_key.clone(),
                                                         role: auth_rec.role.clone(),
                                                         close_tx: Some(close_tx),
+                                                        session_id: None,
                                                     });
                                                 }
                                                 close_rx_fused = new_close_rx;
@@ -1181,19 +1205,19 @@ async fn handle_socket(
     let engine_metrics = state.engine.clone();
 
     // Register this WebSocket connection in active_connections so the background
-    // checker can evict it if the key is revoked or role changes.
+    // checker can evict it if the key is revoked or role changes. The checker
+    // looks up the hash in `auth_keys`, so it must be the auth key hash the
+    // session was created from — not a hash of the session id itself.
     let (close_tx, close_rx) = tokio::sync::oneshot::channel::<()>();
-    let auth_key_hash_for_conn = if let Some(ref token) = session_token {
-        let hash = blake3::hash(token.as_bytes());
-        Some(crate::security::hex_encode(hash.as_bytes()))
-    } else {
-        None
-    };
+    let auth_key_hash_for_conn = session_token
+        .as_deref()
+        .and_then(|token| session_auth_key_hash(&state, token));
     if let Some(ref hash) = auth_key_hash_for_conn {
         let mut conns = state.active_connections.lock().unwrap();
         conns.push(ActiveNativeConnection {
             auth_key_hash: hash.clone(),
             role: session_role.clone(),
+            session_id: session_token.clone(),
             close_tx: Some(close_tx),
         });
     }
@@ -1378,10 +1402,12 @@ async fn handle_socket(
     }
 
     let _ = stats_cancel_tx.send(());
-    // Remove from active_connections on close.
-    if let Some(ref hash) = auth_key_hash_for_conn {
+    // Remove from active_connections on close. Match on the session id so
+    // closing one dashboard tab does not unregister other sessions that share
+    // the same auth key.
+    if let Some(ref token) = session_token {
         let mut conns = state.active_connections.lock().unwrap();
-        conns.retain(|c| c.auth_key_hash != *hash);
+        conns.retain(|c| c.session_id.as_deref() != Some(token.as_str()));
     }
 }
 
@@ -1571,6 +1597,7 @@ async fn system_auth_login_handler(
                     SessionInfo {
                         user_id: user_id.clone(),
                         role: role.clone(),
+                        auth_key_hash: auth_rec.auth_key.clone(),
                         last_seen: std::time::Instant::now(),
                     },
                 );
@@ -2336,4 +2363,73 @@ async fn system_config_handler(
     });
 
     (StatusCode::OK, Json(response)).into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A dashboard session must register its connection under the hash of the
+    /// auth key it was created from. Hashing the session id instead (the
+    /// original bug) made `lookup_key_by_hash` return None, so the revocation
+    /// checker killed the socket ~500 ms after login.
+    #[test]
+    fn session_connections_resolve_to_a_real_auth_key_hash() {
+        let dir = tempfile::tempdir().unwrap();
+        let engine = Arc::new(StorageEngine::new(dir.path(), 16 * 1024 * 1024).unwrap());
+
+        let key_hash = "a".repeat(64);
+        let record = AuthKeyRecord {
+            key_id: "default-admin".to_string(),
+            role: "admin".to_string(),
+            auth_key: key_hash.clone(),
+            status: "active".to_string(),
+            allowed_tags: Vec::new(),
+        };
+        engine
+            .append(
+                "auth_keys",
+                "default-admin",
+                DataValue::String(serde_json::to_string(&record).unwrap()),
+                false,
+            )
+            .unwrap();
+
+        let state = ServerState {
+            engine: engine.clone(),
+            config: crate::config::AppConfig::from_embedded(
+                dir.path().to_str().unwrap(),
+                32,
+                16,
+                16,
+                64,
+                4096,
+            ),
+            sessions: Mutex::new(HashMap::new()),
+            active_connections: Mutex::new(Vec::new()),
+            identity_cache: std::sync::RwLock::new(HashMap::new()),
+        };
+        state.sessions.lock().unwrap().insert(
+            "session-id-1".to_string(),
+            SessionInfo {
+                user_id: "default-admin".to_string(),
+                role: "admin".to_string(),
+                auth_key_hash: key_hash.clone(),
+                last_seen: std::time::Instant::now(),
+            },
+        );
+
+        let resolved = session_auth_key_hash(&state, "session-id-1")
+            .expect("session should resolve to an auth key hash");
+        assert_eq!(resolved, key_hash);
+        assert!(
+            lookup_key_by_hash(&engine, &resolved).is_some(),
+            "revocation checker must find the key behind a session"
+        );
+
+        // The old behaviour registered blake3(session_id); that hash is never
+        // present in auth_keys, which is what triggered the kills.
+        let old_behaviour = crate::security::hex_encode(blake3::hash(b"session-id-1").as_bytes());
+        assert!(lookup_key_by_hash(&engine, &old_behaviour).is_none());
+    }
 }
