@@ -18,6 +18,10 @@ allow_local_auto_generation = true
 [storage]
 data_directory = "./data"
 
+# Maximum segment file size before a new segment is created.
+# This key is read from [storage]; the duplicate under [limits] is ignored.
+max_segment_size_mb = 1024
+
 [limits]
 # Maximum concurrent streams. Each stream has its own timestamp index.
 max_concurrent_streams = 32
@@ -26,20 +30,22 @@ max_concurrent_streams = 32
 # Increase if you have many segments and frequent cold reads.
 max_open_file_descriptors = 64
 
-# Index RAM budget in megabytes.
-# If not explicitly set, LIVEN auto-allocates 25% of system RAM (max 4GB).
-# Formula: ~84 bytes per unique key.
-# Examples at different budgets:
-# - 16MB ≈ 190K keys (legacy default)
-# - 64MB ≈ 760K keys
-# - 256MB ≈ 3M keys
-# - 1GB ≈ 12M keys
-# - 4GB ≈ 48M keys (max auto-detected)
-# Uncomment to override auto-detection with a specific value:
+# Primary-index budget in MiB.
+# If not set (or set to exactly 16), LIVEN auto-allocates 25% of detected
+# host RAM, clamped to 32 MiB..4096 MiB. The 4 GiB value is an auto-detect
+# ceiling, not a hard cap; an explicit larger value is accepted.
+#
+# The budget charges len("stream:key") + 64 bytes per live key. Actual RSS is
+# higher (timestamp index + allocator overhead): roughly 160 B/key for short
+# keys and 190 B/key for 32-byte keys. See docs/RAM_CAPACITY.md.
+# Approximate capacities:
+# - 16 MiB  ≈ 87K 32-byte keys / 107K short keys
+# - 64 MiB  ≈ 349K / 427K
+# - 256 MiB ≈ 1.4M / 1.7M
+# - 1 GiB   ≈ 5.6M / 6.8M
+# - 4 GiB   ≈ 22M / 27M
+# Uncomment to override auto-detection:
 # max_index_ram_mb = 256
-
-# Maximum segment file size before a new segment is created.
-max_segment_size_mb = 1024
 
 # Maximum number of records returned from full scan operations
 max_scan_results = 100000
