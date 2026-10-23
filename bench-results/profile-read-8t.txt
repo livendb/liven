@@ -1,0 +1,1267 @@
+Analysis of sampling load_bench-b162c69bffb362fa (pid 63378) every 1 millisecond
+Process:         load_bench-b162c69bffb362fa [63378]
+Path:            /Users/USER/Documents/*/load_bench-b162c69bffb362fa
+Load Address:    0x102ae8000
+Identifier:      load_bench-b162c69bffb362fa
+Version:         0
+Code Type:       ARM64
+Platform:        macOS
+Parent Process:  Python [63377]
+Target Type:     live task
+
+Date/Time:       2026-10-23 1:05:17.788 PM +0100
+Launch Time:     2026-10-23 1:05:15.711 PM +0100
+OS Version:      macOS 26.1 (25B78)
+Report Version:  7
+Analysis Tool:   /usr/bin/sample
+
+Physical footprint:         56.6M
+Physical footprint (peak):  56.6M
+Idle exit:                  untracked
+----
+
+Call graph:
+    3605 Thread_1279468   DispatchQueue_1: com.apple.main-thread  (serial)
+    + 3605 start  (in dyld) + 7184  [0x192371d54]
+    +   3605 main  (in load_bench-b162c69bffb362fa) + 928  [0x102bb1274]
+    +     3605 std::sys::backtrace::__rust_begin_short_backtrace::h1600e652a763257b  (in load_bench-b162c69bffb362fa) + 12  [0x102b124a8]  backtrace.rs:158
+    +       3605 load_bench::main::hc7b03ae63beb759e  (in load_bench-b162c69bffb362fa) + 15832  [0x102af8b40]  load_bench.rs:1486
+    +         3605 _pthread_join  (in libsystem_pthread.dylib) + 608  [0x19273c0ac]
+    +           3605 __ulock_wait  (in libsystem_kernel.dylib) + 8  [0x1926f8ae4]
+    3605 Thread_1279495
+    + 3605 thread_start  (in libsystem_pthread.dylib) + 8  [0x192734ba8]
+    +   3605 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x192739c08]
+    +     3605 std::sys::thread::unix::Thread::new::thread_start::h98270432b6aefc44  (in load_bench-b162c69bffb362fa) + 52  [0x102cfc298]  unix.rs:126
+    +       3605 core::ops::function::FnOnce::call_once$u7b$$u7b$vtable.shim$u7d$$u7d$::h88c871e3c20df63c  (in load_bench-b162c69bffb362fa) + 536  [0x102b1fe10]  function.rs:250
+    +         3605 std::sys::backtrace::__rust_begin_short_backtrace::hb07b13ed0806a7e2  (in load_bench-b162c69bffb362fa) + 504  [0x102b13f5c]  backtrace.rs:158
+    +           3605 std::sync::mpmc::array::Channel$LT$T$GT$::recv::hbbd60794a4a3aa43  (in load_bench-b162c69bffb362fa) + 244  [0x102c5f788]  array.rs:390
+    +             3605 std::sync::mpmc::array::Channel$LT$T$GT$::recv::_$u7b$$u7b$closure$u7d$$u7d$::h1f92add2ba7f4ee4  (in load_bench-b162c69bffb362fa) + 392  [0x102c32674]  array.rs:402
+    +               3605 _dispatch_semaphore_wait_slow  (in libdispatch.dylib) + 76  [0x19257ef08]
+    +                 3605 _dispatch_sema4_timedwait  (in libdispatch.dylib) + 64  [0x1925b1c84]
+    +                   3605 semaphore_timedwait_trap  (in libsystem_kernel.dylib) + 8  [0x1926f6bc8]
+    3605 Thread_1279496
+    + 3605 thread_start  (in libsystem_pthread.dylib) + 8  [0x192734ba8]
+    +   3605 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x192739c08]
+    +     3605 std::sys::thread::unix::Thread::new::thread_start::h98270432b6aefc44  (in load_bench-b162c69bffb362fa) + 52  [0x102cfc298]  unix.rs:126
+    +       3605 core::ops::function::FnOnce::call_once$u7b$$u7b$vtable.shim$u7d$$u7d$::h2aa91564ae41432b  (in load_bench-b162c69bffb362fa) + 472  [0x102b1f520]  function.rs:250
+    +         3538 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 616  [0x102b15754]  backtrace.rs:158
+    +         ! 3346 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 484  [0x102c1756c]  storage.rs:1231
+    +         ! : 1077 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 524  [0x102c3088c]  storage.rs:1181
+    +         ! : | 1077 _$LT$std..fs..File$u20$as$u20$liven..storage..PositionalReader$GT$::read_exact_at::ha621830e22b7727d  (in load_bench-b162c69bffb362fa) + 100  [0x102c27900]  storage.rs:69
+    +         ! : |   1077 pread  (in libsystem_kernel.dylib) + 8,4  [0x1926f863c,0x1926f8638]
+    +         ! : 1052 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 288  [0x102c307a0]  storage.rs:1136
+    +         ! : | 1052 _$LT$std..fs..File$u20$as$u20$liven..storage..PositionalReader$GT$::read_exact_at::ha621830e22b7727d  (in load_bench-b162c69bffb362fa) + 100  [0x102c27900]  storage.rs:69
+    +         ! : |   1052 pread  (in libsystem_kernel.dylib) + 8,4,...  [0x1926f863c,0x1926f8638,...]
+    +         ! : 858 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 112  [0x102c306f0]  storage.rs:1125
+    +         ! : | 858 fstat  (in libsystem_kernel.dylib) + 8,4  [0x192705264,0x192705260]
+    +         ! : 317 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 60  [0x102c306bc]  storage.rs:1124
+    +         ! : | 256 liven::storage::StorageEngine::get_or_load_file_handle::h486bebc727c660fa  (in load_bench-b162c69bffb362fa) + 64  [0x102c26cb8]  storage.rs:469
+    +         ! : | + 248 _pthread_mutex_firstfit_lock_slow  (in libsystem_pthread.dylib) + 220  [0x192734868]
+    +         ! : | + ! 247 _pthread_mutex_firstfit_lock_wait  (in libsystem_pthread.dylib) + 84  [0x192736e3c]
+    +         ! : | + ! : 247 __psynch_mutexwait  (in libsystem_kernel.dylib) + 8  [0x1926f99c8]
+    +         ! : | + ! 1 _pthread_mutex_firstfit_lock_wait  (in libsystem_pthread.dylib) + 140  [0x192736e74]
+    +         ! : | + 5 pthread_mutex_lock  (in libsystem_pthread.dylib) + 32,140  [0x1927343a0,0x19273440c]
+    +         ! : | + 3 _pthread_mutex_firstfit_lock_slow  (in libsystem_pthread.dylib) + 124,100  [0x192734808,0x1927347f0]
+    +         ! : | 44 liven::storage::StorageEngine::get_or_load_file_handle::h486bebc727c660fa  (in load_bench-b162c69bffb362fa) + 1400  [0x102c271f0]  storage.rs:489
+    +         ! : | + 39 _pthread_mutex_firstfit_unlock_slow  (in libsystem_pthread.dylib) + 240  [0x192734b30]
+    +         ! : | + ! 39 _pthread_mutex_firstfit_wake  (in libsystem_pthread.dylib) + 28  [0x192736eac]
+    +         ! : | + !   39 __psynch_mutexdrop  (in libsystem_kernel.dylib) + 8  [0x1926f9b94]
+    +         ! : | + 3 pthread_mutex_unlock  (in libsystem_pthread.dylib) + 104,76  [0x192734934,0x192734918]
+    +         ! : | + 2 _pthread_mutex_firstfit_unlock_slow  (in libsystem_pthread.dylib) + 156,216  [0x192734adc,0x192734b18]
+    +         ! : | 7 liven::storage::StorageEngine::get_or_load_file_handle::h486bebc727c660fa  (in load_bench-b162c69bffb362fa) + 116  [0x102c26cec]  storage.rs:470
+    +         ! : | + 3 core::hash::BuildHasher::hash_one::h62b31bd32b66d046  (in load_bench-b162c69bffb362fa) + 252,224  [0x102c2ebd8,0x102c2ebbc]  mod.rs:701
+    +         ! : | + 2 core::hash::BuildHasher::hash_one::h62b31bd32b66d046  (in load_bench-b162c69bffb362fa) + 24,56  [0x102c2eaf4,0x102c2eb14]  mod.rs:699
+    +         ! : | + 2 core::hash::BuildHasher::hash_one::h62b31bd32b66d046  (in load_bench-b162c69bffb362fa) + 80  [0x102c2eb2c]  mod.rs:700
+    +         ! : | +   1 _$LT$core..hash..sip..Hasher$LT$S$GT$$u20$as$u20$core..hash..Hasher$GT$::write::h8232b839179d186b  (in load_bench-b162c69bffb362fa) + 320  [0x102b88b08]  sip.rs:104
+    +         ! : | +   1 _$LT$core..hash..sip..Hasher$LT$S$GT$$u20$as$u20$core..hash..Hasher$GT$::write::h8232b839179d186b  (in load_bench-b162c69bffb362fa) + 364  [0x102b88b34]  sip.rs:288
+    +         ! : | 6 liven::storage::StorageEngine::get_or_load_file_handle::h486bebc727c660fa  (in load_bench-b162c69bffb362fa) + 544,536  [0x102c26e98,0x102c26e90]  storage.rs:471
+    +         ! : | 2 liven::storage::StorageEngine::get_or_load_file_handle::h486bebc727c660fa  (in load_bench-b162c69bffb362fa) + 116,520  [0x102c26cec,0x102c26e80]  storage.rs:470
+    +         ! : | 1 liven::storage::StorageEngine::get_or_load_file_handle::h486bebc727c660fa  (in load_bench-b162c69bffb362fa) + 24  [0x102c26c90]  storage.rs:468
+    +         ! : | 1 liven::storage::StorageEngine::get_or_load_file_handle::h486bebc727c660fa  (in load_bench-b162c69bffb362fa) + 60  [0x102c26cb4]  storage.rs:469
+    +         ! : 33 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 584  [0x102c308c8]  storage.rs:1181
+    +         ! : | 18 liven::storage::deserialize_payload_borrowed::hd6843a42d248e1ba  (in load_bench-b162c69bffb362fa) + 848  [0x102c27cb0]  storage.rs:2357
+    +         ! : | + 12 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_enum::hffb8e2f55685d1c4  (in load_bench-b162c69bffb362fa) + 1288  [0x102c293fc]  decode.rs:676
+    +         ! : | + ! 11 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_string::h602696d85807ef7c  (in load_bench-b162c69bffb362fa) + 1104  [0x102bffd8c]  macros.rs:132
+    +         ! : | + ! : 4 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_string::h602696d85807ef7c  (in load_bench-b162c69bffb362fa) + 692  [0x102bffbf0]  macros.rs:132
+    +         ! : | + ! : | 4 core::str::converts::from_utf8::h907df036b51c9b19  (in load_bench-b162c69bffb362fa) + 44,128  [0x102bcf32c,0x102bcf380]  converts.rs:91
+    +         ! : | + ! : 4 _malloc_zone_malloc  (in libsystem_malloc.dylib) + 12,76  [0x192565e0c,0x192565e4c]
+    +         ! : | + ! : 2 _xzm_xzone_malloc  (in libsystem_malloc.dylib) + 0,32  [0x19255908c,0x1925590ac]
+    +         ! : | + ! : 1 malloc  (in libsystem_malloc.dylib) + 0  [0x19252fce8]
+    +         ! : | + ! 1 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_string::h602696d85807ef7c  (in load_bench-b162c69bffb362fa) + 844  [0x102bffc88]  macros.rs:132
+    +         ! : | + 4 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_enum::hffb8e2f55685d1c4  (in load_bench-b162c69bffb362fa) + 184  [0x102c28fac]  decode.rs:676
+    +         ! : | + ! 3 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_string::h602696d85807ef7c  (in load_bench-b162c69bffb362fa) + 1104  [0x102bffd8c]  macros.rs:132
+    +         ! : | + ! : 3 _$LT$core..marker..PhantomData$LT$T$GT$$u20$as$u20$serde_core..de..DeserializeSeed$GT$::deserialize::h864c087f3d3854e4  (in load_bench-b162c69bffb362fa) + 736  [0x102c297b4]  mod.rs:825
+    +         ! : | + ! :   3 core::str::converts::from_utf8::h907df036b51c9b19  (in load_bench-b162c69bffb362fa) + 56,72,...  [0x102bcf338,0x102bcf348,...]  converts.rs:91
+    +         ! : | + ! 1 _$LT$core..marker..PhantomData$LT$T$GT$$u20$as$u20$serde_core..de..DeserializeSeed$GT$::deserialize::h864c087f3d3854e4  (in load_bench-b162c69bffb362fa) + 1156  [0x102c29958]  mod.rs:825
+    +         ! : | + 1 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_enum::hffb8e2f55685d1c4  (in load_bench-b162c69bffb362fa) + 0  [0x102c28ef4]  decode.rs:665
+    +         ! : | + 1 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_enum::hffb8e2f55685d1c4  (in load_bench-b162c69bffb362fa) + 200  [0x102c28fbc]  decode.rs:676
+    +         ! : | 7 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 880  [0x102c309f0]  storage.rs:1181
+    +         ! : | + 5 _xzm_xzone_malloc  (in libsystem_malloc.dylib) + 140,76  [0x192559118,0x1925590d8]
+    +         ! : | + 1 <deduplicated_symbol>  (in libsystem_malloc.dylib) + 108  [0x192558c8c]
+    +         ! : | + 1 _malloc_zone_malloc  (in libsystem_malloc.dylib) + 28  [0x192565e1c]
+    +         ! : | 3 liven::storage::deserialize_payload_borrowed::hd6843a42d248e1ba  (in load_bench-b162c69bffb362fa) + 496  [0x102c27b50]  storage.rs:2339
+    +         ! : | + 3 core::str::converts::from_utf8::h907df036b51c9b19  (in load_bench-b162c69bffb362fa) + 44,112,...  [0x102bcf32c,0x102bcf370,...]  converts.rs:91
+    +         ! : | 1 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_enum::hffb8e2f55685d1c4  (in load_bench-b162c69bffb362fa) + 1460  [0x102c294a8]  decode.rs:683
+    +         ! : | 1 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 764  [0x102c3097c]  storage.rs:1181
+    +         ! : | + 1 _platform_memmove  (in libsystem_platform.dylib) + 428  [0x19274350c]
+    +         ! : | 1 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 932  [0x102c30a24]  storage.rs:1181
+    +         ! : | + 1 _platform_memmove  (in libsystem_platform.dylib) + 452  [0x192743524]
+    +         ! : | 1 liven::storage::deserialize_payload_borrowed::hd6843a42d248e1ba  (in load_bench-b162c69bffb362fa) + 884  [0x102c27cd4]  storage.rs:2357
+    +         ! : | 1 liven::storage::deserialize_payload_borrowed::hd6843a42d248e1ba  (in load_bench-b162c69bffb362fa) + 920  [0x102c27cf8]  storage.rs:2361
+    +         ! : 4 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 1020,1028  [0x102c30a7c,0x102c30a84]  storage.rs:1214
+    +         ! : 3 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 556  [0x102c308ac]  storage.rs:1181
+    +         ! : | 3 crc32fast::hash::h25c026a3d564784f  (in load_bench-b162c69bffb362fa) + 28,148,...  [0x102bd5c14,0x102bd5c8c,...]  lib.rs:52
+    +         ! : 1 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 764  [0x102c3097c]  storage.rs:1181
+    +         ! : 1 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 952  [0x102c30a38]  storage.rs:1213
+    +         ! 152 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 456  [0x102c17550]  storage.rs:1230
+    +         ! : 145 crossbeam_skiplist::map::SkipMap$LT$K$C$V$GT$::get::h2f1885f49d48ccbe  (in load_bench-b162c69bffb362fa) + 92  [0x102c39c00]  map.rs:164
+    +         ! : | 61 crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 260,168  [0x102c331c0,0x102c33164]  base.rs:0
+    +         ! : | 50 crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 148  [0x102c33150]  base.rs:751
+    +         ! : | + 50 _platform_memcmp  (in libsystem_platform.dylib) + 56,96,...  [0x192740f08,0x192740f30,...]
+    +         ! : | 30 crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 236,148  [0x102c331a8,0x102c33150]  base.rs:751
+    +         ! : | 2 crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 104  [0x102c33124]  base.rs:715
+    +         ! : | 1 crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 64  [0x102c330fc]  base.rs:699
+    +         ! : | 1 crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 96  [0x102c3311c]  base.rs:711
+    +         ! : 3 crossbeam_skiplist::map::SkipMap$LT$K$C$V$GT$::get::h2f1885f49d48ccbe  (in load_bench-b162c69bffb362fa) + 128  [0x102c39c24]  map.rs:164
+    +         ! : | 2 _platform_memcmp  (in libsystem_platform.dylib) + 56,96  [0x192740f08,0x192740f30]
+    +         ! : | 1 DYLD-STUB$$memcmp  (in load_bench-b162c69bffb362fa) + 4  [0x102e7a05c]
+    +         ! : 2 crossbeam_skiplist::map::SkipMap$LT$K$C$V$GT$::get::h2f1885f49d48ccbe  (in load_bench-b162c69bffb362fa) + 40  [0x102c39bcc]  map.rs:163
+    +         ! : | 2 crossbeam_epoch::default::with_handle::h0f32ee68993180ca  (in load_bench-b162c69bffb362fa) + 32,64  [0x102c2f6d0,0x102c2f6f0]  default.rs:60
+    +         ! : 1 crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 312  [0x102c331f4]  base.rs:765
+    +         ! : 1 crossbeam_skiplist::map::SkipMap$LT$K$C$V$GT$::get::h2f1885f49d48ccbe  (in load_bench-b162c69bffb362fa) + 0  [0x102c39ba4]  map.rs:158
+    +         ! 14 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 244  [0x102c1747c]  storage.rs:1223
+    +         ! : 5 core::fmt::write::h164e2e78980a3344  (in load_bench-b162c69bffb362fa) + 376  [0x102bca08c]  mod.rs:1469
+    +         ! : | 3 _$LT$std..io..default_write_fmt..Adapter$LT$T$GT$$u20$as$u20$core..fmt..Write$GT$::write_str::h6bbb327eb7da1257  (in load_bench-b162c69bffb362fa) + 72  [0x102c39ddc]  mod.rs:628
+    +         ! : | + 3 _platform_memmove  (in libsystem_platform.dylib) + 12,420,...  [0x19274336c,0x192743504,...]
+    +         ! : | 1 _$LT$std..io..default_write_fmt..Adapter$LT$T$GT$$u20$as$u20$core..fmt..Write$GT$::write_str::h6bbb327eb7da1257  (in load_bench-b162c69bffb362fa) + 0  [0x102c39d94]  mod.rs:627
+    +         ! : | 1 _$LT$std..io..default_write_fmt..Adapter$LT$T$GT$$u20$as$u20$core..fmt..Write$GT$::write_str::h6bbb327eb7da1257  (in load_bench-b162c69bffb362fa) + 36  [0x102c39db8]  mod.rs:628
+    +         ! : 4 _$LT$std..io..default_write_fmt..Adapter$LT$T$GT$$u20$as$u20$core..fmt..Write$GT$::write_str::h6bbb327eb7da1257  (in load_bench-b162c69bffb362fa) + 136  [0x102c39e1c]  mod.rs:635
+    +         ! : 3 core::fmt::write::h164e2e78980a3344  (in load_bench-b162c69bffb362fa) + 360  [0x102bca07c]  mod.rs:1463
+    +         ! : | 2 _$LT$std..io..default_write_fmt..Adapter$LT$T$GT$$u20$as$u20$core..fmt..Write$GT$::write_str::h6bbb327eb7da1257  (in load_bench-b162c69bffb362fa) + 36  [0x102c39db8]  mod.rs:628
+    +         ! : | 1 _$LT$std..io..default_write_fmt..Adapter$LT$T$GT$$u20$as$u20$core..fmt..Write$GT$::write_str::h6bbb327eb7da1257  (in load_bench-b162c69bffb362fa) + 124  [0x102c39e10]  mod.rs:635
+    +         ! : 1 core::fmt::Formatter::pad::hf4614a1c20e4508e  (in load_bench-b162c69bffb362fa) + 628  [0x102bcb978]  mod.rs:0
+    +         ! : 1 core::fmt::write::h164e2e78980a3344  (in load_bench-b162c69bffb362fa) + 44  [0x102bc9f40]  mod.rs:1455
+    +         ! 10 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 152,388  [0x102c17420,0x102c1750c]  storage.rs:0
+    +         ! 10 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 424  [0x102c17530]  storage.rs:1225
+    +         ! : 10 core::str::converts::from_utf8::h907df036b51c9b19  (in load_bench-b162c69bffb362fa) + 80,96  [0x102bcf350,0x102bcf360]  converts.rs:91
+    +         ! 3 core::fmt::write::h164e2e78980a3344  (in load_bench-b162c69bffb362fa) + 476  [0x102bca0f0]  mod.rs:1498
+    +         ! 2 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 572,580  [0x102c175c4,0x102c175cc]  storage.rs:1231
+    +         ! 1 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 116  [0x102c173fc]  storage.rs:1218
+    +         25 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 628  [0x102b15760]  backtrace.rs:158
+    +         ! 24 std::sys::pal::unix::time::Timespec::now::h10d6d2ed67c46185  (in load_bench-b162c69bffb362fa) + 24  [0x102cfaba8]  time.rs:131
+    +         ! : 20 clock_gettime  (in libsystem_c.dylib) + 60  [0x1925d3e08]
+    +         ! : | 16 clock_gettime_nsec_np  (in libsystem_c.dylib) + 384  [0x1925c6168]
+    +         ! : | + 16 mach_absolute_time  (in libsystem_kernel.dylib) + 108,28  [0x1926f70fc,0x1926f70ac]
+    +         ! : | 3 clock_gettime_nsec_np  (in libsystem_c.dylib) + 228  [0x1925c60cc]
+    +         ! : | 1 clock_gettime_nsec_np  (in libsystem_c.dylib) + 240  [0x1925c60d8]
+    +         ! : |   1 mach_timebase_info  (in libsystem_kernel.dylib) + 68  [0x1926f7004]
+    +         ! : 4 clock_gettime  (in libsystem_c.dylib) + 64,32,...  [0x1925d3e0c,0x1925d3dec,...]
+    +         ! 1 std::sys::pal::unix::time::Timespec::now::h10d6d2ed67c46185  (in load_bench-b162c69bffb362fa) + 96  [0x102cfabf0]  time.rs:133
+    +         13 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 552  [0x102b15714]  backtrace.rs:158
+    +         ! 12 std::sys::pal::unix::time::Timespec::now::h10d6d2ed67c46185  (in load_bench-b162c69bffb362fa) + 24  [0x102cfaba8]  time.rs:131
+    +         ! : 10 clock_gettime  (in libsystem_c.dylib) + 60  [0x1925d3e08]
+    +         ! : | 9 clock_gettime_nsec_np  (in libsystem_c.dylib) + 384  [0x1925c6168]
+    +         ! : | + 9 mach_absolute_time  (in libsystem_kernel.dylib) + 108,28  [0x1926f70fc,0x1926f70ac]
+    +         ! : | 1 clock_gettime_nsec_np  (in libsystem_c.dylib) + 324  [0x1925c612c]
+    +         ! : 1 DYLD-STUB$$clock_gettime  (in load_bench-b162c69bffb362fa) + 4  [0x102e79e10]
+    +         ! : 1 clock_gettime  (in libsystem_c.dylib) + 416  [0x1925d3f6c]
+    +         ! 1 std::sys::pal::unix::time::Timespec::now::h10d6d2ed67c46185  (in load_bench-b162c69bffb362fa) + 96  [0x102cfabf0]  time.rs:133
+    +         8 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 540  [0x102b15708]  backtrace.rs:158
+    +         ! 7 rand_core::block::BlockRng$LT$R$GT$::generate_and_set::h9778ad68f1adadb8  (in load_bench-b162c69bffb362fa) + 440,480,...  [0x102baffd4,0x102bafffc,...]  block.rs:176
+    +         ! 1 load_bench::pick_index::h67b5b210dbc33163  (in load_bench-b162c69bffb362fa) + 132  [0x102aec684]  load_bench.rs:273
+    +         8 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 880  [0x102b1585c]  backtrace.rs:158
+    +         ! 8 _platform_memcmp  (in libsystem_platform.dylib) + 56,32,...  [0x192740f08,0x192740ef0,...]
+    +         8 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 868  [0x102b15850]  backtrace.rs:158
+    +         3 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 500  [0x102b156e0]  backtrace.rs:158
+    +         ! 2 _free  (in libsystem_malloc.dylib) + 56,96  [0x192566a60,0x192566a88]
+    +         ! 1 DYLD-STUB$$free  (in load_bench-b162c69bffb362fa) + 0  [0x102e79f5c]
+    +         1 load_bench::pick_index::h67b5b210dbc33163  (in load_bench-b162c69bffb362fa) + 396  [0x102aec78c]  load_bench.rs:281
+    +         1 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 660  [0x102b15780]  backtrace.rs:158
+    +           1 std::sys::pal::unix::time::Timespec::sub_timespec::h9e61d60fef934ad5  (in load_bench-b162c69bffb362fa) + 8  [0x102cfacac]  time.rs:136
+    3605 Thread_1279497
+    + 3605 thread_start  (in libsystem_pthread.dylib) + 8  [0x192734ba8]
+    +   3605 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x192739c08]
+    +     3605 std::sys::thread::unix::Thread::new::thread_start::h98270432b6aefc44  (in load_bench-b162c69bffb362fa) + 52  [0x102cfc298]  unix.rs:126
+    +       3605 core::ops::function::FnOnce::call_once$u7b$$u7b$vtable.shim$u7d$$u7d$::h2aa91564ae41432b  (in load_bench-b162c69bffb362fa) + 472  [0x102b1f520]  function.rs:250
+    +         3517 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 616  [0x102b15754]  backtrace.rs:158
+    +         ! 3300 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 484  [0x102c1756c]  storage.rs:1231
+    +         ! : 1105 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 524  [0x102c3088c]  storage.rs:1181
+    +         ! : | 1105 _$LT$std..fs..File$u20$as$u20$liven..storage..PositionalReader$GT$::read_exact_at::ha621830e22b7727d  (in load_bench-b162c69bffb362fa) + 100  [0x102c27900]  storage.rs:69
+    +         ! : |   1104 pread  (in libsystem_kernel.dylib) + 8,4,...  [0x1926f863c,0x1926f8638,...]
+    +         ! : |   1 DYLD-STUB$$pread  (in load_bench-b162c69bffb362fa) + 4  [0x102e7a194]
+    +         ! : 1040 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 288  [0x102c307a0]  storage.rs:1136
+    +         ! : | 1040 _$LT$std..fs..File$u20$as$u20$liven..storage..PositionalReader$GT$::read_exact_at::ha621830e22b7727d  (in load_bench-b162c69bffb362fa) + 100  [0x102c27900]  storage.rs:69
+    +         ! : |   1040 pread  (in libsystem_kernel.dylib) + 8,4  [0x1926f863c,0x1926f8638]
+    +         ! : 815 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 112  [0x102c306f0]  storage.rs:1125
+    +         ! : | 815 fstat  (in libsystem_kernel.dylib) + 8,4  [0x192705264,0x192705260]
+    +         ! : 300 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 60  [0x102c306bc]  storage.rs:1124
+    +         ! : | 255 liven::storage::StorageEngine::get_or_load_file_handle::h486bebc727c660fa  (in load_bench-b162c69bffb362fa) + 64  [0x102c26cb8]  storage.rs:469
+    +         ! : | + 252 _pthread_mutex_firstfit_lock_slow  (in libsystem_pthread.dylib) + 220  [0x192734868]
+    +         ! : | + ! 252 _pthread_mutex_firstfit_lock_wait  (in libsystem_pthread.dylib) + 84  [0x192736e3c]
+    +         ! : | + !   252 __psynch_mutexwait  (in libsystem_kernel.dylib) + 8  [0x1926f99c8]
+    +         ! : | + 3 pthread_mutex_lock  (in libsystem_pthread.dylib) + 32  [0x1927343a0]
+    +         ! : | 39 liven::storage::StorageEngine::get_or_load_file_handle::h486bebc727c660fa  (in load_bench-b162c69bffb362fa) + 1400  [0x102c271f0]  storage.rs:489
+    +         ! : | + 37 _pthread_mutex_firstfit_unlock_slow  (in libsystem_pthread.dylib) + 240  [0x192734b30]
+    +         ! : | + ! 37 _pthread_mutex_firstfit_wake  (in libsystem_pthread.dylib) + 28  [0x192736eac]
+    +         ! : | + !   37 __psynch_mutexdrop  (in libsystem_kernel.dylib) + 8  [0x1926f9b94]
+    +         ! : | + 2 pthread_mutex_unlock  (in libsystem_pthread.dylib) + 104  [0x192734934]
+    +         ! : | 2 liven::storage::StorageEngine::get_or_load_file_handle::h486bebc727c660fa  (in load_bench-b162c69bffb362fa) + 56,72  [0x102c26cb0,0x102c26cc0]  storage.rs:469
+    +         ! : | 2 liven::storage::StorageEngine::get_or_load_file_handle::h486bebc727c660fa  (in load_bench-b162c69bffb362fa) + 116,520  [0x102c26cec,0x102c26e80]  storage.rs:470
+    +         ! : | 1 liven::storage::StorageEngine::get_or_load_file_handle::h486bebc727c660fa  (in load_bench-b162c69bffb362fa) + 116  [0x102c26cec]  storage.rs:470
+    +         ! : | + 1 core::hash::BuildHasher::hash_one::h62b31bd32b66d046  (in load_bench-b162c69bffb362fa) + 224  [0x102c2ebbc]  mod.rs:701
+    +         ! : | 1 liven::storage::StorageEngine::get_or_load_file_handle::h486bebc727c660fa  (in load_bench-b162c69bffb362fa) + 544  [0x102c26e98]  storage.rs:471
+    +         ! : 24 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 584  [0x102c308c8]  storage.rs:1181
+    +         ! : | 16 liven::storage::deserialize_payload_borrowed::hd6843a42d248e1ba  (in load_bench-b162c69bffb362fa) + 848  [0x102c27cb0]  storage.rs:2357
+    +         ! : | + 11 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_enum::hffb8e2f55685d1c4  (in load_bench-b162c69bffb362fa) + 1288  [0x102c293fc]  decode.rs:676
+    +         ! : | + ! 9 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_string::h602696d85807ef7c  (in load_bench-b162c69bffb362fa) + 1104  [0x102bffd8c]  macros.rs:132
+    +         ! : | + ! : 6 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_string::h602696d85807ef7c  (in load_bench-b162c69bffb362fa) + 692  [0x102bffbf0]  macros.rs:132
+    +         ! : | + ! : | 6 core::str::converts::from_utf8::h907df036b51c9b19  (in load_bench-b162c69bffb362fa) + 128,80,...  [0x102bcf380,0x102bcf350,...]  converts.rs:91
+    +         ! : | + ! : 3 _xzm_xzone_malloc  (in libsystem_malloc.dylib) + 76,136  [0x1925590d8,0x192559114]
+    +         ! : | + ! 2 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_string::h602696d85807ef7c  (in load_bench-b162c69bffb362fa) + 628,1164  [0x102bffbb0,0x102bffdc8]  macros.rs:132
+    +         ! : | + 2 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_enum::hffb8e2f55685d1c4  (in load_bench-b162c69bffb362fa) + 184  [0x102c28fac]  decode.rs:676
+    +         ! : | + ! 1 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_string::h602696d85807ef7c  (in load_bench-b162c69bffb362fa) + 1104  [0x102bffd8c]  macros.rs:132
+    +         ! : | + ! : 1 _$LT$core..marker..PhantomData$LT$T$GT$$u20$as$u20$serde_core..de..DeserializeSeed$GT$::deserialize::h864c087f3d3854e4  (in load_bench-b162c69bffb362fa) + 736  [0x102c297b4]  mod.rs:825
+    +         ! : | + ! :   1 core::str::converts::from_utf8::h907df036b51c9b19  (in load_bench-b162c69bffb362fa) + 52  [0x102bcf334]  converts.rs:91
+    +         ! : | + ! 1 _$LT$core..marker..PhantomData$LT$T$GT$$u20$as$u20$serde_core..de..DeserializeSeed$GT$::deserialize::h864c087f3d3854e4  (in load_bench-b162c69bffb362fa) + 32  [0x102c294f4]  mod.rs:825
+    +         ! : | + 1 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_enum::hffb8e2f55685d1c4  (in load_bench-b162c69bffb362fa) + 1424  [0x102c29484]  decode.rs:0
+    +         ! : | + 1 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_enum::hffb8e2f55685d1c4  (in load_bench-b162c69bffb362fa) + 160  [0x102c28f94]  decode.rs:670
+    +         ! : | + 1 _$LT$core..marker..PhantomData$LT$T$GT$$u20$as$u20$serde_core..de..DeserializeSeed$GT$::deserialize::h864c087f3d3854e4  (in load_bench-b162c69bffb362fa) + 1084  [0x102c29910]  mod.rs:826
+    +         ! : | 3 liven::storage::deserialize_payload_borrowed::hd6843a42d248e1ba  (in load_bench-b162c69bffb362fa) + 496  [0x102c27b50]  storage.rs:2339
+    +         ! : | + 2 core::str::converts::from_utf8::h907df036b51c9b19  (in load_bench-b162c69bffb362fa) + 528  [0x102bcf510]  converts.rs:0
+    +         ! : | + 1 core::str::converts::from_utf8::h907df036b51c9b19  (in load_bench-b162c69bffb362fa) + 120  [0x102bcf378]  converts.rs:91
+    +         ! : | 2 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 880  [0x102c309f0]  storage.rs:1181
+    +         ! : | + 2 _xzm_xzone_malloc  (in libsystem_malloc.dylib) + 8,140  [0x192559094,0x192559118]
+    +         ! : | 2 liven::storage::deserialize_payload_borrowed::hd6843a42d248e1ba  (in load_bench-b162c69bffb362fa) + 848  [0x102c27cb0]  storage.rs:2358
+    +         ! : | 1 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 932  [0x102c30a24]  storage.rs:1181
+    +         ! : |   1 _platform_memmove  (in libsystem_platform.dylib) + 456  [0x192743528]
+    +         ! : 6 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 396,556,...  [0x102c3080c,0x102c308ac,...]  storage.rs:1181
+    +         ! : 4 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 1020,1028  [0x102c30a7c,0x102c30a84]  storage.rs:1214
+    +         ! : 3 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 556  [0x102c308ac]  storage.rs:1181
+    +         ! : | 3 crc32fast::hash::h25c026a3d564784f  (in load_bench-b162c69bffb362fa) + 148,188,...  [0x102bd5c8c,0x102bd5cb4,...]  lib.rs:52
+    +         ! : 1 _$LT$std..fs..File$u20$as$u20$liven..storage..PositionalReader$GT$::read_exact_at::ha621830e22b7727d  (in load_bench-b162c69bffb362fa) + 156  [0x102c27938]  storage.rs:70
+    +         ! : 1 fstat  (in libsystem_kernel.dylib) + 40  [0x192705284]
+    +         ! : 1 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 20  [0x102c30694]  storage.rs:1123
+    +         ! 181 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 456  [0x102c17550]  storage.rs:1230
+    +         ! : 174 crossbeam_skiplist::map::SkipMap$LT$K$C$V$GT$::get::h2f1885f49d48ccbe  (in load_bench-b162c69bffb362fa) + 92  [0x102c39c00]  map.rs:164
+    +         ! : | 75 crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 168,260,...  [0x102c33164,0x102c331c0,...]  base.rs:0
+    +         ! : | 61 crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 148  [0x102c33150]  base.rs:751
+    +         ! : | + 59 _platform_memcmp  (in libsystem_platform.dylib) + 56,96,...  [0x192740f08,0x192740f30,...]
+    +         ! : | + 2 DYLD-STUB$$memcmp  (in load_bench-b162c69bffb362fa) + 4  [0x102e7a05c]
+    +         ! : | 30 crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 236,148  [0x102c331a8,0x102c33150]  base.rs:751
+    +         ! : | 4 crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 180,184  [0x102c33170,0x102c33174]  base.rs:726
+    +         ! : | 2 crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 44  [0x102c330e8]  base.rs:681
+    +         ! : | 1 crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 96  [0x102c3311c]  base.rs:711
+    +         ! : | 1 crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 112  [0x102c3312c]  base.rs:719
+    +         ! : 4 crossbeam_skiplist::map::SkipMap$LT$K$C$V$GT$::get::h2f1885f49d48ccbe  (in load_bench-b162c69bffb362fa) + 56,68,...  [0x102c39bdc,0x102c39be8,...]  map.rs:164
+    +         ! : 2 crossbeam_skiplist::map::SkipMap$LT$K$C$V$GT$::get::h2f1885f49d48ccbe  (in load_bench-b162c69bffb362fa) + 128  [0x102c39c24]  map.rs:164
+    +         ! : | 1 DYLD-STUB$$memcmp  (in load_bench-b162c69bffb362fa) + 4  [0x102e7a05c]
+    +         ! : | 1 _platform_memcmp  (in libsystem_platform.dylib) + 56  [0x192740f08]
+    +         ! : 1 crossbeam_skiplist::map::SkipMap$LT$K$C$V$GT$::get::h2f1885f49d48ccbe  (in load_bench-b162c69bffb362fa) + 40  [0x102c39bcc]  map.rs:163
+    +         ! :   1 crossbeam_epoch::default::with_handle::h0f32ee68993180ca  (in load_bench-b162c69bffb362fa) + 64  [0x102c2f6f0]  default.rs:60
+    +         ! 17 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 244  [0x102c1747c]  storage.rs:1223
+    +         ! : 6 core::fmt::write::h164e2e78980a3344  (in load_bench-b162c69bffb362fa) + 376  [0x102bca08c]  mod.rs:1469
+    +         ! : | 4 _$LT$std..io..default_write_fmt..Adapter$LT$T$GT$$u20$as$u20$core..fmt..Write$GT$::write_str::h6bbb327eb7da1257  (in load_bench-b162c69bffb362fa) + 72  [0x102c39ddc]  mod.rs:628
+    +         ! : | + 2 DYLD-STUB$$memcpy  (in load_bench-b162c69bffb362fa) + 4  [0x102e7a068]
+    +         ! : | + 2 _platform_memmove  (in libsystem_platform.dylib) + 12,460  [0x19274336c,0x19274352c]
+    +         ! : | 1 _$LT$std..io..default_write_fmt..Adapter$LT$T$GT$$u20$as$u20$core..fmt..Write$GT$::write_str::h6bbb327eb7da1257  (in load_bench-b162c69bffb362fa) + 0  [0x102c39d94]  mod.rs:627
+    +         ! : | 1 _$LT$std..io..default_write_fmt..Adapter$LT$T$GT$$u20$as$u20$core..fmt..Write$GT$::write_str::h6bbb327eb7da1257  (in load_bench-b162c69bffb362fa) + 36  [0x102c39db8]  mod.rs:628
+    +         ! : 4 _$LT$std..io..default_write_fmt..Adapter$LT$T$GT$$u20$as$u20$core..fmt..Write$GT$::write_str::h6bbb327eb7da1257  (in load_bench-b162c69bffb362fa) + 136  [0x102c39e1c]  mod.rs:635
+    +         ! : 4 core::fmt::write::h164e2e78980a3344  (in load_bench-b162c69bffb362fa) + 360  [0x102bca07c]  mod.rs:1463
+    +         ! : | 3 _$LT$std..io..default_write_fmt..Adapter$LT$T$GT$$u20$as$u20$core..fmt..Write$GT$::write_str::h6bbb327eb7da1257  (in load_bench-b162c69bffb362fa) + 36  [0x102c39db8]  mod.rs:628
+    +         ! : | 1 _$LT$std..io..default_write_fmt..Adapter$LT$T$GT$$u20$as$u20$core..fmt..Write$GT$::write_str::h6bbb327eb7da1257  (in load_bench-b162c69bffb362fa) + 72  [0x102c39ddc]  mod.rs:628
+    +         ! : |   1 DYLD-STUB$$memcpy  (in load_bench-b162c69bffb362fa) + 4  [0x102e7a068]
+    +         ! : 3 core::fmt::write::h164e2e78980a3344  (in load_bench-b162c69bffb362fa) + 364  [0x102bca080]  mod.rs:1469
+    +         ! 8 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 424  [0x102c17530]  storage.rs:1225
+    +         ! : 8 core::str::converts::from_utf8::h907df036b51c9b19  (in load_bench-b162c69bffb362fa) + 80,96,...  [0x102bcf350,0x102bcf360,...]  converts.rs:91
+    +         ! 4 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 152  [0x102c17420]  storage.rs:0
+    +         ! 4 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 560,600  [0x102c175b8,0x102c175e0]  storage.rs:1231
+    +         ! 1 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 92  [0x102c173e4]  storage.rs:1218
+    +         ! 1 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 168  [0x102c17430]  storage.rs:1221
+    +         ! 1 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 624  [0x102c175f8]  storage.rs:1233
+    +         !   1 core::ptr::drop_in_place$LT$crossbeam_skiplist..map..Entry$LT$alloc..string..String$C$liven..types..LogPointer$GT$$GT$::hb1708afc6329b5b6  (in load_bench-b162c69bffb362fa) + 376  [0x102c2f288]  mod.rs:805
+    +         30 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 628  [0x102b15760]  backtrace.rs:158
+    +         ! 30 std::sys::pal::unix::time::Timespec::now::h10d6d2ed67c46185  (in load_bench-b162c69bffb362fa) + 24  [0x102cfaba8]  time.rs:131
+    +         !   27 clock_gettime  (in libsystem_c.dylib) + 60  [0x1925d3e08]
+    +         !   : 21 clock_gettime_nsec_np  (in libsystem_c.dylib) + 384  [0x1925c6168]
+    +         !   : | 21 mach_absolute_time  (in libsystem_kernel.dylib) + 108,28  [0x1926f70fc,0x1926f70ac]
+    +         !   : 5 clock_gettime_nsec_np  (in libsystem_c.dylib) + 228  [0x1925c60cc]
+    +         !   : 1 clock_gettime_nsec_np  (in libsystem_c.dylib) + 240  [0x1925c60d8]
+    +         !   :   1 mach_timebase_info  (in libsystem_kernel.dylib) + 76  [0x1926f700c]
+    +         !   2 clock_gettime  (in libsystem_c.dylib) + 64  [0x1925d3e0c]
+    +         !   1 DYLD-STUB$$clock_gettime  (in load_bench-b162c69bffb362fa) + 4  [0x102e79e10]
+    +         23 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 552  [0x102b15714]  backtrace.rs:158
+    +         ! 22 std::sys::pal::unix::time::Timespec::now::h10d6d2ed67c46185  (in load_bench-b162c69bffb362fa) + 24  [0x102cfaba8]  time.rs:131
+    +         ! : 20 clock_gettime  (in libsystem_c.dylib) + 60  [0x1925d3e08]
+    +         ! : | 18 clock_gettime_nsec_np  (in libsystem_c.dylib) + 384  [0x1925c6168]
+    +         ! : | + 18 mach_absolute_time  (in libsystem_kernel.dylib) + 108  [0x1926f70fc]
+    +         ! : | 2 clock_gettime_nsec_np  (in libsystem_c.dylib) + 12,316  [0x1925c5ff4,0x1925c6124]
+    +         ! : 2 clock_gettime  (in libsystem_c.dylib) + 64,416  [0x1925d3e0c,0x1925d3f6c]
+    +         ! 1 std::sys::pal::unix::time::Timespec::now::h10d6d2ed67c46185  (in load_bench-b162c69bffb362fa) + 96  [0x102cfabf0]  time.rs:133
+    +         15 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 880  [0x102b1585c]  backtrace.rs:158
+    +         ! 15 _platform_memcmp  (in libsystem_platform.dylib) + 56,36,...  [0x192740f08,0x192740ef4,...]
+    +         12 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 540  [0x102b15708]  backtrace.rs:158
+    +         ! 6 load_bench::pick_index::h67b5b210dbc33163  (in load_bench-b162c69bffb362fa) + 132,212,...  [0x102aec684,0x102aec6d4,...]  load_bench.rs:273
+    +         ! 6 rand_core::block::BlockRng$LT$R$GT$::generate_and_set::h9778ad68f1adadb8  (in load_bench-b162c69bffb362fa) + 2080,2160,...  [0x102bb063c,0x102bb068c,...]  block.rs:176
+    +         7 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 868  [0x102b15850]  backtrace.rs:158
+    +         1 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 904  [0x102b15874]  backtrace.rs:158
+    +           1 _free  (in libsystem_malloc.dylib) + 24  [0x192566a40]
+    3605 Thread_1279498
+    + 3605 thread_start  (in libsystem_pthread.dylib) + 8  [0x192734ba8]
+    +   3605 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x192739c08]
+    +     3605 std::sys::thread::unix::Thread::new::thread_start::h98270432b6aefc44  (in load_bench-b162c69bffb362fa) + 52  [0x102cfc298]  unix.rs:126
+    +       3605 core::ops::function::FnOnce::call_once$u7b$$u7b$vtable.shim$u7d$$u7d$::h2aa91564ae41432b  (in load_bench-b162c69bffb362fa) + 472  [0x102b1f520]  function.rs:250
+    +         3542 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 616  [0x102b15754]  backtrace.rs:158
+    +         ! 3325 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 484  [0x102c1756c]  storage.rs:1231
+    +         ! : 1117 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 524  [0x102c3088c]  storage.rs:1181
+    +         ! : | 1117 _$LT$std..fs..File$u20$as$u20$liven..storage..PositionalReader$GT$::read_exact_at::ha621830e22b7727d  (in load_bench-b162c69bffb362fa) + 100  [0x102c27900]  storage.rs:69
+    +         ! : |   1117 pread  (in libsystem_kernel.dylib) + 8,4  [0x1926f863c,0x1926f8638]
+    +         ! : 980 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 288  [0x102c307a0]  storage.rs:1136
+    +         ! : | 980 _$LT$std..fs..File$u20$as$u20$liven..storage..PositionalReader$GT$::read_exact_at::ha621830e22b7727d  (in load_bench-b162c69bffb362fa) + 100  [0x102c27900]  storage.rs:69
+    +         ! : |   979 pread  (in libsystem_kernel.dylib) + 8,4  [0x1926f863c,0x1926f8638]
+    +         ! : |   1 DYLD-STUB$$pread  (in load_bench-b162c69bffb362fa) + 4  [0x102e7a194]
+    +         ! : 883 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 112  [0x102c306f0]  storage.rs:1125
+    +         ! : | 882 fstat  (in libsystem_kernel.dylib) + 8,4  [0x192705264,0x192705260]
+    +         ! : | 1 DYLD-STUB$$fstat  (in load_bench-b162c69bffb362fa) + 4  [0x102e79f78]
+    +         ! : 304 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 60  [0x102c306bc]  storage.rs:1124
+    +         ! : | 259 liven::storage::StorageEngine::get_or_load_file_handle::h486bebc727c660fa  (in load_bench-b162c69bffb362fa) + 64  [0x102c26cb8]  storage.rs:469
+    +         ! : | + 251 _pthread_mutex_firstfit_lock_slow  (in libsystem_pthread.dylib) + 220  [0x192734868]
+    +         ! : | + ! 251 _pthread_mutex_firstfit_lock_wait  (in libsystem_pthread.dylib) + 84  [0x192736e3c]
+    +         ! : | + !   251 __psynch_mutexwait  (in libsystem_kernel.dylib) + 8  [0x1926f99c8]
+    +         ! : | + 8 pthread_mutex_lock  (in libsystem_pthread.dylib) + 112,32,...  [0x1927343f0,0x1927343a0,...]
+    +         ! : | 28 liven::storage::StorageEngine::get_or_load_file_handle::h486bebc727c660fa  (in load_bench-b162c69bffb362fa) + 1400  [0x102c271f0]  storage.rs:489
+    +         ! : | + 25 _pthread_mutex_firstfit_unlock_slow  (in libsystem_pthread.dylib) + 240  [0x192734b30]
+    +         ! : | + ! 25 _pthread_mutex_firstfit_wake  (in libsystem_pthread.dylib) + 28  [0x192736eac]
+    +         ! : | + !   25 __psynch_mutexdrop  (in libsystem_kernel.dylib) + 8  [0x1926f9b94]
+    +         ! : | + 2 _pthread_mutex_firstfit_unlock_slow  (in libsystem_pthread.dylib) + 204,252  [0x192734b0c,0x192734b3c]
+    +         ! : | + 1 pthread_mutex_unlock  (in libsystem_pthread.dylib) + 104  [0x192734934]
+    +         ! : | 8 liven::storage::StorageEngine::get_or_load_file_handle::h486bebc727c660fa  (in load_bench-b162c69bffb362fa) + 116  [0x102c26cec]  storage.rs:470
+    +         ! : | + 4 core::hash::BuildHasher::hash_one::h62b31bd32b66d046  (in load_bench-b162c69bffb362fa) + 224,196,...  [0x102c2ebbc,0x102c2eba0,...]  mod.rs:701
+    +         ! : | + 2 core::hash::BuildHasher::hash_one::h62b31bd32b66d046  (in load_bench-b162c69bffb362fa) + 60  [0x102c2eb18]  mod.rs:700
+    +         ! : | + 1 core::hash::BuildHasher::hash_one::h62b31bd32b66d046  (in load_bench-b162c69bffb362fa) + 80  [0x102c2eb2c]  mod.rs:700
+    +         ! : | + ! 1 _$LT$core..hash..sip..Hasher$LT$S$GT$$u20$as$u20$core..hash..Hasher$GT$::write::h8232b839179d186b  (in load_bench-b162c69bffb362fa) + 0  [0x102b889c8]  sip.rs:257
+    +         ! : | + 1 core::hash::BuildHasher::hash_one::h62b31bd32b66d046  (in load_bench-b162c69bffb362fa) + 264  [0x102c2ebe4]  mod.rs:702
+    +         ! : | 5 liven::storage::StorageEngine::get_or_load_file_handle::h486bebc727c660fa  (in load_bench-b162c69bffb362fa) + 544,536,...  [0x102c26e98,0x102c26e90,...]  storage.rs:471
+    +         ! : | 3 liven::storage::StorageEngine::get_or_load_file_handle::h486bebc727c660fa  (in load_bench-b162c69bffb362fa) + 520,116  [0x102c26e80,0x102c26cec]  storage.rs:470
+    +         ! : | 1 liven::storage::StorageEngine::get_or_load_file_handle::h486bebc727c660fa  (in load_bench-b162c69bffb362fa) + 60  [0x102c26cb4]  storage.rs:469
+    +         ! : 33 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 584  [0x102c308c8]  storage.rs:1181
+    +         ! : | 19 liven::storage::deserialize_payload_borrowed::hd6843a42d248e1ba  (in load_bench-b162c69bffb362fa) + 848  [0x102c27cb0]  storage.rs:2357
+    +         ! : | + 16 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_enum::hffb8e2f55685d1c4  (in load_bench-b162c69bffb362fa) + 1288  [0x102c293fc]  decode.rs:676
+    +         ! : | + ! 16 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_string::h602696d85807ef7c  (in load_bench-b162c69bffb362fa) + 1104  [0x102bffd8c]  macros.rs:132
+    +         ! : | + !   8 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_string::h602696d85807ef7c  (in load_bench-b162c69bffb362fa) + 692  [0x102bffbf0]  macros.rs:132
+    +         ! : | + !   : 8 core::str::converts::from_utf8::h907df036b51c9b19  (in load_bench-b162c69bffb362fa) + 128,80,...  [0x102bcf380,0x102bcf350,...]  converts.rs:91
+    +         ! : | + !   3 _malloc_zone_malloc  (in libsystem_malloc.dylib) + 76,28  [0x192565e4c,0x192565e1c]
+    +         ! : | + !   3 _xzm_xzone_malloc  (in libsystem_malloc.dylib) + 0,76,...  [0x19255908c,0x1925590d8,...]
+    +         ! : | + !   1 <deduplicated_symbol>  (in libsystem_malloc.dylib) + 276  [0x192558d34]
+    +         ! : | + !   1 _RNvCsiGVaDesi5rv_7___rustc12___rust_alloc  (in load_bench-b162c69bffb362fa) + 0  [0x102bb1528]
+    +         ! : | + 2 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_enum::hffb8e2f55685d1c4  (in load_bench-b162c69bffb362fa) + 184  [0x102c28fac]  decode.rs:676
+    +         ! : | + ! 2 _$LT$core..marker..PhantomData$LT$T$GT$$u20$as$u20$serde_core..de..DeserializeSeed$GT$::deserialize::h864c087f3d3854e4  (in load_bench-b162c69bffb362fa) + 888,1156  [0x102c2984c,0x102c29958]  mod.rs:825
+    +         ! : | + 1 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_enum::hffb8e2f55685d1c4  (in load_bench-b162c69bffb362fa) + 32  [0x102c28f14]  decode.rs:668
+    +         ! : | 4 liven::storage::deserialize_payload_borrowed::hd6843a42d248e1ba  (in load_bench-b162c69bffb362fa) + 180  [0x102c27a14]  storage.rs:2329
+    +         ! : | + 3 core::str::converts::from_utf8::h907df036b51c9b19  (in load_bench-b162c69bffb362fa) + 60,44  [0x102bcf33c,0x102bcf32c]  converts.rs:91
+    +         ! : | + 1 core::str::converts::from_utf8::h907df036b51c9b19  (in load_bench-b162c69bffb362fa) + 524  [0x102bcf50c]  converts.rs:94
+    +         ! : | 3 liven::storage::deserialize_payload_borrowed::hd6843a42d248e1ba  (in load_bench-b162c69bffb362fa) + 848  [0x102c27cb0]  storage.rs:2358
+    +         ! : | 2 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 880  [0x102c309f0]  storage.rs:1181
+    +         ! : | + 1 DYLD-STUB$$malloc  (in load_bench-b162c69bffb362fa) + 4  [0x102e7a044]
+    +         ! : | + 1 _RNvCsiGVaDesi5rv_7___rustc12___rust_alloc  (in load_bench-b162c69bffb362fa) + 20  [0x102bb153c]
+    +         ! : | 1 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 764  [0x102c3097c]  storage.rs:1181
+    +         ! : | + 1 _platform_memmove  (in libsystem_platform.dylib) + 0  [0x192743360]
+    +         ! : | 1 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 932  [0x102c30a24]  storage.rs:1181
+    +         ! : | + 1 DYLD-STUB$$memcpy  (in load_bench-b162c69bffb362fa) + 4  [0x102e7a068]
+    +         ! : | 1 liven::storage::deserialize_payload_borrowed::hd6843a42d248e1ba  (in load_bench-b162c69bffb362fa) + 476  [0x102c27b3c]  lib.rs:0
+    +         ! : | 1 liven::storage::deserialize_payload_borrowed::hd6843a42d248e1ba  (in load_bench-b162c69bffb362fa) + 496  [0x102c27b50]  storage.rs:2339
+    +         ! : | + 1 core::str::converts::from_utf8::h907df036b51c9b19  (in load_bench-b162c69bffb362fa) + 128  [0x102bcf380]  converts.rs:91
+    +         ! : | 1 liven::storage::deserialize_payload_borrowed::hd6843a42d248e1ba  (in load_bench-b162c69bffb362fa) + 912  [0x102c27cf0]  storage.rs:2361
+    +         ! : 3 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 556  [0x102c308ac]  storage.rs:1181
+    +         ! : | 3 crc32fast::hash::h25c026a3d564784f  (in load_bench-b162c69bffb362fa) + 0,56,...  [0x102bd5bf8,0x102bd5c30,...]  lib.rs:52
+    +         ! : 1 _$LT$std..fs..File$u20$as$u20$liven..storage..PositionalReader$GT$::read_exact_at::ha621830e22b7727d  (in load_bench-b162c69bffb362fa) + 156  [0x102c27938]  storage.rs:70
+    +         ! : 1 fstat  (in libsystem_kernel.dylib) + 40  [0x192705284]
+    +         ! : 1 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 384  [0x102c30800]  storage.rs:1181
+    +         ! : 1 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 972  [0x102c30a4c]  storage.rs:1213
+    +         ! : 1 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 1020  [0x102c30a7c]  storage.rs:1214
+    +         ! 179 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 456  [0x102c17550]  storage.rs:1230
+    +         ! : 176 crossbeam_skiplist::map::SkipMap$LT$K$C$V$GT$::get::h2f1885f49d48ccbe  (in load_bench-b162c69bffb362fa) + 92  [0x102c39c00]  map.rs:164
+    +         ! : | 81 crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 168,260,...  [0x102c33164,0x102c331c0,...]  base.rs:0
+    +         ! : | 56 crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 148  [0x102c33150]  base.rs:751
+    +         ! : | + 53 _platform_memcmp  (in libsystem_platform.dylib) + 56,96,...  [0x192740f08,0x192740f30,...]
+    +         ! : | + 3 DYLD-STUB$$memcmp  (in load_bench-b162c69bffb362fa) + 4,0  [0x102e7a05c,0x102e7a058]
+    +         ! : | 30 crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 236,148  [0x102c331a8,0x102c33150]  base.rs:751
+    +         ! : | 5 crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 184,180  [0x102c33174,0x102c33170]  base.rs:726
+    +         ! : | 2 crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 112  [0x102c3312c]  base.rs:719
+    +         ! : | 1 crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 100  [0x102c33120]  base.rs:712
+    +         ! : | 1 crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 104  [0x102c33124]  base.rs:715
+    +         ! : 2 crossbeam_skiplist::map::SkipMap$LT$K$C$V$GT$::get::h2f1885f49d48ccbe  (in load_bench-b162c69bffb362fa) + 40  [0x102c39bcc]  map.rs:163
+    +         ! : | 1 crossbeam_epoch::default::with_handle::h0f32ee68993180ca  (in load_bench-b162c69bffb362fa) + 68  [0x102c2f6f4]  default.rs:60
+    +         ! : | 1 crossbeam_epoch::default::with_handle::h0f32ee68993180ca  (in load_bench-b162c69bffb362fa) + 116  [0x102c2f724]  default.rs:62
+    +         ! : 1 crossbeam_skiplist::map::SkipMap$LT$K$C$V$GT$::get::h2f1885f49d48ccbe  (in load_bench-b162c69bffb362fa) + 132  [0x102c39c28]  map.rs:164
+    +         ! 13 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 244  [0x102c1747c]  storage.rs:1223
+    +         ! : 5 _$LT$std..io..default_write_fmt..Adapter$LT$T$GT$$u20$as$u20$core..fmt..Write$GT$::write_str::h6bbb327eb7da1257  (in load_bench-b162c69bffb362fa) + 136  [0x102c39e1c]  mod.rs:635
+    +         ! : 4 core::fmt::write::h164e2e78980a3344  (in load_bench-b162c69bffb362fa) + 376  [0x102bca08c]  mod.rs:1469
+    +         ! : | 4 _$LT$std..io..default_write_fmt..Adapter$LT$T$GT$$u20$as$u20$core..fmt..Write$GT$::write_str::h6bbb327eb7da1257  (in load_bench-b162c69bffb362fa) + 72  [0x102c39ddc]  mod.rs:628
+    +         ! : |   3 _platform_memmove  (in libsystem_platform.dylib) + 0,12,...  [0x192743360,0x19274336c,...]
+    +         ! : |   1 DYLD-STUB$$memcpy  (in load_bench-b162c69bffb362fa) + 4  [0x102e7a068]
+    +         ! : 3 core::fmt::write::h164e2e78980a3344  (in load_bench-b162c69bffb362fa) + 360  [0x102bca07c]  mod.rs:1463
+    +         ! : | 3 _$LT$std..io..default_write_fmt..Adapter$LT$T$GT$$u20$as$u20$core..fmt..Write$GT$::write_str::h6bbb327eb7da1257  (in load_bench-b162c69bffb362fa) + 36  [0x102c39db8]  mod.rs:628
+    +         ! : 1 core::fmt::write::h164e2e78980a3344  (in load_bench-b162c69bffb362fa) + 304  [0x102bca044]  mod.rs:1458
+    +         ! 11 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 152,388  [0x102c17420,0x102c1750c]  storage.rs:0
+    +         ! 10 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 424  [0x102c17530]  storage.rs:1225
+    +         ! : 10 core::str::converts::from_utf8::h907df036b51c9b19  (in load_bench-b162c69bffb362fa) + 80,52  [0x102bcf350,0x102bcf334]  converts.rs:91
+    +         ! 2 core::fmt::write::h164e2e78980a3344  (in load_bench-b162c69bffb362fa) + 476  [0x102bca0f0]  mod.rs:1498
+    +         ! 1 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 4  [0x102c1738c]  storage.rs:1217
+    +         ! 1 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 56  [0x102c173c0]  storage.rs:1218
+    +         27 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 552  [0x102b15714]  backtrace.rs:158
+    +         ! 26 std::sys::pal::unix::time::Timespec::now::h10d6d2ed67c46185  (in load_bench-b162c69bffb362fa) + 24  [0x102cfaba8]  time.rs:131
+    +         ! : 19 clock_gettime  (in libsystem_c.dylib) + 60  [0x1925d3e08]
+    +         ! : | 17 clock_gettime_nsec_np  (in libsystem_c.dylib) + 384  [0x1925c6168]
+    +         ! : | + 17 mach_absolute_time  (in libsystem_kernel.dylib) + 108  [0x1926f70fc]
+    +         ! : | 2 clock_gettime_nsec_np  (in libsystem_c.dylib) + 240  [0x1925c60d8]
+    +         ! : |   2 mach_timebase_info  (in libsystem_kernel.dylib) + 4,68  [0x1926f6fc4,0x1926f7004]
+    +         ! : 7 clock_gettime  (in libsystem_c.dylib) + 64,416,...  [0x1925d3e0c,0x1925d3f6c,...]
+    +         ! 1 std::sys::pal::unix::time::Timespec::now::h10d6d2ed67c46185  (in load_bench-b162c69bffb362fa) + 8  [0x102cfab98]  time.rs:99
+    +         17 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 628  [0x102b15760]  backtrace.rs:158
+    +         ! 17 std::sys::pal::unix::time::Timespec::now::h10d6d2ed67c46185  (in load_bench-b162c69bffb362fa) + 24  [0x102cfaba8]  time.rs:131
+    +         !   15 clock_gettime  (in libsystem_c.dylib) + 60  [0x1925d3e08]
+    +         !   : 14 clock_gettime_nsec_np  (in libsystem_c.dylib) + 384  [0x1925c6168]
+    +         !   : | 14 mach_absolute_time  (in libsystem_kernel.dylib) + 108,28,...  [0x1926f70fc,0x1926f70ac,...]
+    +         !   : 1 clock_gettime_nsec_np  (in libsystem_c.dylib) + 240  [0x1925c60d8]
+    +         !   :   1 mach_timebase_info  (in libsystem_kernel.dylib) + 28  [0x1926f6fdc]
+    +         !   2 clock_gettime  (in libsystem_c.dylib) + 12,32  [0x1925d3dd8,0x1925d3dec]
+    +         8 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 540  [0x102b15708]  backtrace.rs:158
+    +         ! 7 rand_core::block::BlockRng$LT$R$GT$::generate_and_set::h9778ad68f1adadb8  (in load_bench-b162c69bffb362fa) + 440,1624,...  [0x102baffd4,0x102bb0474,...]  block.rs:176
+    +         ! 1 load_bench::pick_index::h67b5b210dbc33163  (in load_bench-b162c69bffb362fa) + 212  [0x102aec6d4]  load_bench.rs:273
+    +         6 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 868,632,...  [0x102b15850,0x102b15764,...]  backtrace.rs:158
+    +         5 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 880  [0x102b1585c]  backtrace.rs:158
+    +           5 _platform_memcmp  (in libsystem_platform.dylib) + 56,48  [0x192740f08,0x192740f00]
+    3605 Thread_1279499
+    + 3605 thread_start  (in libsystem_pthread.dylib) + 8  [0x192734ba8]
+    +   3605 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x192739c08]
+    +     3605 std::sys::thread::unix::Thread::new::thread_start::h98270432b6aefc44  (in load_bench-b162c69bffb362fa) + 52  [0x102cfc298]  unix.rs:126
+    +       3605 core::ops::function::FnOnce::call_once$u7b$$u7b$vtable.shim$u7d$$u7d$::h2aa91564ae41432b  (in load_bench-b162c69bffb362fa) + 472  [0x102b1f520]  function.rs:250
+    +         3544 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 616  [0x102b15754]  backtrace.rs:158
+    +         ! 3331 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 484  [0x102c1756c]  storage.rs:1231
+    +         ! : 1094 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 524  [0x102c3088c]  storage.rs:1181
+    +         ! : | 1093 _$LT$std..fs..File$u20$as$u20$liven..storage..PositionalReader$GT$::read_exact_at::ha621830e22b7727d  (in load_bench-b162c69bffb362fa) + 100  [0x102c27900]  storage.rs:69
+    +         ! : | + 1093 pread  (in libsystem_kernel.dylib) + 8,4  [0x1926f863c,0x1926f8638]
+    +         ! : | 1 _$LT$std..fs..File$u20$as$u20$liven..storage..PositionalReader$GT$::read_exact_at::ha621830e22b7727d  (in load_bench-b162c69bffb362fa) + 120  [0x102c27914]  storage.rs:69
+    +         ! : 1013 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 288  [0x102c307a0]  storage.rs:1136
+    +         ! : | 1012 _$LT$std..fs..File$u20$as$u20$liven..storage..PositionalReader$GT$::read_exact_at::ha621830e22b7727d  (in load_bench-b162c69bffb362fa) + 100  [0x102c27900]  storage.rs:69
+    +         ! : | + 1012 pread  (in libsystem_kernel.dylib) + 8,4  [0x1926f863c,0x1926f8638]
+    +         ! : | 1 _$LT$std..fs..File$u20$as$u20$liven..storage..PositionalReader$GT$::read_exact_at::ha621830e22b7727d  (in load_bench-b162c69bffb362fa) + 100  [0x102c27900]  storage.rs:69
+    +         ! : 863 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 112  [0x102c306f0]  storage.rs:1125
+    +         ! : | 863 fstat  (in libsystem_kernel.dylib) + 8,4  [0x192705264,0x192705260]
+    +         ! : 327 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 60  [0x102c306bc]  storage.rs:1124
+    +         ! : | 264 liven::storage::StorageEngine::get_or_load_file_handle::h486bebc727c660fa  (in load_bench-b162c69bffb362fa) + 64  [0x102c26cb8]  storage.rs:469
+    +         ! : | + 252 _pthread_mutex_firstfit_lock_slow  (in libsystem_pthread.dylib) + 220  [0x192734868]
+    +         ! : | + ! 252 _pthread_mutex_firstfit_lock_wait  (in libsystem_pthread.dylib) + 84  [0x192736e3c]
+    +         ! : | + !   252 __psynch_mutexwait  (in libsystem_kernel.dylib) + 8  [0x1926f99c8]
+    +         ! : | + 11 pthread_mutex_lock  (in libsystem_pthread.dylib) + 32,112  [0x1927343a0,0x1927343f0]
+    +         ! : | + 1 DYLD-STUB$$pthread_mutex_lock  (in load_bench-b162c69bffb362fa) + 4  [0x102e7a26c]
+    +         ! : | 48 liven::storage::StorageEngine::get_or_load_file_handle::h486bebc727c660fa  (in load_bench-b162c69bffb362fa) + 1400  [0x102c271f0]  storage.rs:489
+    +         ! : | + 46 _pthread_mutex_firstfit_unlock_slow  (in libsystem_pthread.dylib) + 240  [0x192734b30]
+    +         ! : | + ! 46 _pthread_mutex_firstfit_wake  (in libsystem_pthread.dylib) + 28  [0x192736eac]
+    +         ! : | + !   46 __psynch_mutexdrop  (in libsystem_kernel.dylib) + 8  [0x1926f9b94]
+    +         ! : | + 1 _pthread_mutex_firstfit_unlock_slow  (in libsystem_pthread.dylib) + 124  [0x192734abc]
+    +         ! : | + 1 pthread_mutex_unlock  (in libsystem_pthread.dylib) + 104  [0x192734934]
+    +         ! : | 9 liven::storage::StorageEngine::get_or_load_file_handle::h486bebc727c660fa  (in load_bench-b162c69bffb362fa) + 116  [0x102c26cec]  storage.rs:470
+    +         ! : | + 5 core::hash::BuildHasher::hash_one::h62b31bd32b66d046  (in load_bench-b162c69bffb362fa) + 224,252  [0x102c2ebbc,0x102c2ebd8]  mod.rs:701
+    +         ! : | + 2 core::hash::BuildHasher::hash_one::h62b31bd32b66d046  (in load_bench-b162c69bffb362fa) + 80  [0x102c2eb2c]  mod.rs:700
+    +         ! : | + ! 1 _$LT$core..hash..sip..Hasher$LT$S$GT$$u20$as$u20$core..hash..Hasher$GT$::write::h8232b839179d186b  (in load_bench-b162c69bffb362fa) + 0  [0x102b889c8]  sip.rs:257
+    +         ! : | + ! 1 _$LT$core..hash..sip..Hasher$LT$S$GT$$u20$as$u20$core..hash..Hasher$GT$::write::h8232b839179d186b  (in load_bench-b162c69bffb362fa) + 400  [0x102b88b58]  sip.rs:297
+    +         ! : | + 2 core::hash::BuildHasher::hash_one::h62b31bd32b66d046  (in load_bench-b162c69bffb362fa) + 60  [0x102c2eb18]  mod.rs:700
+    +         ! : | 4 liven::storage::StorageEngine::get_or_load_file_handle::h486bebc727c660fa  (in load_bench-b162c69bffb362fa) + 540,544  [0x102c26e94,0x102c26e98]  storage.rs:471
+    +         ! : | 2 liven::storage::StorageEngine::get_or_load_file_handle::h486bebc727c660fa  (in load_bench-b162c69bffb362fa) + 116,164  [0x102c26cec,0x102c26d1c]  storage.rs:470
+    +         ! : 23 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 584  [0x102c308c8]  storage.rs:1181
+    +         ! : | 18 liven::storage::deserialize_payload_borrowed::hd6843a42d248e1ba  (in load_bench-b162c69bffb362fa) + 848  [0x102c27cb0]  storage.rs:2357
+    +         ! : | + 11 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_enum::hffb8e2f55685d1c4  (in load_bench-b162c69bffb362fa) + 1288  [0x102c293fc]  decode.rs:676
+    +         ! : | + ! 5 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_string::h602696d85807ef7c  (in load_bench-b162c69bffb362fa) + 1104  [0x102bffd8c]  macros.rs:132
+    +         ! : | + ! : 2 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_string::h602696d85807ef7c  (in load_bench-b162c69bffb362fa) + 692  [0x102bffbf0]  macros.rs:132
+    +         ! : | + ! : | 2 core::str::converts::from_utf8::h907df036b51c9b19  (in load_bench-b162c69bffb362fa) + 52,80  [0x102bcf334,0x102bcf350]  converts.rs:91
+    +         ! : | + ! : 1 <deduplicated_symbol>  (in libsystem_malloc.dylib) + 132  [0x192558ca4]
+    +         ! : | + ! : 1 _malloc_zone_malloc  (in libsystem_malloc.dylib) + 76  [0x192565e4c]
+    +         ! : | + ! : 1 _xzm_xzone_malloc  (in libsystem_malloc.dylib) + 140  [0x192559118]
+    +         ! : | + ! 4 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_string::h602696d85807ef7c  (in load_bench-b162c69bffb362fa) + 1180  [0x102bffdd8]  macros.rs:132
+    +         ! : | + ! : 3 _platform_memmove  (in libsystem_platform.dylib) + 0,168  [0x192743360,0x192743408]
+    +         ! : | + ! : 1 DYLD-STUB$$memcpy  (in load_bench-b162c69bffb362fa) + 0  [0x102e7a064]
+    +         ! : | + ! 2 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_string::h602696d85807ef7c  (in load_bench-b162c69bffb362fa) + 1180,1344  [0x102bffdd8,0x102bffe7c]  macros.rs:132
+    +         ! : | + 3 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_enum::hffb8e2f55685d1c4  (in load_bench-b162c69bffb362fa) + 184  [0x102c28fac]  decode.rs:676
+    +         ! : | + ! 2 _$LT$core..marker..PhantomData$LT$T$GT$$u20$as$u20$serde_core..de..DeserializeSeed$GT$::deserialize::h864c087f3d3854e4  (in load_bench-b162c69bffb362fa) + 584,700  [0x102c2971c,0x102c29790]  mod.rs:825
+    +         ! : | + ! 1 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_string::h602696d85807ef7c  (in load_bench-b162c69bffb362fa) + 1104  [0x102bffd8c]  macros.rs:132
+    +         ! : | + !   1 _$LT$core..marker..PhantomData$LT$T$GT$$u20$as$u20$serde_core..de..DeserializeSeed$GT$::deserialize::h864c087f3d3854e4  (in load_bench-b162c69bffb362fa) + 736  [0x102c297b4]  mod.rs:825
+    +         ! : | + !     1 core::str::converts::from_utf8::h907df036b51c9b19  (in load_bench-b162c69bffb362fa) + 528  [0x102bcf510]  converts.rs:0
+    +         ! : | + 2 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_enum::hffb8e2f55685d1c4  (in load_bench-b162c69bffb362fa) + 32  [0x102c28f14]  decode.rs:668
+    +         ! : | + 1 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_enum::hffb8e2f55685d1c4  (in load_bench-b162c69bffb362fa) + 1288  [0x102c293fc]  decode.rs:0
+    +         ! : | + 1 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_enum::hffb8e2f55685d1c4  (in load_bench-b162c69bffb362fa) + 1280  [0x102c293f4]  decode.rs:676
+    +         ! : | 2 liven::storage::deserialize_payload_borrowed::hd6843a42d248e1ba  (in load_bench-b162c69bffb362fa) + 180  [0x102c27a14]  storage.rs:2329
+    +         ! : | + 2 core::str::converts::from_utf8::h907df036b51c9b19  (in load_bench-b162c69bffb362fa) + 44,60  [0x102bcf32c,0x102bcf33c]  converts.rs:91
+    +         ! : | 1 liven::storage::deserialize_payload_borrowed::hd6843a42d248e1ba  (in load_bench-b162c69bffb362fa) + 56  [0x102c27998]  storage.rs:2323
+    +         ! : | 1 liven::storage::deserialize_payload_borrowed::hd6843a42d248e1ba  (in load_bench-b162c69bffb362fa) + 496  [0x102c27b50]  storage.rs:2339
+    +         ! : | + 1 core::str::converts::from_utf8::h907df036b51c9b19  (in load_bench-b162c69bffb362fa) + 128  [0x102bcf380]  converts.rs:91
+    +         ! : | 1 liven::storage::deserialize_payload_borrowed::hd6843a42d248e1ba  (in load_bench-b162c69bffb362fa) + 920  [0x102c27cf8]  storage.rs:2361
+    +         ! : 3 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 556  [0x102c308ac]  storage.rs:1181
+    +         ! : | 3 crc32fast::hash::h25c026a3d564784f  (in load_bench-b162c69bffb362fa) + 72,172,...  [0x102bd5c40,0x102bd5ca4,...]  lib.rs:52
+    +         ! : 3 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 396,524,...  [0x102c3080c,0x102c3088c,...]  storage.rs:1181
+    +         ! : 1 fstat  (in libsystem_kernel.dylib) + 40  [0x192705284]
+    +         ! : 1 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 120  [0x102c306f8]  storage.rs:1125
+    +         ! : 1 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 288  [0x102c307a0]  storage.rs:1136
+    +         ! : 1 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 380  [0x102c307fc]  storage.rs:1181
+    +         ! : | 1 _tlv_get_addr  (in libdyld.dylib) + 20  [0x19233b30c]
+    +         ! : 1 liven::storage::deserialize_payload_borrowed::hd6843a42d248e1ba  (in load_bench-b162c69bffb362fa) + 120  [0x102c279d8]  storage.rs:2362
+    +         ! 168 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 456  [0x102c17550]  storage.rs:1230
+    +         ! : 163 crossbeam_skiplist::map::SkipMap$LT$K$C$V$GT$::get::h2f1885f49d48ccbe  (in load_bench-b162c69bffb362fa) + 92  [0x102c39c00]  map.rs:164
+    +         ! : | 63 crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 148  [0x102c33150]  base.rs:751
+    +         ! : | + 62 _platform_memcmp  (in libsystem_platform.dylib) + 56,96,...  [0x192740f08,0x192740f30,...]
+    +         ! : | + 1 DYLD-STUB$$memcmp  (in load_bench-b162c69bffb362fa) + 4  [0x102e7a05c]
+    +         ! : | 59 crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 168,260,...  [0x102c33164,0x102c331c0,...]  base.rs:0
+    +         ! : | 32 crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 236,148  [0x102c331a8,0x102c33150]  base.rs:751
+    +         ! : | 4 crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 180,184  [0x102c33170,0x102c33174]  base.rs:726
+    +         ! : | 3 crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 64  [0x102c330fc]  base.rs:699
+    +         ! : | 2 crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 96  [0x102c3311c]  base.rs:711
+    +         ! : 3 crossbeam_skiplist::map::SkipMap$LT$K$C$V$GT$::get::h2f1885f49d48ccbe  (in load_bench-b162c69bffb362fa) + 128  [0x102c39c24]  map.rs:164
+    +         ! : | 3 _platform_memcmp  (in libsystem_platform.dylib) + 56,48  [0x192740f08,0x192740f00]
+    +         ! : 1 crossbeam_skiplist::map::SkipMap$LT$K$C$V$GT$::get::h2f1885f49d48ccbe  (in load_bench-b162c69bffb362fa) + 40  [0x102c39bcc]  map.rs:163
+    +         ! : | 1 crossbeam_epoch::default::with_handle::h0f32ee68993180ca  (in load_bench-b162c69bffb362fa) + 24  [0x102c2f6c8]  default.rs:60
+    +         ! : 1 crossbeam_skiplist::map::SkipMap$LT$K$C$V$GT$::get::h2f1885f49d48ccbe  (in load_bench-b162c69bffb362fa) + 68  [0x102c39be8]  map.rs:164
+    +         ! 25 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 244  [0x102c1747c]  storage.rs:1223
+    +         ! : 9 core::fmt::write::h164e2e78980a3344  (in load_bench-b162c69bffb362fa) + 376  [0x102bca08c]  mod.rs:1469
+    +         ! : | 4 _$LT$std..io..default_write_fmt..Adapter$LT$T$GT$$u20$as$u20$core..fmt..Write$GT$::write_str::h6bbb327eb7da1257  (in load_bench-b162c69bffb362fa) + 36  [0x102c39db8]  mod.rs:628
+    +         ! : | 3 _$LT$std..io..default_write_fmt..Adapter$LT$T$GT$$u20$as$u20$core..fmt..Write$GT$::write_str::h6bbb327eb7da1257  (in load_bench-b162c69bffb362fa) + 72  [0x102c39ddc]  mod.rs:628
+    +         ! : | + 3 _platform_memmove  (in libsystem_platform.dylib) + 428,444,...  [0x19274350c,0x19274351c,...]
+    +         ! : | 2 core::fmt::Formatter::pad::hf4614a1c20e4508e  (in load_bench-b162c69bffb362fa) + 596,616  [0x102bcb958,0x102bcb96c]  mod.rs:0
+    +         ! : 6 _$LT$std..io..default_write_fmt..Adapter$LT$T$GT$$u20$as$u20$core..fmt..Write$GT$::write_str::h6bbb327eb7da1257  (in load_bench-b162c69bffb362fa) + 136  [0x102c39e1c]  mod.rs:635
+    +         ! : 3 core::fmt::write::h164e2e78980a3344  (in load_bench-b162c69bffb362fa) + 360  [0x102bca07c]  mod.rs:1463
+    +         ! : | 3 _$LT$std..io..default_write_fmt..Adapter$LT$T$GT$$u20$as$u20$core..fmt..Write$GT$::write_str::h6bbb327eb7da1257  (in load_bench-b162c69bffb362fa) + 36  [0x102c39db8]  mod.rs:628
+    +         ! : 2 core::fmt::write::h164e2e78980a3344  (in load_bench-b162c69bffb362fa) + 0,16  [0x102bc9f14,0x102bc9f24]  mod.rs:1451
+    +         ! : 1 core::fmt::Formatter::pad::hf4614a1c20e4508e  (in load_bench-b162c69bffb362fa) + 632  [0x102bcb97c]  mod.rs:0
+    +         ! : 1 core::fmt::write::h164e2e78980a3344  (in load_bench-b162c69bffb362fa) + 44  [0x102bc9f40]  mod.rs:1455
+    +         ! : 1 core::fmt::write::h164e2e78980a3344  (in load_bench-b162c69bffb362fa) + 296  [0x102bca03c]  mod.rs:1458
+    +         ! : 1 core::fmt::write::h164e2e78980a3344  (in load_bench-b162c69bffb362fa) + 376  [0x102bca08c]  mod.rs:1469
+    +         ! : 1 core::fmt::write::h164e2e78980a3344  (in load_bench-b162c69bffb362fa) + 404  [0x102bca0a8]  mod.rs:1493
+    +         ! 10 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 424  [0x102c17530]  storage.rs:1225
+    +         ! : 10 core::str::converts::from_utf8::h907df036b51c9b19  (in load_bench-b162c69bffb362fa) + 80,60,...  [0x102bcf350,0x102bcf33c,...]  converts.rs:91
+    +         ! 6 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 152  [0x102c17420]  storage.rs:0
+    +         ! 2 core::fmt::write::h164e2e78980a3344  (in load_bench-b162c69bffb362fa) + 476  [0x102bca0f0]  mod.rs:1498
+    +         ! 1 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 116  [0x102c173fc]  storage.rs:1218
+    +         ! 1 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 220  [0x102c17464]  storage.rs:1223
+    +         18 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 628  [0x102b15760]  backtrace.rs:158
+    +         ! 18 std::sys::pal::unix::time::Timespec::now::h10d6d2ed67c46185  (in load_bench-b162c69bffb362fa) + 24  [0x102cfaba8]  time.rs:131
+    +         !   16 clock_gettime  (in libsystem_c.dylib) + 60  [0x1925d3e08]
+    +         !   : 12 clock_gettime_nsec_np  (in libsystem_c.dylib) + 384  [0x1925c6168]
+    +         !   : | 12 mach_absolute_time  (in libsystem_kernel.dylib) + 108,28,...  [0x1926f70fc,0x1926f70ac,...]
+    +         !   : 3 clock_gettime_nsec_np  (in libsystem_c.dylib) + 228  [0x1925c60cc]
+    +         !   : 1 clock_gettime_nsec_np  (in libsystem_c.dylib) + 240  [0x1925c60d8]
+    +         !   :   1 mach_timebase_info  (in libsystem_kernel.dylib) + 0  [0x1926f6fc0]
+    +         !   2 clock_gettime  (in libsystem_c.dylib) + 64  [0x1925d3e0c]
+    +         15 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 880  [0x102b1585c]  backtrace.rs:158
+    +         ! 15 _platform_memcmp  (in libsystem_platform.dylib) + 56,36,...  [0x192740f08,0x192740ef4,...]
+    +         11 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 552  [0x102b15714]  backtrace.rs:158
+    +         ! 11 std::sys::pal::unix::time::Timespec::now::h10d6d2ed67c46185  (in load_bench-b162c69bffb362fa) + 24  [0x102cfaba8]  time.rs:131
+    +         !   11 clock_gettime  (in libsystem_c.dylib) + 60  [0x1925d3e08]
+    +         !     9 clock_gettime_nsec_np  (in libsystem_c.dylib) + 384  [0x1925c6168]
+    +         !     : 9 mach_absolute_time  (in libsystem_kernel.dylib) + 108,28  [0x1926f70fc,0x1926f70ac]
+    +         !     1 clock_gettime_nsec_np  (in libsystem_c.dylib) + 240  [0x1925c60d8]
+    +         !     : 1 mach_timebase_info  (in libsystem_kernel.dylib) + 28  [0x1926f6fdc]
+    +         !     1 mach_timebase_info  (in libsystem_kernel.dylib) + 80  [0x1926f7010]
+    +         11 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 868,720  [0x102b15850,0x102b157bc]  backtrace.rs:158
+    +         4 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 540  [0x102b15708]  backtrace.rs:158
+    +         ! 4 rand_core::block::BlockRng$LT$R$GT$::generate_and_set::h9778ad68f1adadb8  (in load_bench-b162c69bffb362fa) + 336,2732,...  [0x102baff6c,0x102bb08c8,...]  block.rs:176
+    +         1 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 500  [0x102b156e0]  backtrace.rs:158
+    +         ! 1 _xzm_free  (in libsystem_malloc.dylib) + 168  [0x1925597ec]
+    +         1 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 660  [0x102b15780]  backtrace.rs:158
+    +           1 std::sys::pal::unix::time::Timespec::sub_timespec::h9e61d60fef934ad5  (in load_bench-b162c69bffb362fa) + 8  [0x102cfacac]  time.rs:136
+    3605 Thread_1279500
+    + 3605 thread_start  (in libsystem_pthread.dylib) + 8  [0x192734ba8]
+    +   3605 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x192739c08]
+    +     3605 std::sys::thread::unix::Thread::new::thread_start::h98270432b6aefc44  (in load_bench-b162c69bffb362fa) + 52  [0x102cfc298]  unix.rs:126
+    +       3605 core::ops::function::FnOnce::call_once$u7b$$u7b$vtable.shim$u7d$$u7d$::h2aa91564ae41432b  (in load_bench-b162c69bffb362fa) + 472  [0x102b1f520]  function.rs:250
+    +         3540 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 616  [0x102b15754]  backtrace.rs:158
+    +         ! 3317 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 484  [0x102c1756c]  storage.rs:1231
+    +         ! : 1079 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 524  [0x102c3088c]  storage.rs:1181
+    +         ! : | 1078 _$LT$std..fs..File$u20$as$u20$liven..storage..PositionalReader$GT$::read_exact_at::ha621830e22b7727d  (in load_bench-b162c69bffb362fa) + 100  [0x102c27900]  storage.rs:69
+    +         ! : | + 1078 pread  (in libsystem_kernel.dylib) + 8,4  [0x1926f863c,0x1926f8638]
+    +         ! : | 1 pread  (in libsystem_kernel.dylib) + 40  [0x1926f865c]
+    +         ! : 992 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 288  [0x102c307a0]  storage.rs:1136
+    +         ! : | 991 _$LT$std..fs..File$u20$as$u20$liven..storage..PositionalReader$GT$::read_exact_at::ha621830e22b7727d  (in load_bench-b162c69bffb362fa) + 100  [0x102c27900]  storage.rs:69
+    +         ! : | + 991 pread  (in libsystem_kernel.dylib) + 8,4,...  [0x1926f863c,0x1926f8638,...]
+    +         ! : | 1 _$LT$std..fs..File$u20$as$u20$liven..storage..PositionalReader$GT$::read_exact_at::ha621830e22b7727d  (in load_bench-b162c69bffb362fa) + 108  [0x102c27908]  storage.rs:69
+    +         ! : 931 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 112  [0x102c306f0]  storage.rs:1125
+    +         ! : | 931 fstat  (in libsystem_kernel.dylib) + 8,4  [0x192705264,0x192705260]
+    +         ! : 275 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 60  [0x102c306bc]  storage.rs:1124
+    +         ! : | 221 liven::storage::StorageEngine::get_or_load_file_handle::h486bebc727c660fa  (in load_bench-b162c69bffb362fa) + 64  [0x102c26cb8]  storage.rs:469
+    +         ! : | + 211 _pthread_mutex_firstfit_lock_slow  (in libsystem_pthread.dylib) + 220  [0x192734868]
+    +         ! : | + ! 210 _pthread_mutex_firstfit_lock_wait  (in libsystem_pthread.dylib) + 84  [0x192736e3c]
+    +         ! : | + ! : 210 __psynch_mutexwait  (in libsystem_kernel.dylib) + 8  [0x1926f99c8]
+    +         ! : | + ! 1 _pthread_mutex_firstfit_lock_wait  (in libsystem_pthread.dylib) + 60  [0x192736e24]
+    +         ! : | + 7 pthread_mutex_lock  (in libsystem_pthread.dylib) + 32,48,...  [0x1927343a0,0x1927343b0,...]
+    +         ! : | + 3 _pthread_mutex_firstfit_lock_slow  (in libsystem_pthread.dylib) + 124,160  [0x192734808,0x19273482c]
+    +         ! : | 42 liven::storage::StorageEngine::get_or_load_file_handle::h486bebc727c660fa  (in load_bench-b162c69bffb362fa) + 1400  [0x102c271f0]  storage.rs:489
+    +         ! : | + 41 _pthread_mutex_firstfit_unlock_slow  (in libsystem_pthread.dylib) + 240  [0x192734b30]
+    +         ! : | + ! 41 _pthread_mutex_firstfit_wake  (in libsystem_pthread.dylib) + 28  [0x192736eac]
+    +         ! : | + !   41 __psynch_mutexdrop  (in libsystem_kernel.dylib) + 8  [0x1926f9b94]
+    +         ! : | + 1 pthread_mutex_unlock  (in libsystem_pthread.dylib) + 104  [0x192734934]
+    +         ! : | 6 liven::storage::StorageEngine::get_or_load_file_handle::h486bebc727c660fa  (in load_bench-b162c69bffb362fa) + 116  [0x102c26cec]  storage.rs:470
+    +         ! : | + 4 core::hash::BuildHasher::hash_one::h62b31bd32b66d046  (in load_bench-b162c69bffb362fa) + 224,252  [0x102c2ebbc,0x102c2ebd8]  mod.rs:701
+    +         ! : | + 1 core::hash::BuildHasher::hash_one::h62b31bd32b66d046  (in load_bench-b162c69bffb362fa) + 80  [0x102c2eb2c]  mod.rs:700
+    +         ! : | + ! 1 _$LT$core..hash..sip..Hasher$LT$S$GT$$u20$as$u20$core..hash..Hasher$GT$::write::h8232b839179d186b  (in load_bench-b162c69bffb362fa) + 364  [0x102b88b34]  sip.rs:288
+    +         ! : | + 1 core::hash::BuildHasher::hash_one::h62b31bd32b66d046  (in load_bench-b162c69bffb362fa) + 60  [0x102c2eb18]  mod.rs:700
+    +         ! : | 4 liven::storage::StorageEngine::get_or_load_file_handle::h486bebc727c660fa  (in load_bench-b162c69bffb362fa) + 544,540  [0x102c26e98,0x102c26e94]  storage.rs:471
+    +         ! : | 1 liven::storage::StorageEngine::get_or_load_file_handle::h486bebc727c660fa  (in load_bench-b162c69bffb362fa) + 36  [0x102c26c9c]  storage.rs:468
+    +         ! : | 1 liven::storage::StorageEngine::get_or_load_file_handle::h486bebc727c660fa  (in load_bench-b162c69bffb362fa) + 60  [0x102c26cb4]  storage.rs:469
+    +         ! : 28 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 584  [0x102c308c8]  storage.rs:1181
+    +         ! : | 19 liven::storage::deserialize_payload_borrowed::hd6843a42d248e1ba  (in load_bench-b162c69bffb362fa) + 848  [0x102c27cb0]  storage.rs:2357
+    +         ! : | + 13 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_enum::hffb8e2f55685d1c4  (in load_bench-b162c69bffb362fa) + 1288  [0x102c293fc]  decode.rs:676
+    +         ! : | + ! 7 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_string::h602696d85807ef7c  (in load_bench-b162c69bffb362fa) + 1104  [0x102bffd8c]  macros.rs:132
+    +         ! : | + ! : 3 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_string::h602696d85807ef7c  (in load_bench-b162c69bffb362fa) + 692  [0x102bffbf0]  macros.rs:132
+    +         ! : | + ! : | 3 core::str::converts::from_utf8::h907df036b51c9b19  (in load_bench-b162c69bffb362fa) + 60,80,...  [0x102bcf33c,0x102bcf350,...]  converts.rs:91
+    +         ! : | + ! : 2 _malloc_zone_malloc  (in libsystem_malloc.dylib) + 76  [0x192565e4c]
+    +         ! : | + ! : 1 _xzm_xzone_malloc  (in libsystem_malloc.dylib) + 76  [0x1925590d8]
+    +         ! : | + ! : 1 xzm_malloc_zone_malloc_type_malloc  (in libsystem_malloc.dylib) + 0  [0x192562bdc]
+    +         ! : | + ! 5 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_string::h602696d85807ef7c  (in load_bench-b162c69bffb362fa) + 32,540,...  [0x102bff95c,0x102bffb58,...]  macros.rs:132
+    +         ! : | + ! 1 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_string::h602696d85807ef7c  (in load_bench-b162c69bffb362fa) + 1180  [0x102bffdd8]  macros.rs:132
+    +         ! : | + !   1 DYLD-STUB$$memcpy  (in load_bench-b162c69bffb362fa) + 4  [0x102e7a068]
+    +         ! : | + 2 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_enum::hffb8e2f55685d1c4  (in load_bench-b162c69bffb362fa) + 184  [0x102c28fac]  decode.rs:676
+    +         ! : | + ! 1 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_string::h602696d85807ef7c  (in load_bench-b162c69bffb362fa) + 1104  [0x102bffd8c]  macros.rs:132
+    +         ! : | + ! : 1 _$LT$core..marker..PhantomData$LT$T$GT$$u20$as$u20$serde_core..de..DeserializeSeed$GT$::deserialize::h864c087f3d3854e4  (in load_bench-b162c69bffb362fa) + 736  [0x102c297b4]  mod.rs:825
+    +         ! : | + ! :   1 core::str::converts::from_utf8::h907df036b51c9b19  (in load_bench-b162c69bffb362fa) + 128  [0x102bcf380]  converts.rs:91
+    +         ! : | + ! 1 _$LT$core..marker..PhantomData$LT$T$GT$$u20$as$u20$serde_core..de..DeserializeSeed$GT$::deserialize::h864c087f3d3854e4  (in load_bench-b162c69bffb362fa) + 736  [0x102c297b4]  mod.rs:825
+    +         ! : | + 2 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_enum::hffb8e2f55685d1c4  (in load_bench-b162c69bffb362fa) + 200,1280  [0x102c28fbc,0x102c293f4]  decode.rs:676
+    +         ! : | + 2 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_enum::hffb8e2f55685d1c4  (in load_bench-b162c69bffb362fa) + 1456  [0x102c294a4]  decode.rs:683
+    +         ! : | 4 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 880  [0x102c309f0]  storage.rs:1181
+    +         ! : | + 2 <deduplicated_symbol>  (in libsystem_malloc.dylib) + 184  [0x192558cd8]
+    +         ! : | + 1 _malloc_zone_malloc  (in libsystem_malloc.dylib) + 100  [0x192565e64]
+    +         ! : | + 1 _xzm_xzone_malloc  (in libsystem_malloc.dylib) + 136  [0x192559114]
+    +         ! : | 3 liven::storage::deserialize_payload_borrowed::hd6843a42d248e1ba  (in load_bench-b162c69bffb362fa) + 496  [0x102c27b50]  storage.rs:2339
+    +         ! : | + 3 core::str::converts::from_utf8::h907df036b51c9b19  (in load_bench-b162c69bffb362fa) + 0,60  [0x102bcf300,0x102bcf33c]  converts.rs:91
+    +         ! : | 1 liven::storage::deserialize_payload_borrowed::hd6843a42d248e1ba  (in load_bench-b162c69bffb362fa) + 180  [0x102c27a14]  storage.rs:2329
+    +         ! : | + 1 core::str::converts::from_utf8::h907df036b51c9b19  (in load_bench-b162c69bffb362fa) + 52  [0x102bcf334]  converts.rs:91
+    +         ! : | 1 liven::storage::deserialize_payload_borrowed::hd6843a42d248e1ba  (in load_bench-b162c69bffb362fa) + 108  [0x102c279cc]  storage.rs:2362
+    +         ! : 4 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 556  [0x102c308ac]  storage.rs:1181
+    +         ! : | 4 crc32fast::hash::h25c026a3d564784f  (in load_bench-b162c69bffb362fa) + 0,56,...  [0x102bd5bf8,0x102bd5c30,...]  lib.rs:52
+    +         ! : 4 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 1028,1020  [0x102c30a84,0x102c30a7c]  storage.rs:1214
+    +         ! : 3 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 396,492,...  [0x102c3080c,0x102c3086c,...]  storage.rs:1181
+    +         ! : 1 fstat  (in libsystem_kernel.dylib) + 40  [0x192705284]
+    +         ! 180 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 456  [0x102c17550]  storage.rs:1230
+    +         ! : 174 crossbeam_skiplist::map::SkipMap$LT$K$C$V$GT$::get::h2f1885f49d48ccbe  (in load_bench-b162c69bffb362fa) + 92  [0x102c39c00]  map.rs:164
+    +         ! : | 64 crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 168,260,...  [0x102c33164,0x102c331c0,...]  base.rs:0
+    +         ! : | 63 crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 148  [0x102c33150]  base.rs:751
+    +         ! : | + 62 _platform_memcmp  (in libsystem_platform.dylib) + 56,96,...  [0x192740f08,0x192740f30,...]
+    +         ! : | + 1 DYLD-STUB$$memcmp  (in load_bench-b162c69bffb362fa) + 4  [0x102e7a05c]
+    +         ! : | 43 crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 236,148  [0x102c331a8,0x102c33150]  base.rs:751
+    +         ! : | 2 crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 104  [0x102c33124]  base.rs:715
+    +         ! : | 1 crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 96  [0x102c3311c]  base.rs:711
+    +         ! : | 1 crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 180  [0x102c33170]  base.rs:726
+    +         ! : 5 crossbeam_skiplist::map::SkipMap$LT$K$C$V$GT$::get::h2f1885f49d48ccbe  (in load_bench-b162c69bffb362fa) + 68,56  [0x102c39be8,0x102c39bdc]  map.rs:164
+    +         ! : 1 crossbeam_skiplist::map::SkipMap$LT$K$C$V$GT$::get::h2f1885f49d48ccbe  (in load_bench-b162c69bffb362fa) + 40  [0x102c39bcc]  map.rs:163
+    +         ! :   1 crossbeam_epoch::default::with_handle::h0f32ee68993180ca  (in load_bench-b162c69bffb362fa) + 68  [0x102c2f6f4]  default.rs:60
+    +         ! 14 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 152  [0x102c17420]  storage.rs:0
+    +         ! 13 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 424  [0x102c17530]  storage.rs:1225
+    +         ! : 13 core::str::converts::from_utf8::h907df036b51c9b19  (in load_bench-b162c69bffb362fa) + 80,140  [0x102bcf350,0x102bcf38c]  converts.rs:91
+    +         ! 9 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 244  [0x102c1747c]  storage.rs:1223
+    +         ! : 3 _$LT$std..io..default_write_fmt..Adapter$LT$T$GT$$u20$as$u20$core..fmt..Write$GT$::write_str::h6bbb327eb7da1257  (in load_bench-b162c69bffb362fa) + 136  [0x102c39e1c]  mod.rs:635
+    +         ! : 3 core::fmt::write::h164e2e78980a3344  (in load_bench-b162c69bffb362fa) + 360  [0x102bca07c]  mod.rs:1463
+    +         ! : | 3 _$LT$std..io..default_write_fmt..Adapter$LT$T$GT$$u20$as$u20$core..fmt..Write$GT$::write_str::h6bbb327eb7da1257  (in load_bench-b162c69bffb362fa) + 36  [0x102c39db8]  mod.rs:628
+    +         ! : 1 core::fmt::write::h164e2e78980a3344  (in load_bench-b162c69bffb362fa) + 16  [0x102bc9f24]  mod.rs:1451
+    +         ! : 1 core::fmt::write::h164e2e78980a3344  (in load_bench-b162c69bffb362fa) + 44  [0x102bc9f40]  mod.rs:1455
+    +         ! : 1 core::fmt::write::h164e2e78980a3344  (in load_bench-b162c69bffb362fa) + 376  [0x102bca08c]  mod.rs:1469
+    +         ! :   1 _$LT$std..io..default_write_fmt..Adapter$LT$T$GT$$u20$as$u20$core..fmt..Write$GT$::write_str::h6bbb327eb7da1257  (in load_bench-b162c69bffb362fa) + 72  [0x102c39ddc]  mod.rs:628
+    +         ! :     1 _platform_memmove  (in libsystem_platform.dylib) + 444  [0x19274351c]
+    +         ! 2 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 560,572  [0x102c175b8,0x102c175c4]  storage.rs:1231
+    +         ! 2 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 624  [0x102c175f8]  storage.rs:1233
+    +         ! : 2 core::ptr::drop_in_place$LT$crossbeam_skiplist..map..Entry$LT$alloc..string..String$C$liven..types..LogPointer$GT$$GT$::hb1708afc6329b5b6  (in load_bench-b162c69bffb362fa) + 376  [0x102c2f288]  mod.rs:805
+    +         ! 1 core::fmt::write::h164e2e78980a3344  (in load_bench-b162c69bffb362fa) + 476  [0x102bca0f0]  mod.rs:1498
+    +         ! 1 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 188  [0x102c17444]  storage.rs:1223
+    +         ! 1 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 444  [0x102c17544]  storage.rs:1230
+    +         15 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 628  [0x102b15760]  backtrace.rs:158
+    +         ! 15 std::sys::pal::unix::time::Timespec::now::h10d6d2ed67c46185  (in load_bench-b162c69bffb362fa) + 24  [0x102cfaba8]  time.rs:131
+    +         !   14 clock_gettime  (in libsystem_c.dylib) + 60  [0x1925d3e08]
+    +         !   : 12 clock_gettime_nsec_np  (in libsystem_c.dylib) + 384  [0x1925c6168]
+    +         !   : | 12 mach_absolute_time  (in libsystem_kernel.dylib) + 108,28  [0x1926f70fc,0x1926f70ac]
+    +         !   : 2 clock_gettime_nsec_np  (in libsystem_c.dylib) + 228  [0x1925c60cc]
+    +         !   1 clock_gettime  (in libsystem_c.dylib) + 416  [0x1925d3f6c]
+    +         15 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 880  [0x102b1585c]  backtrace.rs:158
+    +         ! 15 _platform_memcmp  (in libsystem_platform.dylib) + 56  [0x192740f08]
+    +         13 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 552  [0x102b15714]  backtrace.rs:158
+    +         ! 13 std::sys::pal::unix::time::Timespec::now::h10d6d2ed67c46185  (in load_bench-b162c69bffb362fa) + 24  [0x102cfaba8]  time.rs:131
+    +         !   11 clock_gettime  (in libsystem_c.dylib) + 60  [0x1925d3e08]
+    +         !   : 10 clock_gettime_nsec_np  (in libsystem_c.dylib) + 384  [0x1925c6168]
+    +         !   : | 10 mach_absolute_time  (in libsystem_kernel.dylib) + 108,28  [0x1926f70fc,0x1926f70ac]
+    +         !   : 1 clock_gettime_nsec_np  (in libsystem_c.dylib) + 324  [0x1925c612c]
+    +         !   2 clock_gettime  (in libsystem_c.dylib) + 64  [0x1925d3e0c]
+    +         9 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 540  [0x102b15708]  backtrace.rs:158
+    +         ! 8 rand_core::block::BlockRng$LT$R$GT$::generate_and_set::h9778ad68f1adadb8  (in load_bench-b162c69bffb362fa) + 440,564,...  [0x102baffd4,0x102bb0050,...]  block.rs:176
+    +         ! 1 load_bench::pick_index::h67b5b210dbc33163  (in load_bench-b162c69bffb362fa) + 104  [0x102aec668]  load_bench.rs:273
+    +         8 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 868,720,...  [0x102b15850,0x102b157bc,...]  backtrace.rs:158
+    +         2 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 500  [0x102b156e0]  backtrace.rs:158
+    +         ! 1 _xzm_free  (in libsystem_malloc.dylib) + 348  [0x1925598a0]
+    +         ! : 1 __bzero  (in libsystem_platform.dylib) + 24  [0x192743048]
+    +         ! 1 _xzm_free  (in libsystem_malloc.dylib) + 260  [0x192559848]
+    +         2 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 660  [0x102b15780]  backtrace.rs:158
+    +         ! 2 std::sys::pal::unix::time::Timespec::sub_timespec::h9e61d60fef934ad5  (in load_bench-b162c69bffb362fa) + 60  [0x102cface0]  time.rs:0
+    +         1 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 904  [0x102b15874]  backtrace.rs:158
+    +           1 _free  (in libsystem_malloc.dylib) + 96  [0x192566a88]
+    3605 Thread_1279501
+    + 3605 thread_start  (in libsystem_pthread.dylib) + 8  [0x192734ba8]
+    +   3605 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x192739c08]
+    +     3605 std::sys::thread::unix::Thread::new::thread_start::h98270432b6aefc44  (in load_bench-b162c69bffb362fa) + 52  [0x102cfc298]  unix.rs:126
+    +       3605 core::ops::function::FnOnce::call_once$u7b$$u7b$vtable.shim$u7d$$u7d$::h2aa91564ae41432b  (in load_bench-b162c69bffb362fa) + 472  [0x102b1f520]  function.rs:250
+    +         3541 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 616  [0x102b15754]  backtrace.rs:158
+    +         ! 3356 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 484  [0x102c1756c]  storage.rs:1231
+    +         ! : 1116 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 524  [0x102c3088c]  storage.rs:1181
+    +         ! : | 1115 _$LT$std..fs..File$u20$as$u20$liven..storage..PositionalReader$GT$::read_exact_at::ha621830e22b7727d  (in load_bench-b162c69bffb362fa) + 100  [0x102c27900]  storage.rs:69
+    +         ! : | + 1115 pread  (in libsystem_kernel.dylib) + 8  [0x1926f863c]
+    +         ! : | 1 pread  (in libsystem_kernel.dylib) + 40  [0x1926f865c]
+    +         ! : 1078 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 288  [0x102c307a0]  storage.rs:1136
+    +         ! : | 1078 _$LT$std..fs..File$u20$as$u20$liven..storage..PositionalReader$GT$::read_exact_at::ha621830e22b7727d  (in load_bench-b162c69bffb362fa) + 100  [0x102c27900]  storage.rs:69
+    +         ! : |   1078 pread  (in libsystem_kernel.dylib) + 8,4,...  [0x1926f863c,0x1926f8638,...]
+    +         ! : 859 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 112  [0x102c306f0]  storage.rs:1125
+    +         ! : | 859 fstat  (in libsystem_kernel.dylib) + 8,4  [0x192705264,0x192705260]
+    +         ! : 280 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 60  [0x102c306bc]  storage.rs:1124
+    +         ! : | 223 liven::storage::StorageEngine::get_or_load_file_handle::h486bebc727c660fa  (in load_bench-b162c69bffb362fa) + 64  [0x102c26cb8]  storage.rs:469
+    +         ! : | + 216 _pthread_mutex_firstfit_lock_slow  (in libsystem_pthread.dylib) + 220  [0x192734868]
+    +         ! : | + ! 216 _pthread_mutex_firstfit_lock_wait  (in libsystem_pthread.dylib) + 84  [0x192736e3c]
+    +         ! : | + !   216 __psynch_mutexwait  (in libsystem_kernel.dylib) + 8  [0x1926f99c8]
+    +         ! : | + 7 pthread_mutex_lock  (in libsystem_pthread.dylib) + 32,140  [0x1927343a0,0x19273440c]
+    +         ! : | 34 liven::storage::StorageEngine::get_or_load_file_handle::h486bebc727c660fa  (in load_bench-b162c69bffb362fa) + 1400  [0x102c271f0]  storage.rs:489
+    +         ! : | + 33 _pthread_mutex_firstfit_unlock_slow  (in libsystem_pthread.dylib) + 240  [0x192734b30]
+    +         ! : | + ! 33 _pthread_mutex_firstfit_wake  (in libsystem_pthread.dylib) + 28  [0x192736eac]
+    +         ! : | + !   33 __psynch_mutexdrop  (in libsystem_kernel.dylib) + 8  [0x1926f9b94]
+    +         ! : | + 1 pthread_mutex_unlock  (in libsystem_pthread.dylib) + 32  [0x1927348ec]
+    +         ! : | 13 liven::storage::StorageEngine::get_or_load_file_handle::h486bebc727c660fa  (in load_bench-b162c69bffb362fa) + 116  [0x102c26cec]  storage.rs:470
+    +         ! : | + 11 core::hash::BuildHasher::hash_one::h62b31bd32b66d046  (in load_bench-b162c69bffb362fa) + 224,184,...  [0x102c2ebbc,0x102c2eb94,...]  mod.rs:701
+    +         ! : | + 1 core::hash::BuildHasher::hash_one::h62b31bd32b66d046  (in load_bench-b162c69bffb362fa) + 60  [0x102c2eb18]  mod.rs:700
+    +         ! : | + 1 core::hash::BuildHasher::hash_one::h62b31bd32b66d046  (in load_bench-b162c69bffb362fa) + 264  [0x102c2ebe4]  mod.rs:702
+    +         ! : | 3 liven::storage::StorageEngine::get_or_load_file_handle::h486bebc727c660fa  (in load_bench-b162c69bffb362fa) + 116,164  [0x102c26cec,0x102c26d1c]  storage.rs:470
+    +         ! : | 3 liven::storage::StorageEngine::get_or_load_file_handle::h486bebc727c660fa  (in load_bench-b162c69bffb362fa) + 544  [0x102c26e98]  storage.rs:471
+    +         ! : | 2 liven::storage::StorageEngine::get_or_load_file_handle::h486bebc727c660fa  (in load_bench-b162c69bffb362fa) + 60,64  [0x102c26cb4,0x102c26cb8]  storage.rs:469
+    +         ! : | 1 liven::storage::StorageEngine::get_or_load_file_handle::h486bebc727c660fa  (in load_bench-b162c69bffb362fa) + 24  [0x102c26c90]  storage.rs:468
+    +         ! : | 1 liven::storage::StorageEngine::get_or_load_file_handle::h486bebc727c660fa  (in load_bench-b162c69bffb362fa) + 1388  [0x102c271e4]  storage.rs:489
+    +         ! : 19 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 584  [0x102c308c8]  storage.rs:1181
+    +         ! : | 15 liven::storage::deserialize_payload_borrowed::hd6843a42d248e1ba  (in load_bench-b162c69bffb362fa) + 848  [0x102c27cb0]  storage.rs:2357
+    +         ! : | + 11 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_enum::hffb8e2f55685d1c4  (in load_bench-b162c69bffb362fa) + 1288  [0x102c293fc]  decode.rs:676
+    +         ! : | + ! 8 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_string::h602696d85807ef7c  (in load_bench-b162c69bffb362fa) + 1104  [0x102bffd8c]  macros.rs:132
+    +         ! : | + ! : 4 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_string::h602696d85807ef7c  (in load_bench-b162c69bffb362fa) + 692  [0x102bffbf0]  macros.rs:132
+    +         ! : | + ! : | 4 core::str::converts::from_utf8::h907df036b51c9b19  (in load_bench-b162c69bffb362fa) + 52,112,...  [0x102bcf334,0x102bcf370,...]  converts.rs:91
+    +         ! : | + ! : 2 _malloc_zone_malloc  (in libsystem_malloc.dylib) + 76,100  [0x192565e4c,0x192565e64]
+    +         ! : | + ! : 1 <deduplicated_symbol>  (in libsystem_malloc.dylib) + 184  [0x192558cd8]
+    +         ! : | + ! : 1 _xzm_xzone_malloc  (in libsystem_malloc.dylib) + 76  [0x1925590d8]
+    +         ! : | + ! 2 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_string::h602696d85807ef7c  (in load_bench-b162c69bffb362fa) + 540,628  [0x102bffb58,0x102bffbb0]  macros.rs:132
+    +         ! : | + ! 1 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_string::h602696d85807ef7c  (in load_bench-b162c69bffb362fa) + 1180  [0x102bffdd8]  macros.rs:132
+    +         ! : | + !   1 DYLD-STUB$$memcpy  (in load_bench-b162c69bffb362fa) + 4  [0x102e7a068]
+    +         ! : | + 2 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_enum::hffb8e2f55685d1c4  (in load_bench-b162c69bffb362fa) + 184  [0x102c28fac]  decode.rs:676
+    +         ! : | + ! 1 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_string::h602696d85807ef7c  (in load_bench-b162c69bffb362fa) + 1104  [0x102bffd8c]  macros.rs:132
+    +         ! : | + ! : 1 _$LT$core..marker..PhantomData$LT$T$GT$$u20$as$u20$serde_core..de..DeserializeSeed$GT$::deserialize::h864c087f3d3854e4  (in load_bench-b162c69bffb362fa) + 900  [0x102c29858]  mod.rs:825
+    +         ! : | + ! :   1 _$LT$liven..types.._..$LT$impl$u20$serde_core..de..Deserialize$u20$for$u20$liven..types..DataValue$GT$..deserialize..__FieldVisitor$u20$as$u20$serde_core..de..Visitor$GT$::visit_str::h0ab2565a878f68ff  (in load_bench-b162c69bffb362fa) + 396  [0x102c2ea70]  types.rs:0
+    +         ! : | + ! 1 _$LT$core..marker..PhantomData$LT$T$GT$$u20$as$u20$serde_core..de..DeserializeSeed$GT$::deserialize::h864c087f3d3854e4  (in load_bench-b162c69bffb362fa) + 584  [0x102c2971c]  mod.rs:825
+    +         ! : | + 1 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_enum::hffb8e2f55685d1c4  (in load_bench-b162c69bffb362fa) + 160  [0x102c28f94]  decode.rs:670
+    +         ! : | + 1 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_enum::hffb8e2f55685d1c4  (in load_bench-b162c69bffb362fa) + 1456  [0x102c294a4]  decode.rs:683
+    +         ! : | 2 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 880  [0x102c309f0]  storage.rs:1181
+    +         ! : | + 1 _malloc_zone_malloc  (in libsystem_malloc.dylib) + 80  [0x192565e50]
+    +         ! : | + 1 _xzm_xzone_malloc  (in libsystem_malloc.dylib) + 76  [0x1925590d8]
+    +         ! : | 1 liven::storage::deserialize_payload_borrowed::hd6843a42d248e1ba  (in load_bench-b162c69bffb362fa) + 496  [0x102c27b50]  storage.rs:2339
+    +         ! : | + 1 core::str::converts::from_utf8::h907df036b51c9b19  (in load_bench-b162c69bffb362fa) + 60  [0x102bcf33c]  converts.rs:91
+    +         ! : | 1 liven::storage::deserialize_payload_borrowed::hd6843a42d248e1ba  (in load_bench-b162c69bffb362fa) + 108  [0x102c279cc]  storage.rs:2362
+    +         ! : 1 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 868  [0x102c309e4]  storage.rs:1181
+    +         ! : 1 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 988  [0x102c30a5c]  storage.rs:1213
+    +         ! : 1 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 1028  [0x102c30a84]  storage.rs:1214
+    +         ! : 1 liven::storage::deserialize_payload_borrowed::hd6843a42d248e1ba  (in load_bench-b162c69bffb362fa) + 124  [0x102c279dc]  storage.rs:2362
+    +         ! 146 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 456  [0x102c17550]  storage.rs:1230
+    +         ! : 142 crossbeam_skiplist::map::SkipMap$LT$K$C$V$GT$::get::h2f1885f49d48ccbe  (in load_bench-b162c69bffb362fa) + 92  [0x102c39c00]  map.rs:164
+    +         ! : | 63 crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 148  [0x102c33150]  base.rs:751
+    +         ! : | + 62 _platform_memcmp  (in libsystem_platform.dylib) + 56,96,...  [0x192740f08,0x192740f30,...]
+    +         ! : | + 1 DYLD-STUB$$memcmp  (in load_bench-b162c69bffb362fa) + 4  [0x102e7a05c]
+    +         ! : | 49 crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 168,260,...  [0x102c33164,0x102c331c0,...]  base.rs:0
+    +         ! : | 23 crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 236,148  [0x102c331a8,0x102c33150]  base.rs:751
+    +         ! : | 4 crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 96  [0x102c3311c]  base.rs:711
+    +         ! : | 2 crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 64  [0x102c330fc]  base.rs:699
+    +         ! : | 1 crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 180  [0x102c33170]  base.rs:726
+    +         ! : 2 crossbeam_skiplist::map::SkipMap$LT$K$C$V$GT$::get::h2f1885f49d48ccbe  (in load_bench-b162c69bffb362fa) + 92,132  [0x102c39c00,0x102c39c28]  map.rs:164
+    +         ! : 1 crossbeam_skiplist::map::SkipMap$LT$K$C$V$GT$::get::h2f1885f49d48ccbe  (in load_bench-b162c69bffb362fa) + 40  [0x102c39bcc]  map.rs:163
+    +         ! : | 1 crossbeam_epoch::default::with_handle::h0f32ee68993180ca  (in load_bench-b162c69bffb362fa) + 64  [0x102c2f6f0]  default.rs:60
+    +         ! : 1 crossbeam_skiplist::map::SkipMap$LT$K$C$V$GT$::get::h2f1885f49d48ccbe  (in load_bench-b162c69bffb362fa) + 128  [0x102c39c24]  map.rs:164
+    +         ! :   1 _platform_memcmp  (in libsystem_platform.dylib) + 56  [0x192740f08]
+    +         ! 14 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 424  [0x102c17530]  storage.rs:1225
+    +         ! : 14 core::str::converts::from_utf8::h907df036b51c9b19  (in load_bench-b162c69bffb362fa) + 80,128  [0x102bcf350,0x102bcf380]  converts.rs:91
+    +         ! 9 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 152,388  [0x102c17420,0x102c1750c]  storage.rs:0
+    +         ! 9 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 244  [0x102c1747c]  storage.rs:1223
+    +         ! : 4 core::fmt::write::h164e2e78980a3344  (in load_bench-b162c69bffb362fa) + 376  [0x102bca08c]  mod.rs:1469
+    +         ! : | 1 _$LT$std..io..default_write_fmt..Adapter$LT$T$GT$$u20$as$u20$core..fmt..Write$GT$::write_str::h6bbb327eb7da1257  (in load_bench-b162c69bffb362fa) + 72  [0x102c39ddc]  mod.rs:628
+    +         ! : | + 1 _platform_memmove  (in libsystem_platform.dylib) + 12  [0x19274336c]
+    +         ! : | 1 _$LT$std..io..default_write_fmt..Adapter$LT$T$GT$$u20$as$u20$core..fmt..Write$GT$::write_str::h6bbb327eb7da1257  (in load_bench-b162c69bffb362fa) + 36  [0x102c39db8]  mod.rs:628
+    +         ! : | 1 _$LT$std..io..default_write_fmt..Adapter$LT$T$GT$$u20$as$u20$core..fmt..Write$GT$::write_str::h6bbb327eb7da1257  (in load_bench-b162c69bffb362fa) + 124  [0x102c39e10]  mod.rs:635
+    +         ! : | 1 core::fmt::Formatter::pad::hf4614a1c20e4508e  (in load_bench-b162c69bffb362fa) + 32  [0x102bcb724]  mod.rs:1705
+    +         ! : 2 core::fmt::write::h164e2e78980a3344  (in load_bench-b162c69bffb362fa) + 360  [0x102bca07c]  mod.rs:1463
+    +         ! : | 1 _$LT$std..io..default_write_fmt..Adapter$LT$T$GT$$u20$as$u20$core..fmt..Write$GT$::write_str::h6bbb327eb7da1257  (in load_bench-b162c69bffb362fa) + 72  [0x102c39ddc]  mod.rs:628
+    +         ! : | + 1 _platform_memmove  (in libsystem_platform.dylib) + 12  [0x19274336c]
+    +         ! : | 1 _$LT$std..io..default_write_fmt..Adapter$LT$T$GT$$u20$as$u20$core..fmt..Write$GT$::write_str::h6bbb327eb7da1257  (in load_bench-b162c69bffb362fa) + 36  [0x102c39db8]  mod.rs:628
+    +         ! : 1 _$LT$std..io..default_write_fmt..Adapter$LT$T$GT$$u20$as$u20$core..fmt..Write$GT$::write_str::h6bbb327eb7da1257  (in load_bench-b162c69bffb362fa) + 136  [0x102c39e1c]  mod.rs:635
+    +         ! : 1 core::fmt::write::h164e2e78980a3344  (in load_bench-b162c69bffb362fa) + 44  [0x102bc9f40]  mod.rs:1455
+    +         ! : 1 core::fmt::write::h164e2e78980a3344  (in load_bench-b162c69bffb362fa) + 296  [0x102bca03c]  mod.rs:1458
+    +         ! 3 core::fmt::write::h164e2e78980a3344  (in load_bench-b162c69bffb362fa) + 476  [0x102bca0f0]  mod.rs:1498
+    +         ! 2 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 624  [0x102c175f8]  storage.rs:1233
+    +         ! : 2 core::ptr::drop_in_place$LT$crossbeam_skiplist..map..Entry$LT$alloc..string..String$C$liven..types..LogPointer$GT$$GT$::hb1708afc6329b5b6  (in load_bench-b162c69bffb362fa) + 376  [0x102c2f288]  mod.rs:805
+    +         ! 1 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 180  [0x102c1743c]  storage.rs:1223
+    +         ! 1 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 572  [0x102c175c4]  storage.rs:1231
+    +         17 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 552  [0x102b15714]  backtrace.rs:158
+    +         ! 17 std::sys::pal::unix::time::Timespec::now::h10d6d2ed67c46185  (in load_bench-b162c69bffb362fa) + 24  [0x102cfaba8]  time.rs:131
+    +         !   13 clock_gettime  (in libsystem_c.dylib) + 60  [0x1925d3e08]
+    +         !   : 12 clock_gettime_nsec_np  (in libsystem_c.dylib) + 384  [0x1925c6168]
+    +         !   : | 12 mach_absolute_time  (in libsystem_kernel.dylib) + 108,28,...  [0x1926f70fc,0x1926f70ac,...]
+    +         !   : 1 clock_gettime_nsec_np  (in libsystem_c.dylib) + 240  [0x1925c60d8]
+    +         !   :   1 mach_timebase_info  (in libsystem_kernel.dylib) + 68  [0x1926f7004]
+    +         !   4 clock_gettime  (in libsystem_c.dylib) + 64,12  [0x1925d3e0c,0x1925d3dd8]
+    +         12 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 628  [0x102b15760]  backtrace.rs:158
+    +         ! 12 std::sys::pal::unix::time::Timespec::now::h10d6d2ed67c46185  (in load_bench-b162c69bffb362fa) + 24  [0x102cfaba8]  time.rs:131
+    +         !   11 clock_gettime  (in libsystem_c.dylib) + 60  [0x1925d3e08]
+    +         !   : 6 clock_gettime_nsec_np  (in libsystem_c.dylib) + 384  [0x1925c6168]
+    +         !   : | 6 mach_absolute_time  (in libsystem_kernel.dylib) + 108,28  [0x1926f70fc,0x1926f70ac]
+    +         !   : 5 clock_gettime_nsec_np  (in libsystem_c.dylib) + 228,240  [0x1925c60cc,0x1925c60d8]
+    +         !   1 clock_gettime  (in libsystem_c.dylib) + 64  [0x1925d3e0c]
+    +         12 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 868,632  [0x102b15850,0x102b15764]  backtrace.rs:158
+    +         9 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 880  [0x102b1585c]  backtrace.rs:158
+    +         ! 9 _platform_memcmp  (in libsystem_platform.dylib) + 56  [0x192740f08]
+    +         8 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 540  [0x102b15708]  backtrace.rs:158
+    +         ! 8 rand_core::block::BlockRng$LT$R$GT$::generate_and_set::h9778ad68f1adadb8  (in load_bench-b162c69bffb362fa) + 2016,336,...  [0x102bb05fc,0x102baff6c,...]  block.rs:176
+    +         3 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 660  [0x102b15780]  backtrace.rs:158
+    +         ! 3 std::sys::pal::unix::time::Timespec::sub_timespec::h9e61d60fef934ad5  (in load_bench-b162c69bffb362fa) + 60  [0x102cface0]  time.rs:0
+    +         2 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 500  [0x102b156e0]  backtrace.rs:158
+    +         ! 1 _free  (in libsystem_malloc.dylib) + 56  [0x192566a60]
+    +         ! 1 free  (in libsystem_malloc.dylib) + 0  [0x1925306b4]
+    +         1 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 904  [0x102b15874]  backtrace.rs:158
+    +           1 _free  (in libsystem_malloc.dylib) + 104  [0x192566a90]
+    3605 Thread_1279502
+    + 3605 thread_start  (in libsystem_pthread.dylib) + 8  [0x192734ba8]
+    +   3605 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x192739c08]
+    +     3605 std::sys::thread::unix::Thread::new::thread_start::h98270432b6aefc44  (in load_bench-b162c69bffb362fa) + 52  [0x102cfc298]  unix.rs:126
+    +       3605 core::ops::function::FnOnce::call_once$u7b$$u7b$vtable.shim$u7d$$u7d$::h2aa91564ae41432b  (in load_bench-b162c69bffb362fa) + 472  [0x102b1f520]  function.rs:250
+    +         3558 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 616  [0x102b15754]  backtrace.rs:158
+    +         ! 3365 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 484  [0x102c1756c]  storage.rs:1231
+    +         ! : 1074 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 288  [0x102c307a0]  storage.rs:1136
+    +         ! : | 1074 _$LT$std..fs..File$u20$as$u20$liven..storage..PositionalReader$GT$::read_exact_at::ha621830e22b7727d  (in load_bench-b162c69bffb362fa) + 100  [0x102c27900]  storage.rs:69
+    +         ! : |   1074 pread  (in libsystem_kernel.dylib) + 8,0  [0x1926f863c,0x1926f8634]
+    +         ! : 1033 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 524  [0x102c3088c]  storage.rs:1181
+    +         ! : | 1033 _$LT$std..fs..File$u20$as$u20$liven..storage..PositionalReader$GT$::read_exact_at::ha621830e22b7727d  (in load_bench-b162c69bffb362fa) + 100  [0x102c27900]  storage.rs:69
+    +         ! : |   1033 pread  (in libsystem_kernel.dylib) + 8,4  [0x1926f863c,0x1926f8638]
+    +         ! : 941 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 112  [0x102c306f0]  storage.rs:1125
+    +         ! : | 941 fstat  (in libsystem_kernel.dylib) + 8,4  [0x192705264,0x192705260]
+    +         ! : 272 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 60  [0x102c306bc]  storage.rs:1124
+    +         ! : | 238 liven::storage::StorageEngine::get_or_load_file_handle::h486bebc727c660fa  (in load_bench-b162c69bffb362fa) + 64  [0x102c26cb8]  storage.rs:469
+    +         ! : | + 230 _pthread_mutex_firstfit_lock_slow  (in libsystem_pthread.dylib) + 220  [0x192734868]
+    +         ! : | + ! 230 _pthread_mutex_firstfit_lock_wait  (in libsystem_pthread.dylib) + 84  [0x192736e3c]
+    +         ! : | + !   230 __psynch_mutexwait  (in libsystem_kernel.dylib) + 8  [0x1926f99c8]
+    +         ! : | + 8 pthread_mutex_lock  (in libsystem_pthread.dylib) + 32  [0x1927343a0]
+    +         ! : | 26 liven::storage::StorageEngine::get_or_load_file_handle::h486bebc727c660fa  (in load_bench-b162c69bffb362fa) + 1400  [0x102c271f0]  storage.rs:489
+    +         ! : | + 26 _pthread_mutex_firstfit_unlock_slow  (in libsystem_pthread.dylib) + 240  [0x192734b30]
+    +         ! : | +   26 _pthread_mutex_firstfit_wake  (in libsystem_pthread.dylib) + 28  [0x192736eac]
+    +         ! : | +     26 __psynch_mutexdrop  (in libsystem_kernel.dylib) + 8  [0x1926f9b94]
+    +         ! : | 8 liven::storage::StorageEngine::get_or_load_file_handle::h486bebc727c660fa  (in load_bench-b162c69bffb362fa) + 116  [0x102c26cec]  storage.rs:470
+    +         ! : |   5 core::hash::BuildHasher::hash_one::h62b31bd32b66d046  (in load_bench-b162c69bffb362fa) + 224,80  [0x102c2ebbc,0x102c2eb2c]  mod.rs:701
+    +         ! : |   2 core::hash::BuildHasher::hash_one::h62b31bd32b66d046  (in load_bench-b162c69bffb362fa) + 60  [0x102c2eb18]  mod.rs:700
+    +         ! : |   1 core::hash::BuildHasher::hash_one::h62b31bd32b66d046  (in load_bench-b162c69bffb362fa) + 80  [0x102c2eb2c]  mod.rs:700
+    +         ! : |     1 _$LT$core..hash..sip..Hasher$LT$S$GT$$u20$as$u20$core..hash..Hasher$GT$::write::h8232b839179d186b  (in load_bench-b162c69bffb362fa) + 68  [0x102b88a0c]  sip.rs:0
+    +         ! : 33 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 584  [0x102c308c8]  storage.rs:1181
+    +         ! : | 21 liven::storage::deserialize_payload_borrowed::hd6843a42d248e1ba  (in load_bench-b162c69bffb362fa) + 848  [0x102c27cb0]  storage.rs:2357
+    +         ! : | + 17 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_enum::hffb8e2f55685d1c4  (in load_bench-b162c69bffb362fa) + 1288  [0x102c293fc]  decode.rs:676
+    +         ! : | + ! 17 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_string::h602696d85807ef7c  (in load_bench-b162c69bffb362fa) + 1104  [0x102bffd8c]  macros.rs:132
+    +         ! : | + !   8 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_string::h602696d85807ef7c  (in load_bench-b162c69bffb362fa) + 692  [0x102bffbf0]  macros.rs:132
+    +         ! : | + !   : 7 core::str::converts::from_utf8::h907df036b51c9b19  (in load_bench-b162c69bffb362fa) + 60,128,...  [0x102bcf33c,0x102bcf380,...]  converts.rs:91
+    +         ! : | + !   : 1 core::str::converts::from_utf8::h907df036b51c9b19  (in load_bench-b162c69bffb362fa) + 528  [0x102bcf510]  converts.rs:0
+    +         ! : | + !   3 <deduplicated_symbol>  (in libsystem_malloc.dylib) + 104,160,...  [0x192558c88,0x192558cc0,...]
+    +         ! : | + !   3 _xzm_xzone_malloc  (in libsystem_malloc.dylib) + 140,76  [0x192559118,0x1925590d8]
+    +         ! : | + !   2 _malloc_zone_malloc  (in libsystem_malloc.dylib) + 28,76  [0x192565e1c,0x192565e4c]
+    +         ! : | + !   1 malloc  (in libsystem_malloc.dylib) + 0  [0x19252fce8]
+    +         ! : | + 3 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_enum::hffb8e2f55685d1c4  (in load_bench-b162c69bffb362fa) + 184  [0x102c28fac]  decode.rs:676
+    +         ! : | + ! 1 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_string::h602696d85807ef7c  (in load_bench-b162c69bffb362fa) + 1104  [0x102bffd8c]  macros.rs:132
+    +         ! : | + ! : 1 _$LT$core..marker..PhantomData$LT$T$GT$$u20$as$u20$serde_core..de..DeserializeSeed$GT$::deserialize::h864c087f3d3854e4  (in load_bench-b162c69bffb362fa) + 900  [0x102c29858]  mod.rs:825
+    +         ! : | + ! :   1 _$LT$liven..types.._..$LT$impl$u20$serde_core..de..Deserialize$u20$for$u20$liven..types..DataValue$GT$..deserialize..__FieldVisitor$u20$as$u20$serde_core..de..Visitor$GT$::visit_str::h0ab2565a878f68ff  (in load_bench-b162c69bffb362fa) + 396  [0x102c2ea70]  types.rs:0
+    +         ! : | + ! 1 _$LT$core..marker..PhantomData$LT$T$GT$$u20$as$u20$serde_core..de..DeserializeSeed$GT$::deserialize::h864c087f3d3854e4  (in load_bench-b162c69bffb362fa) + 8  [0x102c294dc]  mod.rs:821
+    +         ! : | + ! 1 _$LT$core..marker..PhantomData$LT$T$GT$$u20$as$u20$serde_core..de..DeserializeSeed$GT$::deserialize::h864c087f3d3854e4  (in load_bench-b162c69bffb362fa) + 584  [0x102c2971c]  mod.rs:825
+    +         ! : | + 1 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_enum::hffb8e2f55685d1c4  (in load_bench-b162c69bffb362fa) + 1456  [0x102c294a4]  decode.rs:683
+    +         ! : | 5 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 880  [0x102c309f0]  storage.rs:1181
+    +         ! : | + 2 _malloc_zone_malloc  (in libsystem_malloc.dylib) + 28,100  [0x192565e1c,0x192565e64]
+    +         ! : | + 2 _xzm_xzone_malloc  (in libsystem_malloc.dylib) + 140,168  [0x192559118,0x192559134]
+    +         ! : | + 1 <deduplicated_symbol>  (in libsystem_malloc.dylib) + 132  [0x192558ca4]
+    +         ! : | 2 liven::storage::deserialize_payload_borrowed::hd6843a42d248e1ba  (in load_bench-b162c69bffb362fa) + 180  [0x102c27a14]  storage.rs:2329
+    +         ! : | + 2 core::str::converts::from_utf8::h907df036b51c9b19  (in load_bench-b162c69bffb362fa) + 44,52  [0x102bcf32c,0x102bcf334]  converts.rs:91
+    +         ! : | 1 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 932  [0x102c30a24]  storage.rs:1181
+    +         ! : | + 1 _platform_memmove  (in libsystem_platform.dylib) + 452  [0x192743524]
+    +         ! : | 1 liven::storage::deserialize_payload_borrowed::hd6843a42d248e1ba  (in load_bench-b162c69bffb362fa) + 496  [0x102c27b50]  storage.rs:2339
+    +         ! : | + 1 core::str::converts::from_utf8::h907df036b51c9b19  (in load_bench-b162c69bffb362fa) + 52  [0x102bcf334]  converts.rs:91
+    +         ! : | 1 liven::storage::deserialize_payload_borrowed::hd6843a42d248e1ba  (in load_bench-b162c69bffb362fa) + 636  [0x102c27bdc]  storage.rs:2340
+    +         ! : | 1 liven::storage::deserialize_payload_borrowed::hd6843a42d248e1ba  (in load_bench-b162c69bffb362fa) + 848  [0x102c27cb0]  storage.rs:2358
+    +         ! : | 1 liven::storage::deserialize_payload_borrowed::hd6843a42d248e1ba  (in load_bench-b162c69bffb362fa) + 912  [0x102c27cf0]  storage.rs:2361
+    +         ! : 5 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 556  [0x102c308ac]  storage.rs:1181
+    +         ! : | 5 crc32fast::hash::h25c026a3d564784f  (in load_bench-b162c69bffb362fa) + 148,188,...  [0x102bd5c8c,0x102bd5cb4,...]  lib.rs:52
+    +         ! : 3 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 564  [0x102c308b4]  storage.rs:1181
+    +         ! : 1 _$LT$std..fs..File$u20$as$u20$liven..storage..PositionalReader$GT$::read_exact_at::ha621830e22b7727d  (in load_bench-b162c69bffb362fa) + 156  [0x102c27938]  storage.rs:70
+    +         ! : 1 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 60  [0x102c306bc]  storage.rs:1124
+    +         ! : 1 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 968  [0x102c30a48]  storage.rs:1213
+    +         ! : 1 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 1028  [0x102c30a84]  storage.rs:1214
+    +         ! 170 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 456  [0x102c17550]  storage.rs:1230
+    +         ! : 165 crossbeam_skiplist::map::SkipMap$LT$K$C$V$GT$::get::h2f1885f49d48ccbe  (in load_bench-b162c69bffb362fa) + 92  [0x102c39c00]  map.rs:164
+    +         ! : | 65 crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 168,260,...  [0x102c33164,0x102c331c0,...]  base.rs:0
+    +         ! : | 58 crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 148  [0x102c33150]  base.rs:751
+    +         ! : | + 56 _platform_memcmp  (in libsystem_platform.dylib) + 56,96,...  [0x192740f08,0x192740f30,...]
+    +         ! : | + 2 DYLD-STUB$$memcmp  (in load_bench-b162c69bffb362fa) + 4  [0x102e7a05c]
+    +         ! : | 35 crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 236,148  [0x102c331a8,0x102c33150]  base.rs:751
+    +         ! : | 4 crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 96  [0x102c3311c]  base.rs:711
+    +         ! : | 3 crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 180  [0x102c33170]  base.rs:726
+    +         ! : 3 crossbeam_skiplist::map::SkipMap$LT$K$C$V$GT$::get::h2f1885f49d48ccbe  (in load_bench-b162c69bffb362fa) + 40  [0x102c39bcc]  map.rs:163
+    +         ! : | 3 crossbeam_epoch::default::with_handle::h0f32ee68993180ca  (in load_bench-b162c69bffb362fa) + 64,32  [0x102c2f6f0,0x102c2f6d0]  default.rs:60
+    +         ! : 2 crossbeam_skiplist::map::SkipMap$LT$K$C$V$GT$::get::h2f1885f49d48ccbe  (in load_bench-b162c69bffb362fa) + 112  [0x102c39c14]  map.rs:164
+    +         ! 7 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 152  [0x102c17420]  storage.rs:0
+    +         ! 7 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 244  [0x102c1747c]  storage.rs:1223
+    +         ! : 3 _$LT$std..io..default_write_fmt..Adapter$LT$T$GT$$u20$as$u20$core..fmt..Write$GT$::write_str::h6bbb327eb7da1257  (in load_bench-b162c69bffb362fa) + 136  [0x102c39e1c]  mod.rs:635
+    +         ! : 2 core::fmt::write::h164e2e78980a3344  (in load_bench-b162c69bffb362fa) + 376  [0x102bca08c]  mod.rs:1469
+    +         ! : | 1 _$LT$std..io..default_write_fmt..Adapter$LT$T$GT$$u20$as$u20$core..fmt..Write$GT$::write_str::h6bbb327eb7da1257  (in load_bench-b162c69bffb362fa) + 72  [0x102c39ddc]  mod.rs:628
+    +         ! : | + 1 DYLD-STUB$$memcpy  (in load_bench-b162c69bffb362fa) + 4  [0x102e7a068]
+    +         ! : | 1 _$LT$std..io..default_write_fmt..Adapter$LT$T$GT$$u20$as$u20$core..fmt..Write$GT$::write_str::h6bbb327eb7da1257  (in load_bench-b162c69bffb362fa) + 36  [0x102c39db8]  mod.rs:628
+    +         ! : 1 core::fmt::write::h164e2e78980a3344  (in load_bench-b162c69bffb362fa) + 304  [0x102bca044]  mod.rs:1458
+    +         ! : 1 core::fmt::write::h164e2e78980a3344  (in load_bench-b162c69bffb362fa) + 360  [0x102bca07c]  mod.rs:1463
+    +         ! :   1 _$LT$std..io..default_write_fmt..Adapter$LT$T$GT$$u20$as$u20$core..fmt..Write$GT$::write_str::h6bbb327eb7da1257  (in load_bench-b162c69bffb362fa) + 72  [0x102c39ddc]  mod.rs:628
+    +         ! :     1 _platform_memmove  (in libsystem_platform.dylib) + 460  [0x19274352c]
+    +         ! 6 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 424  [0x102c17530]  storage.rs:1225
+    +         ! : 6 core::str::converts::from_utf8::h907df036b51c9b19  (in load_bench-b162c69bffb362fa) + 80,120,...  [0x102bcf350,0x102bcf378,...]  converts.rs:91
+    +         ! 1 core::fmt::write::h164e2e78980a3344  (in load_bench-b162c69bffb362fa) + 476  [0x102bca0f0]  mod.rs:1498
+    +         ! 1 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 0  [0x102c17388]  storage.rs:1217
+    +         ! 1 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 500  [0x102c1757c]  storage.rs:1231
+    +         15 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 628  [0x102b15760]  backtrace.rs:158
+    +         ! 15 std::sys::pal::unix::time::Timespec::now::h10d6d2ed67c46185  (in load_bench-b162c69bffb362fa) + 24  [0x102cfaba8]  time.rs:131
+    +         !   12 clock_gettime  (in libsystem_c.dylib) + 60  [0x1925d3e08]
+    +         !   : 8 clock_gettime_nsec_np  (in libsystem_c.dylib) + 384  [0x1925c6168]
+    +         !   : | 8 mach_absolute_time  (in libsystem_kernel.dylib) + 108  [0x1926f70fc]
+    +         !   : 4 clock_gettime_nsec_np  (in libsystem_c.dylib) + 228,12  [0x1925c60cc,0x1925c5ff4]
+    +         !   3 clock_gettime  (in libsystem_c.dylib) + 416,64  [0x1925d3f6c,0x1925d3e0c]
+    +         15 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 880  [0x102b1585c]  backtrace.rs:158
+    +         ! 15 _platform_memcmp  (in libsystem_platform.dylib) + 56,48  [0x192740f08,0x192740f00]
+    +         11 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 552  [0x102b15714]  backtrace.rs:158
+    +         ! 10 std::sys::pal::unix::time::Timespec::now::h10d6d2ed67c46185  (in load_bench-b162c69bffb362fa) + 24  [0x102cfaba8]  time.rs:131
+    +         ! : 10 clock_gettime  (in libsystem_c.dylib) + 60  [0x1925d3e08]
+    +         ! :   9 clock_gettime_nsec_np  (in libsystem_c.dylib) + 384  [0x1925c6168]
+    +         ! :   | 9 mach_absolute_time  (in libsystem_kernel.dylib) + 108,28  [0x1926f70fc,0x1926f70ac]
+    +         ! :   1 clock_gettime_nsec_np  (in libsystem_c.dylib) + 240  [0x1925c60d8]
+    +         ! :     1 mach_timebase_info  (in libsystem_kernel.dylib) + 28  [0x1926f6fdc]
+    +         ! 1 std::sys::pal::unix::time::Timespec::now::h10d6d2ed67c46185  (in load_bench-b162c69bffb362fa) + 8  [0x102cfab98]  time.rs:99
+    +         3 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 540  [0x102b15708]  backtrace.rs:158
+    +         ! 2 rand_core::block::BlockRng$LT$R$GT$::generate_and_set::h9778ad68f1adadb8  (in load_bench-b162c69bffb362fa) + 440  [0x102baffd4]  block.rs:176
+    +         ! 1 load_bench::pick_index::h67b5b210dbc33163  (in load_bench-b162c69bffb362fa) + 116  [0x102aec674]  load_bench.rs:273
+    +         2 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 868  [0x102b15850]  backtrace.rs:158
+    +         1 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 500  [0x102b156e0]  backtrace.rs:158
+    +           1 core::ptr::drop_in_place$LT$liven..types..DataValue$GT$::h0d44f838c579cd0a  (in load_bench-b162c69bffb362fa) + 72  [0x102b31728]  mod.rs:805
+    3605 Thread_1279503
+      3605 thread_start  (in libsystem_pthread.dylib) + 8  [0x192734ba8]
+        3605 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x192739c08]
+          3605 std::sys::thread::unix::Thread::new::thread_start::h98270432b6aefc44  (in load_bench-b162c69bffb362fa) + 52  [0x102cfc298]  unix.rs:126
+            3605 core::ops::function::FnOnce::call_once$u7b$$u7b$vtable.shim$u7d$$u7d$::h2aa91564ae41432b  (in load_bench-b162c69bffb362fa) + 472  [0x102b1f520]  function.rs:250
+              3547 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 616  [0x102b15754]  backtrace.rs:158
+              ! 3361 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 484  [0x102c1756c]  storage.rs:1231
+              ! : 1119 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 524  [0x102c3088c]  storage.rs:1181
+              ! : | 1118 _$LT$std..fs..File$u20$as$u20$liven..storage..PositionalReader$GT$::read_exact_at::ha621830e22b7727d  (in load_bench-b162c69bffb362fa) + 100  [0x102c27900]  storage.rs:69
+              ! : | + 1118 pread  (in libsystem_kernel.dylib) + 8,4,...  [0x1926f863c,0x1926f8638,...]
+              ! : | 1 pread  (in libsystem_kernel.dylib) + 40  [0x1926f865c]
+              ! : 1035 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 288  [0x102c307a0]  storage.rs:1136
+              ! : | 1033 _$LT$std..fs..File$u20$as$u20$liven..storage..PositionalReader$GT$::read_exact_at::ha621830e22b7727d  (in load_bench-b162c69bffb362fa) + 100  [0x102c27900]  storage.rs:69
+              ! : | + 1033 pread  (in libsystem_kernel.dylib) + 8,4,...  [0x1926f863c,0x1926f8638,...]
+              ! : | 1 _$LT$std..fs..File$u20$as$u20$liven..storage..PositionalReader$GT$::read_exact_at::ha621830e22b7727d  (in load_bench-b162c69bffb362fa) + 24  [0x102c278b4]  storage.rs:69
+              ! : | 1 pread  (in libsystem_kernel.dylib) + 40  [0x1926f865c]
+              ! : 901 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 112  [0x102c306f0]  storage.rs:1125
+              ! : | 901 fstat  (in libsystem_kernel.dylib) + 8  [0x192705264]
+              ! : 280 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 60  [0x102c306bc]  storage.rs:1124
+              ! : | 254 liven::storage::StorageEngine::get_or_load_file_handle::h486bebc727c660fa  (in load_bench-b162c69bffb362fa) + 64  [0x102c26cb8]  storage.rs:469
+              ! : | + 248 _pthread_mutex_firstfit_lock_slow  (in libsystem_pthread.dylib) + 220  [0x192734868]
+              ! : | + ! 248 _pthread_mutex_firstfit_lock_wait  (in libsystem_pthread.dylib) + 84  [0x192736e3c]
+              ! : | + !   248 __psynch_mutexwait  (in libsystem_kernel.dylib) + 8  [0x1926f99c8]
+              ! : | + 6 pthread_mutex_lock  (in libsystem_pthread.dylib) + 32  [0x1927343a0]
+              ! : | 18 liven::storage::StorageEngine::get_or_load_file_handle::h486bebc727c660fa  (in load_bench-b162c69bffb362fa) + 1400  [0x102c271f0]  storage.rs:489
+              ! : | + 18 _pthread_mutex_firstfit_unlock_slow  (in libsystem_pthread.dylib) + 240  [0x192734b30]
+              ! : | +   18 _pthread_mutex_firstfit_wake  (in libsystem_pthread.dylib) + 28  [0x192736eac]
+              ! : | +     18 __psynch_mutexdrop  (in libsystem_kernel.dylib) + 8  [0x1926f9b94]
+              ! : | 6 liven::storage::StorageEngine::get_or_load_file_handle::h486bebc727c660fa  (in load_bench-b162c69bffb362fa) + 116  [0x102c26cec]  storage.rs:470
+              ! : | + 4 core::hash::BuildHasher::hash_one::h62b31bd32b66d046  (in load_bench-b162c69bffb362fa) + 252,212,...  [0x102c2ebd8,0x102c2ebb0,...]  mod.rs:701
+              ! : | + 1 core::hash::BuildHasher::hash_one::h62b31bd32b66d046  (in load_bench-b162c69bffb362fa) + 80  [0x102c2eb2c]  mod.rs:700
+              ! : | + ! 1 _$LT$core..hash..sip..Hasher$LT$S$GT$$u20$as$u20$core..hash..Hasher$GT$::write::h8232b839179d186b  (in load_bench-b162c69bffb362fa) + 68  [0x102b88a0c]  sip.rs:0
+              ! : | + 1 core::hash::BuildHasher::hash_one::h62b31bd32b66d046  (in load_bench-b162c69bffb362fa) + 60  [0x102c2eb18]  mod.rs:700
+              ! : | 1 liven::storage::StorageEngine::get_or_load_file_handle::h486bebc727c660fa  (in load_bench-b162c69bffb362fa) + 164  [0x102c26d1c]  storage.rs:470
+              ! : | 1 liven::storage::StorageEngine::get_or_load_file_handle::h486bebc727c660fa  (in load_bench-b162c69bffb362fa) + 544  [0x102c26e98]  storage.rs:471
+              ! : 18 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 584  [0x102c308c8]  storage.rs:1181
+              ! : | 10 liven::storage::deserialize_payload_borrowed::hd6843a42d248e1ba  (in load_bench-b162c69bffb362fa) + 848  [0x102c27cb0]  storage.rs:2357
+              ! : | + 3 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_enum::hffb8e2f55685d1c4  (in load_bench-b162c69bffb362fa) + 184  [0x102c28fac]  decode.rs:676
+              ! : | + ! 2 _$LT$core..marker..PhantomData$LT$T$GT$$u20$as$u20$serde_core..de..DeserializeSeed$GT$::deserialize::h864c087f3d3854e4  (in load_bench-b162c69bffb362fa) + 888,1260  [0x102c2984c,0x102c299c0]  mod.rs:825
+              ! : | + ! 1 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_string::h602696d85807ef7c  (in load_bench-b162c69bffb362fa) + 1104  [0x102bffd8c]  macros.rs:132
+              ! : | + !   1 _$LT$core..marker..PhantomData$LT$T$GT$$u20$as$u20$serde_core..de..DeserializeSeed$GT$::deserialize::h864c087f3d3854e4  (in load_bench-b162c69bffb362fa) + 736  [0x102c297b4]  mod.rs:825
+              ! : | + !     1 core::str::converts::from_utf8::h907df036b51c9b19  (in load_bench-b162c69bffb362fa) + 44  [0x102bcf32c]  converts.rs:91
+              ! : | + 3 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_enum::hffb8e2f55685d1c4  (in load_bench-b162c69bffb362fa) + 1288  [0x102c293fc]  decode.rs:676
+              ! : | + ! 3 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_string::h602696d85807ef7c  (in load_bench-b162c69bffb362fa) + 1104  [0x102bffd8c]  macros.rs:132
+              ! : | + !   1 <deduplicated_symbol>  (in libsystem_malloc.dylib) + 108  [0x192558c8c]
+              ! : | + !   1 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_string::h602696d85807ef7c  (in load_bench-b162c69bffb362fa) + 692  [0x102bffbf0]  macros.rs:132
+              ! : | + !   : 1 core::str::converts::from_utf8::h907df036b51c9b19  (in load_bench-b162c69bffb362fa) + 128  [0x102bcf380]  converts.rs:91
+              ! : | + !   1 _malloc_zone_malloc  (in libsystem_malloc.dylib) + 56  [0x192565e38]
+              ! : | + 2 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_enum::hffb8e2f55685d1c4  (in load_bench-b162c69bffb362fa) + 20,32  [0x102c28f08,0x102c28f14]  decode.rs:668
+              ! : | + 1 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_enum::hffb8e2f55685d1c4  (in load_bench-b162c69bffb362fa) + 1280  [0x102c293f4]  decode.rs:676
+              ! : | + 1 _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_enum::hffb8e2f55685d1c4  (in load_bench-b162c69bffb362fa) + 1456  [0x102c294a4]  decode.rs:683
+              ! : | 2 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 880  [0x102c309f0]  storage.rs:1181
+              ! : | + 2 _xzm_xzone_malloc  (in libsystem_malloc.dylib) + 140  [0x192559118]
+              ! : | 2 liven::storage::deserialize_payload_borrowed::hd6843a42d248e1ba  (in load_bench-b162c69bffb362fa) + 180  [0x102c27a14]  storage.rs:2329
+              ! : | + 2 core::str::converts::from_utf8::h907df036b51c9b19  (in load_bench-b162c69bffb362fa) + 52  [0x102bcf334]  converts.rs:91
+              ! : | 1 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 932  [0x102c30a24]  storage.rs:1181
+              ! : | + 1 DYLD-STUB$$memcpy  (in load_bench-b162c69bffb362fa) + 4  [0x102e7a068]
+              ! : | 1 liven::storage::deserialize_payload_borrowed::hd6843a42d248e1ba  (in load_bench-b162c69bffb362fa) + 496  [0x102c27b50]  storage.rs:2339
+              ! : | + 1 core::str::converts::from_utf8::h907df036b51c9b19  (in load_bench-b162c69bffb362fa) + 60  [0x102bcf33c]  converts.rs:91
+              ! : | 1 liven::storage::deserialize_payload_borrowed::hd6843a42d248e1ba  (in load_bench-b162c69bffb362fa) + 636  [0x102c27bdc]  storage.rs:2340
+              ! : | 1 liven::storage::deserialize_payload_borrowed::hd6843a42d248e1ba  (in load_bench-b162c69bffb362fa) + 932  [0x102c27d04]  storage.rs:2361
+              ! : 6 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 524,564,...  [0x102c3088c,0x102c308b4,...]  storage.rs:1181
+              ! : 1 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 100  [0x102c306e4]  storage.rs:1125
+              ! : 1 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 1028  [0x102c30a84]  storage.rs:1214
+              ! 157 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 456  [0x102c17550]  storage.rs:1230
+              ! : 155 crossbeam_skiplist::map::SkipMap$LT$K$C$V$GT$::get::h2f1885f49d48ccbe  (in load_bench-b162c69bffb362fa) + 92  [0x102c39c00]  map.rs:164
+              ! : | 73 crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 168,260,...  [0x102c33164,0x102c331c0,...]  base.rs:0
+              ! : | 51 crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 148  [0x102c33150]  base.rs:751
+              ! : | + 49 _platform_memcmp  (in libsystem_platform.dylib) + 56,8,...  [0x192740f08,0x192740ed8,...]
+              ! : | + 2 DYLD-STUB$$memcmp  (in load_bench-b162c69bffb362fa) + 4  [0x102e7a05c]
+              ! : | 27 crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 236,148  [0x102c331a8,0x102c33150]  base.rs:751
+              ! : | 2 crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 96  [0x102c3311c]  base.rs:711
+              ! : | 1 crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 64  [0x102c330fc]  base.rs:699
+              ! : | 1 crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 112  [0x102c3312c]  base.rs:719
+              ! : 2 crossbeam_skiplist::map::SkipMap$LT$K$C$V$GT$::get::h2f1885f49d48ccbe  (in load_bench-b162c69bffb362fa) + 40  [0x102c39bcc]  map.rs:163
+              ! :   2 crossbeam_epoch::default::with_handle::h0f32ee68993180ca  (in load_bench-b162c69bffb362fa) + 32,64  [0x102c2f6d0,0x102c2f6f0]  default.rs:60
+              ! 10 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 244  [0x102c1747c]  storage.rs:1223
+              ! : 5 core::fmt::write::h164e2e78980a3344  (in load_bench-b162c69bffb362fa) + 376  [0x102bca08c]  mod.rs:1469
+              ! : | 4 _$LT$std..io..default_write_fmt..Adapter$LT$T$GT$$u20$as$u20$core..fmt..Write$GT$::write_str::h6bbb327eb7da1257  (in load_bench-b162c69bffb362fa) + 72  [0x102c39ddc]  mod.rs:628
+              ! : | + 4 _platform_memmove  (in libsystem_platform.dylib) + 0,12,...  [0x192743360,0x19274336c,...]
+              ! : | 1 _$LT$std..io..default_write_fmt..Adapter$LT$T$GT$$u20$as$u20$core..fmt..Write$GT$::write_str::h6bbb327eb7da1257  (in load_bench-b162c69bffb362fa) + 76  [0x102c39de0]  mod.rs:628
+              ! : 3 core::fmt::write::h164e2e78980a3344  (in load_bench-b162c69bffb362fa) + 360  [0x102bca07c]  mod.rs:1463
+              ! : | 3 _$LT$std..io..default_write_fmt..Adapter$LT$T$GT$$u20$as$u20$core..fmt..Write$GT$::write_str::h6bbb327eb7da1257  (in load_bench-b162c69bffb362fa) + 36  [0x102c39db8]  mod.rs:628
+              ! : 1 core::fmt::write::h164e2e78980a3344  (in load_bench-b162c69bffb362fa) + 380  [0x102bca090]  mod.rs:1458
+              ! : 1 core::fmt::write::h164e2e78980a3344  (in load_bench-b162c69bffb362fa) + 336  [0x102bca064]  mod.rs:1462
+              ! 7 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 152  [0x102c17420]  storage.rs:0
+              ! 6 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 424  [0x102c17530]  storage.rs:1225
+              ! : 6 core::str::converts::from_utf8::h907df036b51c9b19  (in load_bench-b162c69bffb362fa) + 80,96  [0x102bcf350,0x102bcf360]  converts.rs:91
+              ! 1 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 76  [0x102c173d4]  storage.rs:1218
+              ! 1 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 168  [0x102c17430]  storage.rs:1221
+              ! 1 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 200  [0x102c17450]  storage.rs:1223
+              ! 1 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 572  [0x102c175c4]  storage.rs:1231
+              ! 1 liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 624  [0x102c175f8]  storage.rs:1233
+              ! : 1 core::ptr::drop_in_place$LT$crossbeam_skiplist..map..Entry$LT$alloc..string..String$C$liven..types..LogPointer$GT$$GT$::hb1708afc6329b5b6  (in load_bench-b162c69bffb362fa) + 376  [0x102c2f288]  mod.rs:805
+              ! 1 liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 1048  [0x102c30a98]  storage.rs:1214
+              18 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 628  [0x102b15760]  backtrace.rs:158
+              ! 18 std::sys::pal::unix::time::Timespec::now::h10d6d2ed67c46185  (in load_bench-b162c69bffb362fa) + 24  [0x102cfaba8]  time.rs:131
+              !   18 clock_gettime  (in libsystem_c.dylib) + 60  [0x1925d3e08]
+              !     13 clock_gettime_nsec_np  (in libsystem_c.dylib) + 384  [0x1925c6168]
+              !     : 13 mach_absolute_time  (in libsystem_kernel.dylib) + 108,28,...  [0x1926f70fc,0x1926f70ac,...]
+              !     3 clock_gettime_nsec_np  (in libsystem_c.dylib) + 240  [0x1925c60d8]
+              !     : 2 mach_timebase_info  (in libsystem_kernel.dylib) + 0,68  [0x1926f6fc0,0x1926f7004]
+              !     : 1 DYLD-STUB$$mach_timebase_info  (in libsystem_c.dylib) + 8  [0x19263fb30]
+              !     2 clock_gettime_nsec_np  (in libsystem_c.dylib) + 228  [0x1925c60cc]
+              12 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 552  [0x102b15714]  backtrace.rs:158
+              ! 12 std::sys::pal::unix::time::Timespec::now::h10d6d2ed67c46185  (in load_bench-b162c69bffb362fa) + 24  [0x102cfaba8]  time.rs:131
+              !   11 clock_gettime  (in libsystem_c.dylib) + 60  [0x1925d3e08]
+              !   : 11 clock_gettime_nsec_np  (in libsystem_c.dylib) + 384  [0x1925c6168]
+              !   :   11 mach_absolute_time  (in libsystem_kernel.dylib) + 108,0,...  [0x1926f70fc,0x1926f7090,...]
+              !   1 clock_gettime  (in libsystem_c.dylib) + 8  [0x1925d3dd4]
+              9 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 540  [0x102b15708]  backtrace.rs:158
+              ! 5 rand_core::block::BlockRng$LT$R$GT$::generate_and_set::h9778ad68f1adadb8  (in load_bench-b162c69bffb362fa) + 424,1892,...  [0x102baffc4,0x102bb0580,...]  block.rs:176
+              ! 3 load_bench::pick_index::h67b5b210dbc33163  (in load_bench-b162c69bffb362fa) + 212,132  [0x102aec6d4,0x102aec684]  load_bench.rs:273
+              ! 1 load_bench::pick_index::h67b5b210dbc33163  (in load_bench-b162c69bffb362fa) + 188  [0x102aec6bc]  load_bench.rs:273
+              !   1 rand_core::block::BlockRng$LT$R$GT$::generate_and_set::h9778ad68f1adadb8  (in load_bench-b162c69bffb362fa) + 32  [0x102bafe3c]  block.rs:176
+              9 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 880  [0x102b1585c]  backtrace.rs:158
+              ! 9 _platform_memcmp  (in libsystem_platform.dylib) + 56  [0x192740f08]
+              7 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 868,720,...  [0x102b15850,0x102b157bc,...]  backtrace.rs:158
+              2 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 500  [0x102b156e0]  backtrace.rs:158
+              ! 1 _xzm_free  (in libsystem_malloc.dylib) + 348  [0x1925598a0]
+              ! : 1 __bzero  (in libsystem_platform.dylib) + 24  [0x192743048]
+              ! 1 _xzm_free  (in libsystem_malloc.dylib) + 220  [0x192559820]
+              1 std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 904  [0x102b15874]  backtrace.rs:158
+                1 _xzm_free  (in libsystem_malloc.dylib) + 28  [0x192559760]
+
+Total number in stack (recursive counted multiple, when >=5):
+        33       core::str::converts::from_utf8::h907df036b51c9b19  (in load_bench-b162c69bffb362fa) + 0  [0x102bcf300]  converts.rs:91
+        20       _platform_memcmp  (in libsystem_platform.dylib) + 0  [0x192740ed0]
+        20       pread  (in libsystem_kernel.dylib) + 0  [0x1926f8634]
+        16       _$LT$std..fs..File$u20$as$u20$liven..storage..PositionalReader$GT$::read_exact_at::ha621830e22b7727d  (in load_bench-b162c69bffb362fa) + 100  [0x102c27900]  storage.rs:69
+        16       clock_gettime  (in libsystem_c.dylib) + 60  [0x1925d3e08]
+        16       clock_gettime_nsec_np  (in libsystem_c.dylib) + 384  [0x1925c6168]
+        16       mach_absolute_time  (in libsystem_kernel.dylib) + 0  [0x1926f7090]
+        16       std::sys::pal::unix::time::Timespec::now::h10d6d2ed67c46185  (in load_bench-b162c69bffb362fa) + 24  [0x102cfaba8]  time.rs:131
+        15       _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_string::h602696d85807ef7c  (in load_bench-b162c69bffb362fa) + 1104  [0x102bffd8c]  macros.rs:132
+        15       _platform_memmove  (in libsystem_platform.dylib) + 0  [0x192743360]
+        13       _$LT$std..io..default_write_fmt..Adapter$LT$T$GT$$u20$as$u20$core..fmt..Write$GT$::write_str::h6bbb327eb7da1257  (in load_bench-b162c69bffb362fa) + 0  [0x102c39d94]  mod.rs:628
+        13       _xzm_xzone_malloc  (in libsystem_malloc.dylib) + 0  [0x19255908c]
+        13       clock_gettime  (in libsystem_c.dylib) + 0  [0x1925d3dcc]
+        12       fstat  (in libsystem_kernel.dylib) + 0  [0x19270525c]
+        11       _$LT$std..io..default_write_fmt..Adapter$LT$T$GT$$u20$as$u20$core..fmt..Write$GT$::write_str::h6bbb327eb7da1257  (in load_bench-b162c69bffb362fa) + 72  [0x102c39ddc]  mod.rs:628
+        11       _malloc_zone_malloc  (in libsystem_malloc.dylib) + 0  [0x192565e00]
+        10       clock_gettime_nsec_np  (in libsystem_c.dylib) + 0  [0x1925c5fe8]
+        10       mach_timebase_info  (in libsystem_kernel.dylib) + 0  [0x1926f6fc0]
+        9       DYLD-STUB$$memcmp  (in load_bench-b162c69bffb362fa) + 0  [0x102e7a058]
+        9       DYLD-STUB$$memcpy  (in load_bench-b162c69bffb362fa) + 0  [0x102e7a064]
+        9       _$LT$std..io..default_write_fmt..Adapter$LT$T$GT$$u20$as$u20$core..fmt..Write$GT$::write_str::h6bbb327eb7da1257  (in load_bench-b162c69bffb362fa) + 0  [0x102c39d94]  mod.rs:635
+        9       _pthread_start  (in libsystem_pthread.dylib) + 136  [0x192739c08]
+        9       clock_gettime_nsec_np  (in libsystem_c.dylib) + 240  [0x1925c60d8]
+        9       rand_core::block::BlockRng$LT$R$GT$::generate_and_set::h9778ad68f1adadb8  (in load_bench-b162c69bffb362fa) + 0  [0x102bafe1c]  block.rs:176
+        9       std::sys::thread::unix::Thread::new::thread_start::h98270432b6aefc44  (in load_bench-b162c69bffb362fa) + 52  [0x102cfc298]  unix.rs:126
+        9       thread_start  (in libsystem_pthread.dylib) + 8  [0x192734ba8]
+        8       <deduplicated_symbol>  (in libsystem_malloc.dylib) + 0  [0x192558c20]
+        8       _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_enum::hffb8e2f55685d1c4  (in load_bench-b162c69bffb362fa) + 1288  [0x102c293fc]  decode.rs:676
+        8       _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_enum::hffb8e2f55685d1c4  (in load_bench-b162c69bffb362fa) + 184  [0x102c28fac]  decode.rs:676
+        8       _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_string::h602696d85807ef7c  (in load_bench-b162c69bffb362fa) + 692  [0x102bffbf0]  macros.rs:132
+        8       _$LT$core..marker..PhantomData$LT$T$GT$$u20$as$u20$serde_core..de..DeserializeSeed$GT$::deserialize::h864c087f3d3854e4  (in load_bench-b162c69bffb362fa) + 0  [0x102c294d4]  mod.rs:825
+        8       __psynch_mutexdrop  (in libsystem_kernel.dylib) + 0  [0x1926f9b8c]
+        8       __psynch_mutexwait  (in libsystem_kernel.dylib) + 0  [0x1926f99c0]
+        8       _pthread_mutex_firstfit_lock_slow  (in libsystem_pthread.dylib) + 220  [0x192734868]
+        8       _pthread_mutex_firstfit_lock_wait  (in libsystem_pthread.dylib) + 84  [0x192736e3c]
+        8       _pthread_mutex_firstfit_unlock_slow  (in libsystem_pthread.dylib) + 240  [0x192734b30]
+        8       _pthread_mutex_firstfit_wake  (in libsystem_pthread.dylib) + 28  [0x192736eac]
+        8       core::fmt::write::h164e2e78980a3344  (in load_bench-b162c69bffb362fa) + 360  [0x102bca07c]  mod.rs:1463
+        8       core::fmt::write::h164e2e78980a3344  (in load_bench-b162c69bffb362fa) + 376  [0x102bca08c]  mod.rs:1469
+        8       core::hash::BuildHasher::hash_one::h62b31bd32b66d046  (in load_bench-b162c69bffb362fa) + 0  [0x102c2eadc]  mod.rs:701
+        8       core::ops::function::FnOnce::call_once$u7b$$u7b$vtable.shim$u7d$$u7d$::h2aa91564ae41432b  (in load_bench-b162c69bffb362fa) + 472  [0x102b1f520]  function.rs:250
+        8       crossbeam_epoch::default::with_handle::h0f32ee68993180ca  (in load_bench-b162c69bffb362fa) + 0  [0x102c2f6b0]  default.rs:60
+        8       crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 0  [0x102c330bc]  base.rs:0
+        8       crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 0  [0x102c330bc]  base.rs:751
+        8       crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 148  [0x102c33150]  base.rs:751
+        8       crossbeam_skiplist::map::SkipMap$LT$K$C$V$GT$::get::h2f1885f49d48ccbe  (in load_bench-b162c69bffb362fa) + 40  [0x102c39bcc]  map.rs:163
+        8       crossbeam_skiplist::map::SkipMap$LT$K$C$V$GT$::get::h2f1885f49d48ccbe  (in load_bench-b162c69bffb362fa) + 92  [0x102c39c00]  map.rs:164
+        8       liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 0  [0x102c17388]  storage.rs:0
+        8       liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 244  [0x102c1747c]  storage.rs:1223
+        8       liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 424  [0x102c17530]  storage.rs:1225
+        8       liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 456  [0x102c17550]  storage.rs:1230
+        8       liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 484  [0x102c1756c]  storage.rs:1231
+        8       liven::storage::StorageEngine::get_or_load_file_handle::h486bebc727c660fa  (in load_bench-b162c69bffb362fa) + 116  [0x102c26cec]  storage.rs:470
+        8       liven::storage::StorageEngine::get_or_load_file_handle::h486bebc727c660fa  (in load_bench-b162c69bffb362fa) + 1400  [0x102c271f0]  storage.rs:489
+        8       liven::storage::StorageEngine::get_or_load_file_handle::h486bebc727c660fa  (in load_bench-b162c69bffb362fa) + 64  [0x102c26cb8]  storage.rs:469
+        8       liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 0  [0x102c30680]  storage.rs:1181
+        8       liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 0  [0x102c30680]  storage.rs:1214
+        8       liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 112  [0x102c306f0]  storage.rs:1125
+        8       liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 288  [0x102c307a0]  storage.rs:1136
+        8       liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 524  [0x102c3088c]  storage.rs:1181
+        8       liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 584  [0x102c308c8]  storage.rs:1181
+        8       liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 60  [0x102c306bc]  storage.rs:1124
+        8       liven::storage::deserialize_payload_borrowed::hd6843a42d248e1ba  (in load_bench-b162c69bffb362fa) + 496  [0x102c27b50]  storage.rs:2339
+        8       liven::storage::deserialize_payload_borrowed::hd6843a42d248e1ba  (in load_bench-b162c69bffb362fa) + 848  [0x102c27cb0]  storage.rs:2357
+        8       pthread_mutex_lock  (in libsystem_pthread.dylib) + 0  [0x192734380]
+        8       std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 0  [0x102b154ec]  backtrace.rs:158
+        8       std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 540  [0x102b15708]  backtrace.rs:158
+        8       std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 552  [0x102b15714]  backtrace.rs:158
+        8       std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 616  [0x102b15754]  backtrace.rs:158
+        8       std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 628  [0x102b15760]  backtrace.rs:158
+        8       std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 880  [0x102b1585c]  backtrace.rs:158
+        7       crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 0  [0x102c330bc]  base.rs:711
+        7       liven::storage::StorageEngine::get_or_load_file_handle::h486bebc727c660fa  (in load_bench-b162c69bffb362fa) + 0  [0x102c26c78]  storage.rs:471
+        7       liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 880  [0x102c309f0]  storage.rs:1181
+        6       core::fmt::write::h164e2e78980a3344  (in load_bench-b162c69bffb362fa) + 0  [0x102bc9f14]  mod.rs:1498
+        6       core::hash::BuildHasher::hash_one::h62b31bd32b66d046  (in load_bench-b162c69bffb362fa) + 0  [0x102c2eadc]  mod.rs:700
+        6       core::hash::BuildHasher::hash_one::h62b31bd32b66d046  (in load_bench-b162c69bffb362fa) + 80  [0x102c2eb2c]  mod.rs:700
+        6       crc32fast::hash::h25c026a3d564784f  (in load_bench-b162c69bffb362fa) + 0  [0x102bd5bf8]  lib.rs:52
+        6       crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa) + 0  [0x102c330bc]  base.rs:726
+        6       crossbeam_skiplist::map::SkipMap$LT$K$C$V$GT$::get::h2f1885f49d48ccbe  (in load_bench-b162c69bffb362fa) + 0  [0x102c39ba4]  map.rs:164
+        6       liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 0  [0x102c17388]  storage.rs:1231
+        6       liven::storage::StorageEngine::get_or_load_file_handle::h486bebc727c660fa  (in load_bench-b162c69bffb362fa) + 0  [0x102c26c78]  storage.rs:470
+        6       liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 556  [0x102c308ac]  storage.rs:1181
+        6       load_bench::pick_index::h67b5b210dbc33163  (in load_bench-b162c69bffb362fa) + 0  [0x102aec600]  load_bench.rs:273
+        6       pthread_mutex_unlock  (in libsystem_pthread.dylib) + 0  [0x1927348cc]
+        6       std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa) + 500  [0x102b156e0]  backtrace.rs:158
+        5       _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_enum::hffb8e2f55685d1c4  (in load_bench-b162c69bffb362fa) + 0  [0x102c28ef4]  decode.rs:683
+        5       _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_string::h602696d85807ef7c  (in load_bench-b162c69bffb362fa) + 0  [0x102bff93c]  macros.rs:132
+        5       _$LT$core..marker..PhantomData$LT$T$GT$$u20$as$u20$serde_core..de..DeserializeSeed$GT$::deserialize::h864c087f3d3854e4  (in load_bench-b162c69bffb362fa) + 736  [0x102c297b4]  mod.rs:825
+        5       _free  (in libsystem_malloc.dylib) + 0  [0x192566a28]
+        5       core::fmt::write::h164e2e78980a3344  (in load_bench-b162c69bffb362fa) + 0  [0x102bc9f14]  mod.rs:1458
+        5       liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa) + 0  [0x102c17388]  storage.rs:1218
+        5       liven::storage::StorageEngine::get_or_load_file_handle::h486bebc727c660fa  (in load_bench-b162c69bffb362fa) + 0  [0x102c26c78]  storage.rs:469
+        5       liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa) + 932  [0x102c30a24]  storage.rs:1181
+        5       liven::storage::deserialize_payload_borrowed::hd6843a42d248e1ba  (in load_bench-b162c69bffb362fa) + 0  [0x102c27960]  storage.rs:2361
+        5       liven::storage::deserialize_payload_borrowed::hd6843a42d248e1ba  (in load_bench-b162c69bffb362fa) + 180  [0x102c27a14]  storage.rs:2329
+
+Sort by top of stack, same collapsed (when >= 5):
+        pread  (in libsystem_kernel.dylib)        16998
+        fstat  (in libsystem_kernel.dylib)        7054
+        __ulock_wait  (in libsystem_kernel.dylib)        3605
+        semaphore_timedwait_trap  (in libsystem_kernel.dylib)        3605
+        __psynch_mutexwait  (in libsystem_kernel.dylib)        1906
+        crossbeam_skiplist::base::SkipList$LT$K$C$V$GT$::search_bound::he422d79be1b35504  (in load_bench-b162c69bffb362fa)        830
+        _platform_memcmp  (in libsystem_platform.dylib)        551
+        __psynch_mutexdrop  (in libsystem_kernel.dylib)        265
+        mach_absolute_time  (in libsystem_kernel.dylib)        197
+        core::str::converts::from_utf8::h907df036b51c9b19  (in load_bench-b162c69bffb362fa)        145
+        liven::storage::StorageEngine::get::h5482e0f7480362b7  (in load_bench-b162c69bffb362fa)        93
+        std::sys::backtrace::__rust_begin_short_backtrace::hd4639d56bb635ae5  (in load_bench-b162c69bffb362fa)        61
+        _$LT$std..io..default_write_fmt..Adapter$LT$T$GT$$u20$as$u20$core..fmt..Write$GT$::write_str::h6bbb327eb7da1257  (in load_bench-b162c69bffb362fa)        57
+        pthread_mutex_lock  (in libsystem_pthread.dylib)        55
+        core::hash::BuildHasher::hash_one::h62b31bd32b66d046  (in load_bench-b162c69bffb362fa)        50
+        liven::storage::StorageEngine::read_record::h542b03b972224a68  (in load_bench-b162c69bffb362fa)        50
+        liven::storage::StorageEngine::get_or_load_file_handle::h486bebc727c660fa  (in load_bench-b162c69bffb362fa)        48
+        rand_core::block::BlockRng$LT$R$GT$::generate_and_set::h9778ad68f1adadb8  (in load_bench-b162c69bffb362fa)        48
+        clock_gettime  (in libsystem_c.dylib)        32
+        core::fmt::write::h164e2e78980a3344  (in load_bench-b162c69bffb362fa)        30
+        clock_gettime_nsec_np  (in libsystem_c.dylib)        28
+        _platform_memmove  (in libsystem_platform.dylib)        27
+        _xzm_xzone_malloc  (in libsystem_malloc.dylib)        27
+        _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_enum::hffb8e2f55685d1c4  (in load_bench-b162c69bffb362fa)        21
+        crc32fast::hash::h25c026a3d564784f  (in load_bench-b162c69bffb362fa)        21
+        _malloc_zone_malloc  (in libsystem_malloc.dylib)        20
+        liven::storage::deserialize_payload_borrowed::hd6843a42d248e1ba  (in load_bench-b162c69bffb362fa)        20
+        crossbeam_skiplist::map::SkipMap$LT$K$C$V$GT$::get::h2f1885f49d48ccbe  (in load_bench-b162c69bffb362fa)        16
+        DYLD-STUB$$memcmp  (in load_bench-b162c69bffb362fa)        14
+        load_bench::pick_index::h67b5b210dbc33163  (in load_bench-b162c69bffb362fa)        14
+        _$LT$core..marker..PhantomData$LT$T$GT$$u20$as$u20$serde_core..de..DeserializeSeed$GT$::deserialize::h864c087f3d3854e4  (in load_bench-b162c69bffb362fa)        13
+        crossbeam_epoch::default::with_handle::h0f32ee68993180ca  (in load_bench-b162c69bffb362fa)        13
+        _$LT$$RF$mut$u20$rmp_serde..decode..Deserializer$LT$R$C$C$GT$$u20$as$u20$serde_core..de..Deserializer$GT$::deserialize_string::h602696d85807ef7c  (in load_bench-b162c69bffb362fa)        12
+        mach_timebase_info  (in libsystem_kernel.dylib)        12
+        <deduplicated_symbol>  (in libsystem_malloc.dylib)        11
+        DYLD-STUB$$memcpy  (in load_bench-b162c69bffb362fa)        10
+        pthread_mutex_unlock  (in libsystem_pthread.dylib)        9
+        _$LT$core..hash..sip..Hasher$LT$S$GT$$u20$as$u20$core..hash..Hasher$GT$::write::h8232b839179d186b  (in load_bench-b162c69bffb362fa)        8
+        _$LT$std..fs..File$u20$as$u20$liven..storage..PositionalReader$GT$::read_exact_at::ha621830e22b7727d  (in load_bench-b162c69bffb362fa)        7
+        std::sys::pal::unix::time::Timespec::sub_timespec::h9e61d60fef934ad5  (in load_bench-b162c69bffb362fa)        7
+        _free  (in libsystem_malloc.dylib)        6
+        _pthread_mutex_firstfit_lock_slow  (in libsystem_pthread.dylib)        6
+        core::ptr::drop_in_place$LT$crossbeam_skiplist..map..Entry$LT$alloc..string..String$C$liven..types..LogPointer$GT$$GT$::hb1708afc6329b5b6  (in load_bench-b162c69bffb362fa)        6
+        _pthread_mutex_firstfit_unlock_slow  (in libsystem_pthread.dylib)        5
+        core::fmt::Formatter::pad::hf4614a1c20e4508e  (in load_bench-b162c69bffb362fa)        5
+        std::sys::pal::unix::time::Timespec::now::h10d6d2ed67c46185  (in load_bench-b162c69bffb362fa)        5
+
+Binary Images:
+       0x102ae8000 -        0x1031887b7 +load_bench-b162c69bffb362fa (0) <44DA9598-F1CB-3FD7-95FD-7B64967448A2> /Users/*/Documents/*/load_bench-b162c69bffb362fa
+       0x1922e4000 -        0x19233748b  libobjc.A.dylib (951.1) <5A0AAB4E-0C1A-3680-82C9-43DC4007A6E7> /usr/lib/libobjc.A.dylib
+       0x192338000 -        0x192368bcb  libdyld.dylib (1330) <A64128D9-375B-36AE-8FEB-69D80F987D3C> /usr/lib/system/libdyld.dylib
+       0x192369000 -        0x192407f63  dyld (1.0.0 - 1330) <B50F5A1A-BE81-3068-92E1-3554F2BE478A> /usr/lib/dyld
+       0x192408000 -        0x19240b1d0  libsystem_blocks.dylib (96) <F17000B3-F871-3590-B604-7C4A13EAE01C> /usr/lib/system/libsystem_blocks.dylib
+       0x19240c000 -        0x192460f7f  libxpc.dylib (3089.41.2) <8346BE50-DE08-3606-9FB6-9A352975661D> /usr/lib/system/libxpc.dylib
+       0x192461000 -        0x19248181f  libsystem_trace.dylib (1815.40.20) <4D6C380B-736B-312F-B8E3-47E6C10DF033> /usr/lib/system/libsystem_trace.dylib
+       0x192482000 -        0x19252e54f  libcorecrypto.dylib (1922.40.14) <9E80591D-F3C9-3DAA-95BB-10BB4C313A84> /usr/lib/system/libcorecrypto.dylib
+       0x19252f000 -        0x19257abef  libsystem_malloc.dylib (792.41.1) <8A4825B5-E480-3A53-B35B-B90DCB34EE46> /usr/lib/system/libsystem_malloc.dylib
+       0x19257b000 -        0x1925c1e9f  libdispatch.dylib (1542.0.4) <8FB392AE-401F-399A-96AE-41531CF91162> /usr/lib/system/libdispatch.dylib
+       0x1925c2000 -        0x1925c4feb  libsystem_featureflags.dylib (101) <37F5A64F-CD19-3146-AA3D-7EED47C7B4DE> /usr/lib/system/libsystem_featureflags.dylib
+       0x1925c5000 -        0x192647047  libsystem_c.dylib (1725.40.4) <9F5BD98B-9367-3594-933B-16F392C2A5F8> /usr/lib/system/libsystem_c.dylib
+       0x192648000 -        0x1926dae53  libc++.1.dylib (2000.63) <B29F2164-26B0-3016-A871-82DE5A4637FF> /usr/lib/libc++.1.dylib
+       0x1926db000 -        0x1926f592f  libc++abi.dylib (2000.63) <94052F7C-7016-32FF-9FEF-EEFAE55A2ADB> /usr/lib/libc++abi.dylib
+       0x1926f6000 -        0x19273249f  libsystem_kernel.dylib (12377.41.6) <9FE7C84D-0C2B-363F-BEE5-6FD76D67A227> /usr/lib/system/libsystem_kernel.dylib
+       0x192733000 -        0x19273fabb  libsystem_pthread.dylib (539) <E95973B8-824C-361E-ADF4-390747C40897> /usr/lib/system/libsystem_pthread.dylib
+       0x192740000 -        0x1927483bf  libsystem_platform.dylib (359.40.3) <530FC11D-A495-375D-B2B9-81AE3E701781> /usr/lib/system/libsystem_platform.dylib
+       0x192749000 -        0x192778e23  libsystem_info.dylib (600) <62637EA2-0B6F-3695-9009-7E08AD4FC2F3> /usr/lib/system/libsystem_info.dylib
+       0x1966e3000 -        0x1966ed397  libsystem_darwin.dylib (1725.40.4) <786F353E-9012-3409-A7DF-08FB7E8C21CC> /usr/lib/system/libsystem_darwin.dylib
+       0x196b54000 -        0x196b65ff3  libsystem_notify.dylib (344.0.1) <24C492E0-C65F-3432-9337-90ED0C1EB2CD> /usr/lib/system/libsystem_notify.dylib
+       0x198e2b000 -        0x198e45fdb  libsystem_networkextension.dylib (2205.41.2) <6110390E-A0DB-38B4-AF8E-D6DC1F92C355> /usr/lib/system/libsystem_networkextension.dylib
+       0x198ec9000 -        0x198ee0ff3  libsystem_asl.dylib (404) <4B1F55B9-88E1-3B61-8A2B-B9D471D1E964> /usr/lib/system/libsystem_asl.dylib
+       0x19aa6f000 -        0x19aa773a7  libsystem_symptoms.dylib (2158.40.9) <7F3D95B2-C8F6-3604-A6A4-54C8056FA9B7> /usr/lib/system/libsystem_symptoms.dylib
+       0x19e9d7000 -        0x19ea0f2bb  libsystem_containermanager.dylib (725.40.12) <4AA81635-2296-3F01-93AE-0089169C0344> /usr/lib/system/libsystem_containermanager.dylib
+       0x19fe21000 -        0x19fe2566f  libsystem_configuration.dylib (1385.40.9) <ED3639AF-44FD-37EE-8B7F-1A840E23D5AD> /usr/lib/system/libsystem_configuration.dylib
+       0x19fe26000 -        0x19fe2c6a7  libsystem_sandbox.dylib (2680.41.1) <D3C3FE0A-BFEE-34D2-B3F6-3C7B6A4407CE> /usr/lib/system/libsystem_sandbox.dylib
+       0x1a13a0000 -        0x1a13a31fb  libquarantine.dylib (196.40.3) <76BD9E76-E9B4-3D8F-9675-51A86391C86F> /usr/lib/system/libquarantine.dylib
+       0x1a1b23000 -        0x1a1b29f4f  libsystem_coreservices.dylib (191.1.2.200) <1617C3D3-68FD-3970-BCFF-A623344E510E> /usr/lib/system/libsystem_coreservices.dylib
+       0x1a2064000 -        0x1a20a18b7  libsystem_m.dylib (3309) <219BCAAB-9FBB-3DAD-8B02-EF30D40BF21A> /usr/lib/system/libsystem_m.dylib
+       0x1a20a2000 -        0x1a20a2c9b  libcharset.1.dylib (113) <E33651B7-3FB5-3755-A21F-4D32986EA00D> /usr/lib/libcharset.1.dylib
+       0x1a20a3000 -        0x1a20a6537  libmacho.dylib (1030.6.3) <02B180AE-8EB8-3D0A-A088-8B7751BD6B5D> /usr/lib/system/libmacho.dylib
+       0x1a20c0000 -        0x1a20cd62f  libcommonCrypto.dylib (600035) <1C618B53-3317-3D31-A19D-94E2142BC0BA> /usr/lib/system/libcommonCrypto.dylib
+       0x1a20ce000 -        0x1a20d7b0b  libunwind.dylib (1900.125) <4A2DAFEF-0FC7-3CBD-9A8D-A6D2ED8EF115> /usr/lib/system/libunwind.dylib
+       0x1a20e0000 -        0x1a20ea6ff  libcopyfile.dylib (230.0.1.0.1) <6490C0C2-9700-3F37-A413-58B5E1FF285E> /usr/lib/system/libcopyfile.dylib
+       0x1a20eb000 -        0x1a20ee95f  libcompiler_rt.dylib (103.3) <3BA72D71-990F-3911-87B3-50F0EA714198> /usr/lib/system/libcompiler_rt.dylib
+       0x1a20ef000 -        0x1a20f3a1b  libsystem_collections.dylib (1725.40.4) <669A1A2D-8694-3E02-B154-D970AFC2CE31> /usr/lib/system/libsystem_collections.dylib
+       0x1a20f4000 -        0x1a20f74bf  libsystem_secinit.dylib (168.40.2) <EB462CEE-C06C-3E1D-8817-ACC597C4C995> /usr/lib/system/libsystem_secinit.dylib
+       0x1a20f8000 -        0x1a20fab57  libremovefile.dylib (84) <6F90FCF4-6046-33C5-A583-19620A6E226E> /usr/lib/system/libremovefile.dylib
+       0x1a20fb000 -        0x1a20fbf27  libkeymgr.dylib (31) <413ACA7C-28E4-3BF2-8535-2A3F3F9BCBAC> /usr/lib/system/libkeymgr.dylib
+       0x1a20fc000 -        0x1a2104f87  libsystem_dnssd.dylib (2881.40.18) <C034FE5E-54C1-3D7C-BF3F-86F87908763F> /usr/lib/system/libsystem_dnssd.dylib
+       0x1a2105000 -        0x1a210a0b3  libcache.dylib (95) <5A47A904-437B-3455-8117-E7C5D72F08F2> /usr/lib/system/libcache.dylib
+       0x1a210b000 -        0x1a210ccf3  libSystem.B.dylib (1356) <AE3A4D1A-7CE2-360E-920A-4B1223336609> /usr/lib/libSystem.B.dylib
+       0x1a2146000 -        0x1a214d1bb  libiconv.2.dylib (113) <7541D544-E3F4-3B3D-8195-B2BEA6C91A25> /usr/lib/libiconv.2.dylib
+       0x28b79f000 -        0x28b7a6319  libRosetta.dylib (365.3) <033B4378-3705-3580-8FB1-8DB5688DE702> /usr/lib/libRosetta.dylib
+       0x28cec4000 -        0x28cec7deb  libsystem_darwindirectory.dylib (122) <9B373C44-0144-3CCD-86B5-D6EBD4E7D7E8> /usr/lib/system/libsystem_darwindirectory.dylib
+       0x28cec8000 -        0x28cecf39b  libsystem_eligibility.dylib (286.40.9.0.1) <9008D680-86FF-3811-923A-77087AE9FC8B> /usr/lib/system/libsystem_eligibility.dylib
+       0x28ced0000 -        0x28ced7873  libsystem_sanitizers.dylib (25) <EEA7F32D-849B-315B-8017-2F3313F13E32> /usr/lib/system/libsystem_sanitizers.dylib
+       0x28ced8000 -        0x28ced8bb7  libsystem_trial.dylib (474.3) <40FCA195-78F6-3415-957E-23BAC002B9C8> /usr/lib/system/libsystem_trial.dylib

@@ -1,0 +1,129 @@
+{
+  "meta": {
+    "utc": "2026-10-23T12:10:07Z",
+    "date": "2026-10-23",
+    "commit": "100281d",
+    "dirty": true,
+    "rustc": "rustc 1.92.0 (ded5c06cf 2025-12-08)",
+    "profile": "release",
+    "cpu": "Apple M2",
+    "cores": 8,
+    "ram_mb": 8192,
+    "os": "Darwin 25.1.0 arm64",
+    "filesystem": "/",
+    "storage": "unverified",
+    "tag": "embedded-cold-fstat",
+    "args": "Args { records: 100000, reads: 100000, value_size: 128, key_len: 16, mode: Embedded, threads: [1, 4, 8, 16], clients: [1, 4, 8, 16], batch: 500, read_pattern: Uniform, warm: Cold, seed: 42, mixed: false, segment_mb: 256, max_fds: 64, max_index_ram_mb: 1024, data_dir: None, skip_insert: false, keep_data: false, tag: \"embedded-cold-fstat\" }"
+  },
+  "insert": {
+    "records": 100000,
+    "batch": 500,
+    "elapsed_s": 1.772731708,
+    "ops_per_s": 56410.115275040815,
+    "logical_mb_per_s": 7.220494755205225,
+    "disk_mb_per_s": 10.661511786982715,
+    "batch_latency": {
+      "p50_ns": 8970239,
+      "p99_ns": 10969087,
+      "p999_ns": 13049855,
+      "max_ns": 13049855
+    },
+    "disk_segments": 1,
+    "disk_bytes": 18900000,
+    "rss_bytes": 40648704,
+    "index_ram_bytes": 8600000,
+    "skipmap_len": 100000
+  },
+  "recover": {
+    "rebuild_s": 0.278397708,
+    "rss_before_bytes": 40697856,
+    "rss_after_bytes": 40828928,
+    "disk_segments": 1,
+    "disk_bytes": 18900000,
+    "skipmap_len": 100000
+  },
+  "reads": [
+    {
+      "phase": "read",
+      "mode": "embedded",
+      "threads": 1,
+      "clients": 0,
+      "pattern": "uniform",
+      "warm": "cold",
+      "ops": 100000,
+      "elapsed_s": 0.28331725,
+      "ops_per_s": 352961.21220998716,
+      "latency": {
+        "p50_ns": 2543,
+        "p99_ns": 3167,
+        "p999_ns": 3959,
+        "max_ns": 52799
+      },
+      "mismatches": 0
+    },
+    {
+      "phase": "read",
+      "mode": "embedded",
+      "threads": 4,
+      "clients": 0,
+      "pattern": "uniform",
+      "warm": "cold",
+      "ops": 100000,
+      "elapsed_s": 0.161096125,
+      "ops_per_s": 620747.3953827256,
+      "latency": {
+        "p50_ns": 5043,
+        "p99_ns": 19135,
+        "p999_ns": 36031,
+        "max_ns": 198399
+      },
+      "mismatches": 0
+    },
+    {
+      "phase": "read",
+      "mode": "embedded",
+      "threads": 8,
+      "clients": 0,
+      "pattern": "uniform",
+      "warm": "cold",
+      "ops": 100000,
+      "elapsed_s": 0.198139,
+      "ops_per_s": 504696.1981235395,
+      "latency": {
+        "p50_ns": 13087,
+        "p99_ns": 83903,
+        "p999_ns": 304639,
+        "max_ns": 984063
+      },
+      "mismatches": 0
+    },
+    {
+      "phase": "read",
+      "mode": "embedded",
+      "threads": 16,
+      "clients": 0,
+      "pattern": "uniform",
+      "warm": "cold",
+      "ops": 100000,
+      "elapsed_s": 0.198017167,
+      "ops_per_s": 505006.71994767,
+      "latency": {
+        "p50_ns": 12959,
+        "p99_ns": 618495,
+        "p999_ns": 1762303,
+        "max_ns": 20152319
+      },
+      "mismatches": 0
+    }
+  ],
+  "mixed": null,
+  "notes": [
+    "insert uses StorageEngine::append_batch directly in both modes; TCP measures the read-path overhead on top.",
+    "background compaction disabled (thresholds: segments=18446744073709551615, bytes=18446744073709551615); segment_mb=256, max_fds=64, max_index_ram_mb=1024",
+    "key_len=16 value_size=128 batch=500 seed=42",
+    "cold: cache-drop attempted before each thread/client run",
+    "syscalls: unverified (dtruss requires root; no strace on macOS)",
+    "flamegraph: see bench-results/flamegraph-* (generated separately with cargo flamegraph/sample)",
+    "cold: SKIPPED (purge failed; typically requires root)"
+  ]
+}
