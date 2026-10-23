@@ -39,7 +39,7 @@ max_open_file_descriptors = 64
 # max_index_ram_mb = 256
 
 # Maximum segment file size before a new segment is created.
-max_segment_size_mb = 16
+max_segment_size_mb = 1024
 
 # Maximum number of records returned from full scan operations
 max_scan_results = 100000

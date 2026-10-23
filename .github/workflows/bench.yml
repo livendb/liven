@@ -1,0 +1,265 @@
+name: Load Benchmark (Linux)
+
+on:
+  workflow_dispatch:
+    inputs:
+      records:
+        description: "Records to insert"
+        required: false
+        default: "100000"
+      reads:
+        description: "Point reads per phase"
+        required: false
+        default: "100000"
+      threads:
+        description: "Thread/client counts, comma-separated"
+        required: false
+        default: "1,4,8,16"
+      batch:
+        description: "append_batch size"
+        required: false
+        default: "500"
+      runs:
+        description: "Repeat each phase N times"
+        required: false
+        default: "3"
+        type: number
+      mode:
+        description: "Read path"
+        required: false
+        default: both
+        type: choice
+        options: [both, embedded, tcp]
+      warm:
+        description: "Page-cache mode"
+        required: false
+        default: hot
+        type: choice
+        options: [hot, cold, both]
+      pattern:
+        description: "Read pattern"
+        required: false
+        default: uniform
+        type: choice
+        options: [uniform, zipf, sequential]
+  push:
+    branches: [main]
+    paths:
+      - "src/storage.rs"
+      - "benches/load_bench.rs"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/bench.yml"
+  schedule:
+    # Weekly baseline, Monday 03:00 UTC.
+    - cron: "0 3 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: load-bench-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  load-bench:
+    name: Load benchmark (Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+
+    env:
+      CARGO_TERM_COLOR: always
+      RUST_BACKTRACE: 1
+      # Pin a reproducible baseline CPU level; GitHub runners support x86-64-v2.
+      RUSTFLAGS: "-C target-cpu=x86-64-v2"
+      BENCH_RECORDS: ${{ inputs.records || '100000' }}
+      BENCH_READS: ${{ inputs.reads || '100000' }}
+      BENCH_THREADS: ${{ inputs.threads || '1,4,8,16' }}
+      BENCH_BATCH: ${{ inputs.batch || '500' }}
+      BENCH_RUNS: ${{ inputs.runs || '3' }}
+      BENCH_MODE: ${{ inputs.mode || 'both' }}
+      BENCH_WARM: ${{ inputs.warm || 'hot' }}
+      BENCH_PATTERN: ${{ inputs.pattern || 'uniform' }}
+      BENCH_SEGMENT_MB: "256"
+      BENCH_MAX_FDS: "64"
+      BENCH_MAX_INDEX_RAM_MB: "1024"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: "ui/package-lock.json"
+
+      # The server feature embeds ui/dist via rust-embed.
+      - name: Build Web UI assets
+        working-directory: ui
+        run: |
+          npm ci --legacy-peer-deps
+          npm run build
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: load-bench
+
+      - name: Create results directory
+        run: mkdir -p bench-results
+
+      - name: Build benchmark (release)
+        run: cargo bench --bench load_bench --no-run
+
+      - name: Embedded, hot page cache
+        if: env.BENCH_MODE == 'embedded' || env.BENCH_MODE == 'both'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$BENCH_WARM" != "hot" ] && [ "$BENCH_WARM" != "both" ]; then
+            echo "skipping hot embedded run (warm=$BENCH_WARM)"
+            exit 0
+          fi
+          for i in 1 2 3 4 5; do
+            if [ "$i" -gt "$BENCH_RUNS" ]; then break; fi
+            TAG="ci-embedded-hot-r${i}"
+            cargo bench --bench load_bench -- \
+              --records "$BENCH_RECORDS" \
+              --reads "$BENCH_READS" \
+              --value-size 128 \
+              --key-len 16 \
+              --mode embedded \
+              --threads "$BENCH_THREADS" \
+              --batch "$BENCH_BATCH" \
+              --read-pattern "$BENCH_PATTERN" \
+              --warm hot \
+              --seed 42 \
+              --segment-mb "$BENCH_SEGMENT_MB" \
+              --max-fds "$BENCH_MAX_FDS" \
+              --max-index-ram-mb "$BENCH_MAX_INDEX_RAM_MB" \
+              --tag "$TAG" \
+              2>&1 | tee "bench-results/${TAG}.log"
+          done
+
+      - name: TCP, hot page cache
+        if: env.BENCH_MODE == 'tcp' || env.BENCH_MODE == 'both'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$BENCH_WARM" != "hot" ] && [ "$BENCH_WARM" != "both" ]; then
+            echo "skipping hot TCP run (warm=$BENCH_WARM)"
+            exit 0
+          fi
+          for i in 1 2 3 4 5; do
+            if [ "$i" -gt "$BENCH_RUNS" ]; then break; fi
+            TAG="ci-tcp-hot-r${i}"
+            cargo bench --bench load_bench -- \
+              --records "$BENCH_RECORDS" \
+              --reads "$BENCH_READS" \
+              --value-size 128 \
+              --key-len 16 \
+              --mode tcp \
+              --threads "$BENCH_THREADS" \
+              --batch "$BENCH_BATCH" \
+              --read-pattern "$BENCH_PATTERN" \
+              --warm hot \
+              --seed 42 \
+              --segment-mb "$BENCH_SEGMENT_MB" \
+              --max-fds "$BENCH_MAX_FDS" \
+              --max-index-ram-mb "$BENCH_MAX_INDEX_RAM_MB" \
+              --tag "$TAG" \
+              2>&1 | tee "bench-results/${TAG}.log"
+          done
+
+      - name: Allow benchmark to drop Linux page cache
+        if: env.BENCH_WARM == 'cold' || env.BENCH_WARM == 'both'
+        run: sudo chmod 666 /proc/sys/vm/drop_caches || true
+
+      - name: Embedded, cold page cache
+        if: (env.BENCH_MODE == 'embedded' || env.BENCH_MODE == 'both') && (env.BENCH_WARM == 'cold' || env.BENCH_WARM == 'both')
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in 1 2 3 4 5; do
+            if [ "$i" -gt "$BENCH_RUNS" ]; then break; fi
+            TAG="ci-embedded-cold-r${i}"
+            cargo bench --bench load_bench -- \
+              --records "$BENCH_RECORDS" \
+              --reads "$BENCH_READS" \
+              --value-size 128 \
+              --key-len 16 \
+              --mode embedded \
+              --threads "$BENCH_THREADS" \
+              --batch "$BENCH_BATCH" \
+              --read-pattern "$BENCH_PATTERN" \
+              --warm cold \
+              --seed 42 \
+              --segment-mb "$BENCH_SEGMENT_MB" \
+              --max-fds "$BENCH_MAX_FDS" \
+              --max-index-ram-mb "$BENCH_MAX_INDEX_RAM_MB" \
+              --tag "$TAG" \
+              2>&1 | tee "bench-results/${TAG}.log"
+          done
+
+      - name: TCP, cold page cache
+        if: (env.BENCH_MODE == 'tcp' || env.BENCH_MODE == 'both') && (env.BENCH_WARM == 'cold' || env.BENCH_WARM == 'both')
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in 1 2 3 4 5; do
+            if [ "$i" -gt "$BENCH_RUNS" ]; then break; fi
+            TAG="ci-tcp-cold-r${i}"
+            cargo bench --bench load_bench -- \
+              --records "$BENCH_RECORDS" \
+              --reads "$BENCH_READS" \
+              --value-size 128 \
+              --key-len 16 \
+              --mode tcp \
+              --threads "$BENCH_THREADS" \
+              --batch "$BENCH_BATCH" \
+              --read-pattern "$BENCH_PATTERN" \
+              --warm cold \
+              --seed 42 \
+              --segment-mb "$BENCH_SEGMENT_MB" \
+              --max-fds "$BENCH_MAX_FDS" \
+              --max-index-ram-mb "$BENCH_MAX_INDEX_RAM_MB" \
+              --tag "$TAG" \
+              2>&1 | tee "bench-results/${TAG}.log"
+          done
+
+      - name: Upload benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: load-bench-${{ github.run_id }}
+          path: |
+            bench-results/*.log
+            bench-results/*.json
+            bench-results/*.md
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Write job summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Liven load benchmark"
+            echo ""
+            echo "- commit: \`${GITHUB_SHA}\`"
+            echo "- runner: \`${RUNNER_OS}\` / \`${RUNNER_ARCH}\`"
+            echo "- records: \`${BENCH_RECORDS}\`, reads: \`${BENCH_READS}\`, threads: \`${BENCH_THREADS}\`"
+            echo "- mode: \`${BENCH_MODE}\`, warm: \`${BENCH_WARM}\`, pattern: \`${BENCH_PATTERN}\`, runs: \`${BENCH_RUNS}\`"
+            echo ""
+            for f in bench-results/*.md; do
+              [ -e "$f" ] || continue
+              echo "### ${f}"
+              cat "$f"
+              echo ""
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
