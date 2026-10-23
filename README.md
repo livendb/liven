@@ -376,38 +376,64 @@ flowchart LR
 
 ## Benchmarks
 
-Reproducible benchmarks run inside a pinned Docker image (`x86-64-v2` CPU features)
-to ensure consistent results across hardware.
+Microbenchmarks run in a pinned Docker image (`rust:1.88-bookworm`), built with
+`-C target-cpu=x86-64`, `lto = "fat"` and `codegen-units = 1`, on a GitHub-hosted
+`ubuntu-latest` runner. Values are Criterion medians from run
+[39969013537](https://github.com/livendb/liven/actions/runs/39969013537)
+(commit `3a6fea2`, 2026-10-23). The exact runner CPU model is not recorded in the
+artifact — treat these as relative, not absolute, numbers.
 
-| Operation                          | Performance          | Notes                                    |
-| ---------------------------------- | -------------------- | ---------------------------------------- |
-| **Point lookup** (existing key)    | **~2.3 µs**          | Microsecond, independent of dataset size |
-| **Point lookup** (missing key)     | **~65 ns**           | Near-zero cost (hash miss)               |
-| **Range index** (timestamp)        | **~88 ns**           | Billion elements/second                  |
-| **Full scan**                      | **~600–700K** elem/s | Linear, predictable throughput           |
-| **Scan with limit**                | **~67M** elem/s      | Short-circuits after limit               |
-| **Append** (single)                | **~5 ms**            | Fsync-bound per operation                |
-| **Append** (batch 500)             | **~707K** ops/s      | **Batch for throughput**                 |
-| **Upsert** (new key)               | **~5.3 ms**          | Same cost as append                      |
-| **Upsert** (existing key)          | **~10.7 ms**         | Includes tombstone write                 |
-| **Compaction**                     | **~500–570 µs**      | Sub-linear growth                        |
-| **Parse** (simple)                 | **~437 ns**          | Not a bottleneck                         |
-| **Parse** (complex)                | **~1.15 µs**         | Still sub-microsecond                    |
-| **Vector lookup** (quantized 512d) | **223 MiB/s**        | 9× faster than msgpack                   |
-| **Wire encode** (16 KB)            | **15 GiB/s**         | Far beyond network limits                |
+| Operation                          | Performance          | Notes                                         |
+| ---------------------------------- | -------------------- | --------------------------------------------- |
+| **Point lookup** (existing key)    | **~1.7 µs**          | 1.71 µs at 1K keys, 1.69 µs at 10K keys       |
+| **Point lookup** (missing key)     | **~80–120 ns**       | 79.8 ns at 1K keys, 117 ns at 10K keys        |
+| **Range index** (timestamp)        | **~84 ns**           | 11.8 Gelem/s at 1K entries                    |
+| **Full scan**                      | **~310–340K** elem/s | Linear in dataset size (1K → 10K)             |
+| **Scan with limit** (100)          | **~3–32M** elem/s    | Dataset elems/s; cost grows sub-linearly      |
+| **Append** (single)                | **~720 µs**          | Fsync-bound per operation                     |
+| **Append** (batch 500)             | **~690K** ops/s      | 724 µs per batch; wide run-to-run variance    |
+| **Upsert** (new key)               | **~700 µs**          | Same path as append                           |
+| **Upsert** (existing key)          | **~1.4 ms**          | Includes tombstone write                      |
+| **Compaction**                     | **~690–740 µs**      | 500 and 1,000 records                         |
+| **Parse** (simple)                 | **~470 ns**          | Not a bottleneck                              |
+| **Parse** (complex)                | **~1.2 µs**          | Still sub-microsecond                         |
+| **Vector lookup** (quantized 512d) | **179 MiB/s**        | 2.7 µs; 9.5× faster than msgpack (18.8 MiB/s) |
+| **Wire encode** (16 KB query)      | **12.5 GiB/s**       | Far beyond network limits                     |
+
+### End-to-end load benchmark
+
+100,000 records, 128-byte values, 16-byte keys, `append_batch(500)`, embedded mode,
+same runner. Every read is verified against the expected value (0 mismatches).
+
+| Phase                | Result                                                            |
+| -------------------- | ----------------------------------------------------------------- |
+| **Insert**           | 75,965 ops/s; batch p50 6.29 ms / p99 6.65 ms; 18.9 MB, 1 segment |
+| **Recover**          | 0.43 s for 100,000 keys; RSS 47.5 MB → 63.2 MB                    |
+| **Read**, 1 thread   | 310,772 ops/s; p50 2.77 µs / p99 4.16 µs                          |
+| **Read**, 4 threads  | 1,045,410 ops/s; p50 3.27 µs / p99 4.45 µs                        |
+| **Read**, 8 threads  | 989,926 ops/s; p50 3.31 µs / p99 4.58 µs                          |
+| **Read**, 16 threads | 1,002,985 ops/s; p50 3.37 µs / p99 4.65 µs (p99.9 3.02 ms)        |
+
+Reads saturate at ~1M ops/s from 4 threads upward; beyond that the shared index and
+file-handle cache dominate. The CI job runs the embedded mode only — TCP numbers are
+produced by the `Load Benchmark` workflow.
 
 ### Run benchmarks
 
 ```sh
-# Local (requires Rust nightly for CPU features)
+# Local (release profile; numbers depend on the host CPU)
 cargo bench
 
 # Reproducible Docker (recommended)
 ./run-bench.sh
+
+# End-to-end load harness (insert / recover / point reads)
+cargo bench --bench load_bench -- --records 100000 --reads 100000 --threads 1,4,8,16
 ```
 
-Benchmark source: [`benches/engine_bench.rs`](./benches/engine_bench.rs)
+Benchmark source: [`benches/engine_bench.rs`](./benches/engine_bench.rs), [`benches/load_bench.rs`](./benches/load_bench.rs)
 Docker runner: [`Dockerfile.bench`](./Dockerfile.bench), [`run-bench.sh`](./run-bench.sh)
+Raw output of the latest run: [`bench-results/2026-10-23-3a6fea2-docker-bench.txt`](./bench-results/2026-10-23-3a6fea2-docker-bench.txt)
 
 ---
 
