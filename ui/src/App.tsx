@@ -1,4 +1,4 @@
-import { Suspense, useState, useEffect, useRef } from "react";
+import { Suspense, useState, useEffect, useRef, useCallback } from "react";
 import { WifiOff, RefreshCw, Shield, Activity, XCircle, X } from "lucide-react";
 import { Route, Switch, useLocation } from "wouter";
 
@@ -165,11 +165,12 @@ export default function App() {
   const queriesThisSecondRef = useRef<number>(0);
   const lastSequenceIdRef = useRef<number | null>(null);
 
-  const addActivity = (
-    message: string,
-    category: "storage" | "query" | "server" | "stream",
-    type: "info" | "success" | "warn" | "error" = "info",
-  ) => {
+  const addActivity = useCallback(
+    (
+      message: string,
+      category: "storage" | "query" | "server" | "stream",
+      type: "info" | "success" | "warn" | "error" = "info",
+    ) => {
     const newLog: ActivityLog = {
       id: Math.random().toString(36).substring(2, 9),
       timestamp: new Date().toLocaleTimeString(),
@@ -177,8 +178,10 @@ export default function App() {
       category,
       message,
     };
-    setActivities((prev) => [newLog, ...prev].slice(0, 100));
-  };
+      setActivities((prev) => [newLog, ...prev].slice(0, 100));
+    },
+    [],
+  );
 
   // Query Console states (lifted up to load templates)
   const [query, setQuery] = useState('from("logs") | limit(10)');
@@ -215,7 +218,7 @@ export default function App() {
   const [dbPortVal, setDbPortVal] = useState<string>("43121");
   const [webuiPortVal, setWebuiPortVal] = useState<string>("43120");
 
-  const fetchConfig = async () => {
+  const fetchConfig = useCallback(async () => {
     try {
       const res = await fetch("/api/system/config");
       if (res.ok) {
@@ -237,7 +240,7 @@ export default function App() {
       console.error("Failed to fetch system config:", e);
     }
     return null;
-  };
+  }, [addActivity]);
 
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -281,14 +284,14 @@ export default function App() {
       }
     };
     initApp();
-  }, []);
+  }, [addActivity, fetchConfig]);
 
   // Redirect from security page if user doesn't have admin role
   useEffect(() => {
     if (!authChecking && location === "/security" && userRole !== "admin") {
       setLocation("/unauthorized");
     }
-  }, [authChecking, location, userRole]);
+  }, [authChecking, location, userRole, setLocation]);
 
   // Slide charts forward with 0s if WS disconnected
   useEffect(() => {
@@ -304,7 +307,7 @@ export default function App() {
     };
   }, [wsConnected]);
 
-  const connectWS = () => {
+  const connectWS = useCallback(function connect() {
     const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const wsUrl = `${wsProtocol}//${window.location.host}/ws`;
 
@@ -332,7 +335,7 @@ export default function App() {
       if (wsRef.current === ws) {
         setTimeout(() => {
           if (wsRef.current === ws) {
-            connectWS();
+            connect();
           }
         }, 3000);
       }
@@ -414,20 +417,19 @@ export default function App() {
         console.error("WS parse error:", e);
       }
     };
-  };
+  }, [addActivity]);
 
-  const fetchStreams = async () => {
+  const fetchStreams = useCallback(async () => {
     try {
       const res = await fetch(getDbApiUrl("/api/streams"));
       if (res.ok) {
         const data = await res.json();
         setStreams(data);
         const nonSystemStreams = data.filter((s: string) => s !== "auth_keys");
-        if (
-          nonSystemStreams.length > 0 &&
-          (!selectedStream || selectedStream === "auth_keys")
-        ) {
-          setSelectedStream(nonSystemStreams[0]);
+        if (nonSystemStreams.length > 0) {
+          setSelectedStream((prev) =>
+            !prev || prev === "auth_keys" ? nonSystemStreams[0] : prev,
+          );
         }
         addActivity(
           `Discovered ${data.length} active database storage stream(s): ${data.join(", ") || "none"}`,
@@ -443,9 +445,9 @@ export default function App() {
         "error",
       );
     }
-  };
+  }, [addActivity]);
 
-  const loadStreamRecords = async () => {
+  const loadStreamRecords = useCallback(async () => {
     try {
       // Execute a quick scan query for the specific stream
       const res = await fetch(getDbApiUrl("/api/query"), {
@@ -473,7 +475,7 @@ export default function App() {
         "error",
       );
     }
-  };
+  }, [addActivity, selectedStream]);
 
   // Manage WebSocket connection and fetch initial streams when authenticated.
   // Placed after connectWS/fetchStreams so the callbacks are declared first.
@@ -497,14 +499,14 @@ export default function App() {
         wsRef.current = null;
       }
     };
-  }, [isAuthenticated]);
+  }, [connectWS, fetchStreams, isAuthenticated]);
 
   // Browse records in selected stream
   useEffect(() => {
     if (selectedStream) {
       void Promise.resolve().then(() => loadStreamRecords());
     }
-  }, [selectedStream]);
+  }, [loadStreamRecords, selectedStream]);
 
   const sendHeartbeat = async () => {
     try {

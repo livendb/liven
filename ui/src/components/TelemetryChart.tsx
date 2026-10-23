@@ -285,6 +285,10 @@ export default function TelemetryChart({
       uplotInstance.destroy();
       uplotRef.current = null;
     };
+    // The chart is rebuilt only when the theme changes. Re-creating it on every
+    // data tick would tear down the uPlot instance; the next effect pushes each
+    // update via uplot.setData().
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resolvedTheme]);
 
   // ── Push real-time data updates ──────────────────────────────────────────
