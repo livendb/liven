@@ -53,3 +53,4 @@ auth_*
 *.status
 liven.status
 bench-results/
+liven.key
