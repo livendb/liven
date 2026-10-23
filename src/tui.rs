@@ -960,7 +960,7 @@ pub async fn run_shell(auth_key: Option<String>) -> Result<(), Box<dyn std::erro
                     Constraint::Min(5),
                     Constraint::Length(3),
                 ])
-                .split(f.size());
+                .split(f.area());
 
             let status_style = if is_online {
                 Style::default()
@@ -1099,7 +1099,7 @@ pub async fn run_shell(auth_key: Option<String>) -> Result<(), Box<dyn std::erro
             };
             let cursor_x = input_area.x + 12 + display_cursor_pos as u16;
             let cursor_y = input_area.y + 1;
-            f.set_cursor(cursor_x, cursor_y);
+            f.set_cursor_position((cursor_x, cursor_y));
         })?;
     }
 }
