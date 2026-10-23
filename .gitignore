@@ -52,3 +52,4 @@ auth_*
 *.truststore
 *.status
 liven.status
+bench-results/
