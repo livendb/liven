@@ -414,8 +414,8 @@ same runner. Every read is verified against the expected value (0 mismatches).
 | **Read**, 8 threads  | 989,926 ops/s; p50 3.31 µs / p99 4.58 µs                          |
 | **Read**, 16 threads | 1,002,985 ops/s; p50 3.37 µs / p99 4.65 µs (p99.9 3.02 ms)        |
 
-Reads saturate at ~1M ops/s from 4 threads upward; beyond that the shared index and
-file-handle cache dominate. The CI job runs the embedded mode only — TCP numbers are
+Reads saturate at ~1M ops/s from 4 threads upward; additional threads do not
+increase throughput. The CI job runs the embedded mode only — TCP numbers are
 produced by the `Load Benchmark` workflow.
 
 ### Run benchmarks
