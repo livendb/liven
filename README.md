@@ -63,7 +63,7 @@ Databases today make you choose: batch or stream? Historical or real-time? Key-v
 
 **One engine, three deployment models:**
 
-- Embedded library (~1.5 MB) — runs inside your Rust process
+- Embedded library — runs inside your Rust process
 - Network server — TCP + WebSocket, thousands of clients
 - Interactive TUI or web dashboard — for ad-hoc queries and monitoring
 
@@ -156,6 +156,7 @@ let results = db.run(
     Pipeline::from("events")
         .filter(Filter::field("type").eq("click"))
         .limit(10)
+        .build(),
 )?;
 
 // ── Wire (async) ──
@@ -253,7 +254,7 @@ let pipeline = Pipeline::from("orders")
     .limit(10);
 
 // Embedded
-db.run(pipeline.clone())?;
+db.run(pipeline.clone().build())?;
 
 // Wire
 client.run(&pipeline.build()).await?;
@@ -275,7 +276,7 @@ db.pipeline_delete(pipeline)?;
 ### Explain
 
 ```rust
-use liven::query::Query as Q;
+use liven::types::Query as Q;
 
 let plan = db.explain(Q::insert("events", "e1", json!({"x": 1})))?;
 ```
@@ -287,7 +288,10 @@ use liven::query::{Pipeline, Filter};
 
 // Blocking subscription (embedded, non-async)
 loop {
-    if let Some(record) = db.subscribe_sync(std::time::Duration::from_millis(100))? {
+    let next = db
+        .subscribe_sync(std::time::Duration::from_millis(100))
+        .expect("subscription failed");
+    if let Some(record) = next {
         println!("New: {}", record.key);
     }
 }
@@ -369,7 +373,10 @@ flowchart LR
 - **Writes** are appended to segment files. A background flusher batches them for throughput without sacrificing durability.
 - **Reads** go through a lock-free in-memory index. Point lookups resolve in microseconds.
 - **Subscriptions** broadcast every write to all listeners. The server evaluates pipeline filters before delivery.
-- **Compaction** reclaims space from deleted records automatically.
+- **Compaction** rewrites live records into a new segment and drops superseded
+  versions. The server runs it in the background once the configured thresholds
+  are exceeded; embedded callers opt in with `db.start_auto_compact(...)` or call
+  `db.compact()` directly.
 - **Recovery** replays segments on startup. Checksums catch corruption.
 
 ---
@@ -454,7 +461,11 @@ Keys can be generated, revoked, and role-changed at runtime via the Web UI or RE
 
 ### mTLS / ZTNA
 
-Mutual TLS with X.509 certificates. Client CN maps to capabilities. Single-port mode multiplexes cleartext and TLS on the same listener.
+Mutual TLS with X.509 certificates on the native TCP listener. The client
+certificate's CN is looked up in the `auth_keys` stream and its role determines
+capabilities. TLS is only engaged when `security.ztna.enabled = true` **and**
+`environment = "production"`; otherwise the native listener is cleartext. REST and
+WebSocket traffic on the web port is always plain HTTP.
 
 ### Master key
 
