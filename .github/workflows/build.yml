@@ -225,6 +225,10 @@ jobs:
           test -f /etc/liven/certs/ca.key
           test -f /etc/liven/certs/server.crt
           test -f /etc/liven/certs/server.key
+          # rustls rejects X.509 v1 certs; setup.sh must emit v3 with extensions.
+          openssl x509 -in /etc/liven/certs/ca.crt -noout -text | grep -q 'Version: 3'
+          openssl x509 -in /etc/liven/certs/server.crt -noout -text | grep -q 'Version: 3'
+          openssl x509 -in /etc/liven/certs/server.crt -noout -text | grep -q 'Subject Alternative Name'
           [ "$(stat -c '%a' /etc/liven/certs/server.key)" = "600" ]
           [ "$(stat -c '%a' /etc/liven/certs/ca.key)" = "600" ]
           test -f /etc/systemd/system/liven.service

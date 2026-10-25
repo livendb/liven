@@ -249,16 +249,46 @@ TOML
   $USE_SUDO mkdir -p "$CONFIG_DIR/certs"
   if command -v openssl >/dev/null; then
     echo "Provisioning self-signed production CA and Server certificates..."
+    # rustls rejects X.509 v1 certificates (webpki: UnsupportedCertVersion),
+    # and `openssl x509 -req` emits v1 unless an extension file is supplied.
+    # A config file (rather than -addext/-extfile on `req`) also works with the
+    # LibreSSL tools shipped on macOS.
+    CERT_CNF=$(mktemp)
+    cat > "$CERT_CNF" << 'EOF'
+[req]
+distinguished_name = dn
+prompt = no
+x509_extensions = v3_ca
+
+[dn]
+CN = MyLIVENCA
+
+[v3_ca]
+basicConstraints = critical,CA:TRUE
+keyUsage = critical,keyCertSign,cRLSign
+subjectKeyIdentifier = hash
+
+[v3_server]
+basicConstraints = CA:FALSE
+keyUsage = critical,digitalSignature,keyEncipherment
+extendedKeyUsage = serverAuth
+subjectAltName = IP:127.0.0.1,DNS:localhost
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid,issuer
+EOF
     $USE_SUDO openssl genrsa -out "$CONFIG_DIR/certs/ca.key" 2048 2>/dev/null
     $USE_SUDO openssl req -x509 -new -nodes -key "$CONFIG_DIR/certs/ca.key" -sha256 -days 365 \
-      -out "$CONFIG_DIR/certs/ca.crt" -subj "/CN=MyLIVENCA" 2>/dev/null
+      -out "$CONFIG_DIR/certs/ca.crt" -config "$CERT_CNF" 2>/dev/null
 
     $USE_SUDO openssl genrsa -out "$CONFIG_DIR/certs/server.key" 2048 2>/dev/null
     $USE_SUDO openssl req -new -key "$CONFIG_DIR/certs/server.key" -out "$CONFIG_DIR/certs/server.csr" \
       -subj "/CN=127.0.0.1" 2>/dev/null
     $USE_SUDO openssl x509 -req -in "$CONFIG_DIR/certs/server.csr" \
       -CA "$CONFIG_DIR/certs/ca.crt" -CAkey "$CONFIG_DIR/certs/ca.key" -CAcreateserial \
-      -out "$CONFIG_DIR/certs/server.crt" -days 365 -sha256 2>/dev/null
+      -out "$CONFIG_DIR/certs/server.crt" -days 365 -sha256 \
+      -extfile "$CERT_CNF" -extensions v3_server 2>/dev/null
+    rm -f "$CERT_CNF"
+    $USE_SUDO rm -f "$CONFIG_DIR/certs/server.csr"
 
     $USE_SUDO chmod 600 "$CONFIG_DIR/certs/ca.key"
     $USE_SUDO chmod 600 "$CONFIG_DIR/certs/server.key"

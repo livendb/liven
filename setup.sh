@@ -86,12 +86,42 @@ EOF
     mkdir -p /etc/liven/certs
     if command -v openssl >/dev/null; then
         echo "Provisioning self-signed production CA and Server certificates..."
+        # rustls rejects X.509 v1 certificates (webpki: UnsupportedCertVersion),
+        # and `openssl x509 -req` emits v1 unless an extension file is supplied.
+        # A config file (rather than -addext/-extfile on `req`) also works with
+        # the LibreSSL tools shipped on macOS.
+        cat > /etc/liven/certs/cert.cnf << 'EOF'
+[req]
+distinguished_name = dn
+prompt = no
+x509_extensions = v3_ca
+
+[dn]
+CN = MyLIVENCA
+
+[v3_ca]
+basicConstraints = critical,CA:TRUE
+keyUsage = critical,keyCertSign,cRLSign
+subjectKeyIdentifier = hash
+
+[v3_server]
+basicConstraints = CA:FALSE
+keyUsage = critical,digitalSignature,keyEncipherment
+extendedKeyUsage = serverAuth
+subjectAltName = IP:127.0.0.1,DNS:localhost
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid,issuer
+EOF
         openssl genrsa -out /etc/liven/certs/ca.key 2048 2>/dev/null
-        openssl req -x509 -new -nodes -key /etc/liven/certs/ca.key -sha256 -days 365 -out /etc/liven/certs/ca.crt -subj "/CN=MyLIVENCA" 2>/dev/null
+        openssl req -x509 -new -nodes -key /etc/liven/certs/ca.key -sha256 -days 365 \
+            -out /etc/liven/certs/ca.crt -config /etc/liven/certs/cert.cnf 2>/dev/null
 
         openssl genrsa -out /etc/liven/certs/server.key 2048 2>/dev/null
         openssl req -new -key /etc/liven/certs/server.key -out /etc/liven/certs/server.csr -subj "/CN=127.0.0.1" 2>/dev/null
-        openssl x509 -req -in /etc/liven/certs/server.csr -CA /etc/liven/certs/ca.crt -CAkey /etc/liven/certs/ca.key -CAcreateserial -out /etc/liven/certs/server.crt -days 365 -sha256 2>/dev/null
+        openssl x509 -req -in /etc/liven/certs/server.csr -CA /etc/liven/certs/ca.crt -CAkey /etc/liven/certs/ca.key -CAcreateserial \
+            -out /etc/liven/certs/server.crt -days 365 -sha256 \
+            -extfile /etc/liven/certs/cert.cnf -extensions v3_server 2>/dev/null
+        rm -f /etc/liven/certs/server.csr
 
         chmod 600 /etc/liven/certs/ca.key
         chmod 600 /etc/liven/certs/server.key
