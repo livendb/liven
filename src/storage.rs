@@ -1771,9 +1771,9 @@ impl StorageEngine {
     ) -> crate::error::Result<std::sync::mpsc::Receiver<Result<Vec<Record>, ring_buffer::AckError>>>
     {
         self.ensure_writable()?;
-        // Validate the stream budget up front. Index-RAM decisions are left to
-        // the flusher's per-entry authoritative check so a mixed batch (existing
-        // keys + one new key over budget) does not reject the whole batch.
+        // Validate the stream budget up front. Index-RAM decisions are made by
+        // the flusher, which validates the whole batch atomically before writing
+        // any frame: one over-budget new key rejects the entire batch.
         let mut new_streams = HashSet::new();
 
         {
