@@ -56,6 +56,10 @@ pub enum LivenError {
     )]
     KeyTooLong { len: usize, key: String },
 
+    /// The server configuration is unsafe or unsupported.
+    #[error("configuration error: {0}")]
+    Config(String),
+
     // ── Query / Pipeline ──────────────────────────────────────────
     /// The query string could not be parsed.
     #[error("parse error: {0}")]

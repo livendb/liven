@@ -43,7 +43,6 @@ async fn test_client_protocol_prefixes() {
             data_directory: test_dir.to_string(),
             max_segment_size_mb: 10,
             sync_mode: "always".to_string(),
-            sync_interval_ms: 10,
         },
         limits: LimitsConfig {
             max_concurrent_streams: 10,
@@ -126,7 +125,6 @@ async fn test_client_listen_stream() {
             max_segment_size_mb: 10,
 
             sync_mode: "always".to_string(),
-            sync_interval_ms: 10,
         },
         limits: LimitsConfig {
             max_concurrent_streams: 10,

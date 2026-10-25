@@ -2,7 +2,7 @@ use liven::executor::{
     apply_pipeline_stages_to_vec, compare_values, execute_query, extract_field, project_record,
 };
 use liven::parser::parse_query;
-use liven::storage::StorageEngine;
+use liven::storage::{RecoveryMode, StorageEngine};
 use liven::types::{DataValue, FilterExpr, Op, PipelineStage, Query, Record};
 
 #[test]
@@ -259,10 +259,19 @@ fn test_pipeline_delete_optimizations() {
 #[test]
 fn test_status_query() {
     let temp_dir = format!("./data_test_status_{}", std::process::id());
-    let engine = StorageEngine::new(&temp_dir, 1024 * 1024)
-        .unwrap()
-        .with_max_connections(500)
-        .with_broadcast_capacity(100);
+    let engine = StorageEngine::new_with_tuning(
+        &temp_dir,
+        1024 * 1024,
+        RecoveryMode::Default,
+        32,
+        16 * 1024 * 1024,
+        64,
+        500,
+        100,
+        5_000,
+        2_048,
+    )
+    .unwrap();
 
     let res = execute_query(&engine, &Query::Status).unwrap();
     assert_eq!(res.len(), 1);

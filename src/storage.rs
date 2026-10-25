@@ -119,8 +119,6 @@ pub struct StorageEngine {
     ring_buffer: ring_buffer::LogRingBuffer,
     #[allow(dead_code)]
     sync_mode: String,
-    #[allow(dead_code)]
-    sync_interval_ms: u64,
     is_running: Arc<std::sync::atomic::AtomicBool>,
     /// Set when an I/O or fsync failure leaves the on-disk state uncertain.
     /// Once set, all future writes fail fast and the database must be reopened
@@ -306,13 +304,40 @@ impl StorageEngine {
         max_index_ram_bytes: u64,
         max_fds: usize,
     ) -> crate::error::Result<Self> {
+        Self::new_with_tuning(
+            data_dir,
+            max_segment_size,
+            recovery_mode,
+            max_streams,
+            max_index_ram_bytes,
+            max_fds,
+            10_000,
+            4_096,
+            5_000,
+            2_048,
+        )
+    }
+
+    /// Full constructor used by the server and embedded API. The extra tuning
+    /// values must be supplied before the flusher thread starts; setting the
+    /// public fields afterwards has no effect on that thread.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_tuning<P: AsRef<Path>>(
+        data_dir: P,
+        max_segment_size: u64,
+        recovery_mode: RecoveryMode,
+        max_streams: usize,
+        max_index_ram_bytes: u64,
+        max_fds: usize,
+        max_connections: usize,
+        broadcast_capacity: usize,
+        commit_drain_window_us: u64,
+        commit_max_batch_size: usize,
+    ) -> crate::error::Result<Self> {
         let path = data_dir.as_ref().to_path_buf();
         fs::create_dir_all(&path).map_err(LivenError::Io)?;
 
-        let max_connections: usize = 10000;
-        let broadcast_capacity: usize = 4096;
         let sync_mode: String = "always".to_string();
-        let sync_interval_ms: u64 = 100;
         let max_scan_results: usize = 100_000;
 
         let conn_semaphore = Arc::new(tokio::sync::Semaphore::new(max_connections));
@@ -353,7 +378,6 @@ impl StorageEngine {
             file_handles: file_handles.clone(),
             ring_buffer,
             sync_mode: sync_mode.clone(),
-            sync_interval_ms,
             is_running: is_running.clone(),
             failed: failed.clone(),
             max_streams,
@@ -373,8 +397,8 @@ impl StorageEngine {
             flusher_handle: None,
             max_scan_results,
             frames_read: AtomicU64::new(0),
-            commit_drain_window_us: 5000,
-            commit_max_batch_size: 2048,
+            commit_drain_window_us,
+            commit_max_batch_size,
             recovery_mode,
             lock_timeout_secs: 5,
             recovery_report: None,
@@ -454,24 +478,6 @@ impl StorageEngine {
 
         engine.flusher_handle = Some(flusher_handle);
 
-        if sync_mode == "periodic" {
-            let active_file_clone = active_file;
-            let sync_running = is_running.clone();
-            std::thread::spawn(move || {
-                while sync_running.load(Ordering::Relaxed) {
-                    std::thread::sleep(std::time::Duration::from_millis(sync_interval_ms));
-                    if !sync_running.load(Ordering::Relaxed) {
-                        break;
-                    }
-                    if let Ok(mut file_guard) = active_file_clone.try_lock()
-                        && let Some(file) = file_guard.as_mut()
-                    {
-                        let _ = file.sync_data();
-                    }
-                }
-            });
-        }
-
         Ok(engine)
     }
 
@@ -482,11 +488,6 @@ impl StorageEngine {
     /// Get the number of active broadcast subscribers
     pub fn broadcast_subscriber_count(&self) -> usize {
         self.broadcast_tx.receiver_count()
-    }
-
-    pub fn with_broadcast_capacity(mut self, capacity: usize) -> Self {
-        self.broadcast_capacity = capacity;
-        self
     }
 
     pub fn with_max_connections(mut self, limit: usize) -> Self {
@@ -537,7 +538,6 @@ impl StorageEngine {
                 ring_buffer::LogRingBuffer::new(tx)
             },
             sync_mode: String::new(),
-            sync_interval_ms: 0,
             is_running: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             failed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             max_streams: 32,

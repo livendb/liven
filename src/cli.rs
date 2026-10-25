@@ -2,15 +2,40 @@
 use liven::server;
 use liven::{storage, types::DataValue};
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, exit};
 #[cfg(feature = "server")]
 use std::sync::Arc;
+use std::sync::OnceLock;
 use std::{env, fs};
 use tracing::{info, warn};
 
+static CONFIG_PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
+
+fn config_path_from_args(args: &[String]) -> Option<PathBuf> {
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        if arg == "--config" {
+            return iter.next().map(PathBuf::from);
+        }
+        if let Some(value) = arg.strip_prefix("--config=") {
+            return Some(PathBuf::from(value));
+        }
+    }
+    None
+}
+
+fn load_config(args: &[String]) -> Result<liven::config::AppConfig, String> {
+    liven::config::AppConfig::load_from(config_path_from_args(args).as_deref())
+        .map_err(|e| format!("Failed to load config: {}", e))
+}
+
+fn configured_path() -> Option<&'static Path> {
+    CONFIG_PATH.get().and_then(|path| path.as_deref())
+}
+
 fn get_data_dir() -> String {
-    if let Ok(config) = liven::config::AppConfig::load() {
+    if let Ok(config) = liven::config::AppConfig::load_from(configured_path()) {
         config.storage.data_directory
     } else {
         "./data".to_string()
@@ -35,7 +60,9 @@ fn print_usage() {
     println!("\x1b[0m");
     println!("\x1b[36m LIVEN CLI\x1b[0m");
     println!("Usage:");
-    println!("  liven start [--no-ui] [--repair] [--strict-recovery]   Start the database server");
+    println!(
+        "  liven start [--config <path>] [--no-ui] [--repair] [--strict-recovery]   Start the database server"
+    );
     println!("  liven stop              Stop the running database server");
     println!("  liven status            Check the status of the database server");
     println!("  liven list [--auth-key <value>] List all available database streams");
@@ -89,6 +116,7 @@ pub fn is_server_running() -> bool {
 
 pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
+    let _ = CONFIG_PATH.set(config_path_from_args(&args));
 
     info!("Starting Liven CLI with arguments: {:?}", args);
 
@@ -243,8 +271,7 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
 
             // --repair is an offline maintenance operation — no server starts.
             if is_repair {
-                let config = liven::config::AppConfig::load()
-                    .map_err(|e| format!("Failed to load config: {}", e))?;
+                let config = load_config(&args)?;
                 let data_directory = &config.storage.data_directory;
                 let max_segment_size = config.storage.max_segment_size_mb * 1024 * 1024;
 
@@ -293,8 +320,7 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
 
             info!("Starting LIVEN Server...");
 
-            let config = liven::config::AppConfig::load()
-                .map_err(|e| format!("Failed to load config: {}", e))?;
+            let config = load_config(&args)?;
 
             // Create data directory if it doesn't exist
             let data_directory = &config.storage.data_directory;
@@ -321,13 +347,17 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
             };
             // Pass the configured limits into construction so *recovery* honours
             // them; otherwise a DB with >32 streams or a >16 MB index fails to open.
-            let mut engine = storage::StorageEngine::new_with_limits(
+            let mut engine = storage::StorageEngine::new_with_tuning(
                 data_directory,
                 max_segment_size as u64,
                 recovery_mode,
                 config.limits.max_concurrent_streams,
                 config.limits.max_index_ram_mb as u64 * 1024 * 1024,
                 config.limits.max_open_file_descriptors,
+                config.server.max_connections,
+                config.server.broadcast_capacity,
+                5_000,
+                2_048,
             )?;
 
             // max_scan_results is a query-time limit, not a recovery limit.

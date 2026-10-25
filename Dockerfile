@@ -43,13 +43,14 @@ RUN groupadd -r liven && \
 
 # Copy binary and config
 COPY --from=builder /app/target/release/liven /usr/local/bin/liven
-COPY liven.toml /etc/liven/liven.toml
+COPY docker/liven.toml /etc/liven/liven.toml
 
 # Expose ports (db_port, webui_port)
 EXPOSE 43121 43120
 
-# Default config path
+# Default config path and persistent working directory
 ENV LIVEN_CONFIG=/etc/liven/liven.toml
+WORKDIR /var/lib/liven
 
 # Switch to non-root user
 USER liven

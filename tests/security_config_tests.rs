@@ -6,6 +6,76 @@ use liven::storage::StorageEngine;
 use tempfile::tempdir;
 
 #[test]
+fn test_explicit_config_path_is_loaded() {
+    let temp_dir = tempdir().unwrap();
+    let path = temp_dir.path().join("custom.toml");
+    std::fs::write(
+        &path,
+        r#"
+[server]
+environment = "production"
+host = "127.0.0.1"
+[storage]
+data_directory = "/tmp/liven-explicit"
+[security]
+mode = "none"
+"#,
+    )
+    .unwrap();
+
+    let config = AppConfig::load_from(Some(&path)).unwrap();
+    assert_eq!(config.server.environment, "production");
+    assert_eq!(config.storage.data_directory, "/tmp/liven-explicit");
+    // Explicit security.mode must not be auto-switched.
+    assert_eq!(config.security.mode, "none");
+}
+
+#[test]
+fn test_insecure_security_mode_is_refused() {
+    let mut config = AppConfig::from_embedded("./data", 32, 16, 16, 64, 4096);
+    config.security.mode = "none".to_string();
+
+    config.server.environment = "production".to_string();
+    config.server.host = "127.0.0.1".to_string();
+    assert!(
+        config.validate_security_with(false).is_err(),
+        "production + mode none must be refused"
+    );
+
+    // Production + ZTNA is authenticated by a client certificate, so the
+    // auth-key mode may be disabled.
+    config.security.ztna = Some(liven::config::ZtnaConfig {
+        enabled: true,
+        cert_path: None,
+        key_path: None,
+        client_ca_path: None,
+    });
+    assert!(config.validate_security_with(false).is_ok());
+    config.security.ztna = None;
+
+    config.server.environment = "development".to_string();
+    config.server.host = "0.0.0.0".to_string();
+    assert!(
+        config.validate_security_with(false).is_err(),
+        "non-loopback bind + mode none must be refused"
+    );
+
+    config.server.host = "127.0.0.1".to_string();
+    assert!(config.validate_security_with(false).is_ok());
+    assert!(
+        config.validate_security_with(true).is_ok(),
+        "explicit override must allow the same configuration"
+    );
+}
+
+#[test]
+fn test_unsupported_sync_mode_is_rejected() {
+    let mut config = AppConfig::from_embedded("./data", 32, 16, 16, 64, 4096);
+    config.storage.sync_mode = "never".to_string();
+    assert!(config.validate().is_err());
+}
+
+#[test]
 fn test_auto_security_mode_development() {
     // Test that development environment auto-sets security.mode to "none"
     let temp_dir = tempdir().unwrap();

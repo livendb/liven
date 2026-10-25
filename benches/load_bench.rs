@@ -773,7 +773,6 @@ fn start_tcp_server(
             data_directory: data_dir.to_string_lossy().into_owned(),
             max_segment_size_mb: args.segment_mb as usize,
             sync_mode: "always".to_string(),
-            sync_interval_ms: 100,
         },
         limits: LimitsConfig {
             max_concurrent_streams: 64,

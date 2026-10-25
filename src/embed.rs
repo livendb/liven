@@ -95,19 +95,21 @@ impl Liven {
         // Supplying the limits up front lets recovery honour them, so a database
         // larger than the standalone defaults can be reopened (see
         // StorageEngine::new_with_limits).
-        let mut engine = StorageEngine::new_with_limits(
+        let mut engine = StorageEngine::new_with_tuning(
             path,
             segment_size,
             crate::storage::RecoveryMode::Default,
             config.max_streams,
             config.max_index_ram_mb as u64 * 1024 * 1024,
             config.max_open_fds,
+            10_000,
+            config.broadcast_capacity,
+            config.commit_drain_window_us,
+            config.commit_max_batch_size,
         )?;
         engine.set_max_scan_results(config.max_scan_results);
         engine.compaction_threshold_segments = config.compaction_threshold_segments;
         engine.compaction_threshold_bytes = config.compaction_threshold_bytes;
-        engine.commit_drain_window_us = config.commit_drain_window_us;
-        engine.commit_max_batch_size = config.commit_max_batch_size;
         Ok(Self {
             engine: Arc::new(engine),
         })

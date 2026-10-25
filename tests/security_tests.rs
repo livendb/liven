@@ -110,7 +110,6 @@ async fn test_auth_key_handshake_lifecycle() {
             max_segment_size_mb: 10,
 
             sync_mode: "always".to_string(),
-            sync_interval_ms: 10,
         },
         limits: LimitsConfig {
             max_concurrent_streams: 10,
@@ -233,7 +232,6 @@ async fn test_rest_auth_key_challenge_login_lifecycle() {
             max_segment_size_mb: 10,
 
             sync_mode: "always".to_string(),
-            sync_interval_ms: 10,
         },
         limits: LimitsConfig {
             max_concurrent_streams: 10,
@@ -647,7 +645,6 @@ async fn test_session_role_downgrade_takes_effect_immediately() {
             data_directory: test_dir.to_string_lossy().to_string(),
             max_segment_size_mb: 10,
             sync_mode: "always".to_string(),
-            sync_interval_ms: 10,
         },
         limits: LimitsConfig {
             max_concurrent_streams: 10,

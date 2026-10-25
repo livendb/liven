@@ -58,16 +58,10 @@ pub struct StorageConfig {
     pub max_segment_size_mb: usize,
     #[serde(default = "default_sync_mode")]
     pub sync_mode: String,
-    #[serde(default = "default_sync_interval_ms")]
-    pub sync_interval_ms: u64,
 }
 
 fn default_sync_mode() -> String {
     "always".to_string()
-}
-
-fn default_sync_interval_ms() -> u64 {
-    100
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -152,7 +146,22 @@ impl AppConfig {
     /// Used by the server binary — reads liven.toml, liven.conf,
     /// and environment variables.
     pub fn load() -> Result<Self, ConfigError> {
-        let builder = Config::builder()
+        Self::load_from(None)
+    }
+
+    /// Loads configuration from an explicit file (highest file priority),
+    /// falling back to `./liven.toml` and `./liven.conf`, then environment
+    /// variables. `LIVEN_CONFIG` supplies the explicit path when `path` is
+    /// `None`. Used by `liven start --config <path>`.
+    pub fn load_from(path: Option<&std::path::Path>) -> Result<Self, ConfigError> {
+        let env_path = std::env::var("LIVEN_CONFIG")
+            .ok()
+            .filter(|p| !p.trim().is_empty())
+            .map(std::path::PathBuf::from);
+        let explicit_path = path.map(|p| p.to_path_buf()).or(env_path);
+        let path = explicit_path.as_deref();
+
+        let mut builder = Config::builder()
             // Layer 1: Hardcoded internal defaults
             .set_default("server.environment", "development")?
             .set_default("server.host", "127.0.0.1")?
@@ -163,7 +172,6 @@ impl AppConfig {
             .set_default("storage.data_directory", "./data")?
             .set_default("storage.max_segment_size_mb", 10)?
             .set_default("storage.sync_mode", "always")?
-            .set_default("storage.sync_interval_ms", 100)?
             .set_default("limits.max_concurrent_streams", 32)?
             .set_default("limits.max_open_file_descriptors", 64)?
             .set_default("limits.max_index_ram_mb", 16)?
@@ -183,8 +191,24 @@ impl AppConfig {
                 File::from(std::path::Path::new("liven.conf"))
                     .required(false)
                     .format(config::FileFormat::Toml),
-            )
-            // Layer 3: Environment variable overrides
+            );
+
+        if let Some(explicit) = path {
+            if !explicit.exists() {
+                return Err(ConfigError::Message(format!(
+                    "configuration file does not exist: {}",
+                    explicit.display()
+                )));
+            }
+            builder = builder.add_source(
+                File::from(explicit)
+                    .required(true)
+                    .format(config::FileFormat::Toml),
+            );
+        }
+
+        // Layer 3: Environment variable overrides
+        builder = builder
             .add_source(Environment::with_prefix("LIVEN").separator("__"))
             .add_source(Environment::with_prefix("LIVENDB").separator("__"));
 
@@ -195,16 +219,11 @@ impl AppConfig {
         // If user explicitly set security.mode, respect it
         let was_explicitly_set = std::env::var("LIVEN_SECURITY__MODE").is_ok()
             || std::env::var("LIVENDB_SECURITY__MODE").is_ok()
-            || std::path::Path::new("liven.toml").exists()
-                && std::fs::read_to_string("liven.toml")
-                    .ok()
-                    .map(|content| content.contains("security") && content.contains("mode"))
-                    .unwrap_or(false)
-            || std::path::Path::new("liven.conf").exists()
-                && std::fs::read_to_string("liven.conf")
-                    .ok()
-                    .map(|content| content.contains("security") && content.contains("mode"))
-                    .unwrap_or(false);
+            || path.is_some_and(|p| file_mentions(p, "security") && file_mentions(p, "mode"))
+            || file_mentions(std::path::Path::new("liven.toml"), "security")
+                && file_mentions(std::path::Path::new("liven.toml"), "mode")
+            || file_mentions(std::path::Path::new("liven.conf"), "security")
+                && file_mentions(std::path::Path::new("liven.conf"), "mode");
 
         if !was_explicitly_set {
             // Auto-switch based on environment
@@ -242,16 +261,9 @@ impl AppConfig {
         // Check if max_index_ram_mb was explicitly set by user
         let was_explicitly_set = std::env::var("LIVEN_LIMITS__MAX_INDEX_RAM_MB").is_ok()
             || std::env::var("LIVENDB_LIMITS__MAX_INDEX_RAM_MB").is_ok()
-            || std::path::Path::new("liven.toml").exists()
-                && std::fs::read_to_string("liven.toml")
-                    .ok()
-                    .map(|content| content.contains("max_index_ram_mb"))
-                    .unwrap_or(false)
-            || std::path::Path::new("liven.conf").exists()
-                && std::fs::read_to_string("liven.conf")
-                    .ok()
-                    .map(|content| content.contains("max_index_ram_mb"))
-                    .unwrap_or(false);
+            || path.is_some_and(|p| file_mentions(p, "max_index_ram_mb"))
+            || file_mentions(std::path::Path::new("liven.toml"), "max_index_ram_mb")
+            || file_mentions(std::path::Path::new("liven.conf"), "max_index_ram_mb");
 
         if !was_explicitly_set || config.limits.max_index_ram_mb == 16 {
             // User didn't explicitly set it, or it's the old default - use auto-detection
@@ -332,6 +344,59 @@ impl AppConfig {
         Ok(config)
     }
 
+    /// Validates configuration that the server cannot safely guess at.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.storage.sync_mode != "always" {
+            return Err(format!(
+                "storage.sync_mode = '{}': only 'always' is implemented",
+                self.storage.sync_mode
+            ));
+        }
+        let allow_insecure = matches!(
+            std::env::var("LIVEN_ALLOW_INSECURE").as_deref(),
+            Ok("1") | Ok("true")
+        ) || matches!(
+            std::env::var("LIVENDB_ALLOW_INSECURE").as_deref(),
+            Ok("1") | Ok("true")
+        );
+        self.validate_security_with(allow_insecure)
+    }
+
+    /// Testable security validation. `allow_insecure` is the explicit override
+    /// (normally `LIVEN_ALLOW_INSECURE=1`).
+    pub fn validate_security_with(&self, allow_insecure: bool) -> Result<(), String> {
+        if self.security.mode != "none" {
+            return Ok(());
+        }
+        let production = self.server.environment.eq_ignore_ascii_case("production");
+        let non_loopback = !is_loopback_host(&self.server.host);
+        // Production + ZTNA enforces a client certificate on every native
+        // connection, so mode=none is authenticated by mTLS rather than by an
+        // auth key. In development TLS is not engaged, so this exception does
+        // not apply there.
+        let mtls_enforced =
+            production && self.security.ztna.as_ref().is_some_and(|ztna| ztna.enabled);
+        if mtls_enforced {
+            return Ok(());
+        }
+        if production || non_loopback {
+            if allow_insecure {
+                tracing::warn!(
+                    "security.mode=none with environment='{}' host='{}' allowed by explicit override",
+                    self.server.environment,
+                    self.server.host
+                );
+                return Ok(());
+            }
+            return Err(format!(
+                "refusing to start with security.mode='none' when environment='{}' and host='{}'. \
+                 Set security.mode='auth_key', bind to loopback, or set LIVEN_ALLOW_INSECURE=1 to override.",
+                self.server.environment, self.server.host
+            ));
+        }
+        Ok(())
+    }
+
     /// Creates an AppConfig from programmatic values.
     /// Used by the embedded API — no file system access.
     pub fn from_embedded(
@@ -356,7 +421,6 @@ impl AppConfig {
                 data_directory: data_directory.to_string(),
                 max_segment_size_mb: max_segment_mb,
                 sync_mode: "always".to_string(),
-                sync_interval_ms: 100,
             },
             limits: LimitsConfig {
                 max_concurrent_streams: max_streams,
@@ -373,6 +437,17 @@ impl AppConfig {
             },
         }
     }
+}
+
+fn file_mentions(path: &std::path::Path, needle: &str) -> bool {
+    std::fs::read_to_string(path)
+        .map(|content| content.contains(needle))
+        .unwrap_or(false)
+}
+
+fn is_loopback_host(host: &str) -> bool {
+    let host = host.trim().trim_start_matches('[').trim_end_matches(']');
+    matches!(host, "127.0.0.1" | "::1" | "localhost")
 }
 
 fn write_master_key_to_keyfile(path: &str, mkey: &str) -> std::io::Result<()> {

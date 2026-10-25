@@ -212,7 +212,6 @@ async fn test_ztna_development_mode() {
             max_segment_size_mb: 10,
 
             sync_mode: "always".to_string(),
-            sync_interval_ms: 10,
         },
         limits: LimitsConfig {
             max_concurrent_streams: 10,
@@ -290,7 +289,6 @@ async fn test_ztna_production_mode_cleartext_rejected() {
             max_segment_size_mb: 10,
 
             sync_mode: "always".to_string(),
-            sync_interval_ms: 10,
         },
         limits: LimitsConfig {
             max_concurrent_streams: 10,
@@ -408,7 +406,6 @@ async fn test_ztna_production_mode_mtls_success_with_filtering() {
             max_segment_size_mb: 10,
 
             sync_mode: "always".to_string(),
-            sync_interval_ms: 10,
         },
         limits: LimitsConfig {
             max_concurrent_streams: 10,

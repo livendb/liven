@@ -374,6 +374,9 @@ pub async fn run_server(
     config: crate::config::AppConfig,
     run_ui: bool,
 ) -> crate::error::Result<()> {
+    config
+        .validate()
+        .map_err(crate::error::LivenError::Config)?;
     let state = Arc::new(ServerState {
         engine: engine.clone(),
         config: config.clone(),
@@ -545,9 +548,12 @@ pub async fn run_server(
 
     let env = config.server.environment.trim().to_lowercase();
     let ztna_enabled = config.security.ztna.as_ref().is_some_and(|z| z.enabled);
-    let is_dev = env == "development" || env == "test" || !ztna_enabled;
+    // TLS is a production+ZTNA feature. Production without ZTNA may still bind
+    // externally, but only with auth_key mode (enforced by `validate`).
+    let tls_enabled = env == "production" && ztna_enabled;
+    let loopback_only = env == "development" || env == "test";
 
-    let tls_acceptor = if !is_dev {
+    let tls_acceptor = if tls_enabled {
         let ztna_config = config
             .security
             .ztna
@@ -569,7 +575,7 @@ pub async fn run_server(
         None
     };
 
-    let db_addr = if is_dev {
+    let db_addr = if loopback_only {
         format!("127.0.0.1:{}", config.server.db_port)
     } else {
         format!("{}:{}", config.server.host, config.server.db_port)
@@ -612,7 +618,7 @@ pub async fn run_server(
                             tokio::spawn(async move {
                                 let _ = stream.set_nodelay(true);
 
-                                if is_dev {
+                                if !tls_enabled {
                                     let liven_stream = LivenStream::Cleartext(stream);
                                     let is_auth_key =
                                         state_clone.config.security.mode == "auth_key";

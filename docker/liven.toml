@@ -1,0 +1,24 @@
+[server]
+environment = "production"
+host = "0.0.0.0"
+db_port = 43121
+webui_port = 43120
+max_connections = 10000
+broadcast_capacity = 4096
+
+[storage]
+data_directory = "/var/lib/liven"
+max_segment_size_mb = 256
+sync_mode = "always"
+
+[limits]
+max_concurrent_streams = 64
+max_open_file_descriptors = 128
+max_index_ram_mb = 1024
+max_scan_results = 100000
+
+[security]
+mode = "auth_key"
+
+[security.ztna]
+enabled = false
