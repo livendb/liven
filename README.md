@@ -400,7 +400,7 @@ artifact — treat these as relative, not absolute, numbers.
 | **Append** (single)                | **~720 µs**          | Fsync-bound per operation                     |
 | **Append** (batch 500)             | **~690K** ops/s      | 724 µs per batch; wide run-to-run variance    |
 | **Upsert** (new key)               | **~700 µs**          | Same path as append                           |
-| **Upsert** (existing key)          | **~1.4 ms**          | Includes tombstone write                      |
+| **Upsert** (existing key)          | **~700 µs**          | One replacement frame; no tombstone           |
 | **Compaction**                     | **~690–740 µs**      | 500 and 1,000 records                         |
 | **Parse** (simple)                 | **~470 ns**          | Not a bottleneck                              |
 | **Parse** (complex)                | **~1.2 µs**          | Still sub-microsecond                         |
@@ -469,7 +469,7 @@ WebSocket traffic on the web port is always plain HTTP.
 
 ### Master key
 
-Stored in `./liven.key` (mode 0600). Override with `LIVEN_SECURITY_MASTER_KEY` environment variable.
+Stored in `<data_directory>/liven.key` (mode 0600). Override with `LIVEN_SECURITY_MASTER_KEY` environment variable. Keys left at the pre-0.1.4 `./liven.key` location (including `/liven.key`) are still read with a migration warning.
 
 ---
 

@@ -147,7 +147,8 @@ fn bench_upsert(c: &mut Criterion) {
         });
     }
 
-    // Upsert on existing key — measures tombstone + append cost
+    // Upsert on existing key — one active replacement frame supersedes the old
+    // record in the index (no tombstone is written).
     {
         let (engine, _dir) = make_engine("upsert_existing", 50);
         engine
@@ -160,14 +161,12 @@ fn bench_upsert(c: &mut Criterion) {
             .unwrap();
 
         let mut version = 1u64;
-        group.bench_function("existing_key_tombstone_cost", |b| {
+        group.bench_function("existing_key", |b| {
             b.iter(|| {
-                let _ = engine.append("events", "fixed_key", DataValue::Null, true);
-                let _ = black_box(engine.append(
+                let _ = black_box(engine.replace(
                     "events",
                     "fixed_key",
                     DataValue::String(format!(r#"{{"v":{}}}"#, version)),
-                    false,
                 ));
                 version += 1;
             })

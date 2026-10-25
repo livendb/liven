@@ -139,3 +139,41 @@ automatically on push to main/master:
 The CI requires the following secrets:
 
 - `GITHUB_TOKEN` (provided automatically by GitHub Actions)
+
+---
+
+## 0.1.4 manual release checklist (data-loss advisory)
+
+Repo-side work for 0.1.4 is done on `release-0.1.4`; these are the actions that
+require credentials or human review, in order.
+
+1. **Review and merge** `release-0.1.4` into `main` (draft PR #1). The
+   `Build & Verify` matrix only runs cross-builds on push/`workflow_dispatch`;
+   a `workflow_dispatch` run on the branch is the pre-merge evidence.
+2. **Bump the version** to `0.1.4` in `Cargo.toml`, update `Cargo.lock`
+   (`cargo update -p liven --precise 0.1.4` or `cargo check`), commit, tag
+   `v0.1.4`.
+3. **Publish the draft advisory** (`docs/SECURITY-ADVISORY-0.1.4.md`) on the
+   site and as a GitHub Security Advisory (`Repository → Security → Advisories`).
+   File a RUSTSEC advisory for the crates.io releases (the data-loss defects are
+   not a memory-safety issue, so this may be published as an informational
+   advisory pointing at the GitHub one).
+4. **Yank affected crates.io versions**: `0.1.1`, `0.1.2`, `0.1.3` for the
+   torn-tail defect; `0.0.2`–`0.0.9` as well for the compaction ID collision.
+   (`0.1.0` did not truncate, but it also cannot recover stranded frames — yank
+   it for consistency if the advisory names the 0.1.x line.) `cargo yank --vers
+   <v> liven` for each.
+5. **Retag the Docker image**: `docker.yml` runs on push to `main`; confirm
+   `ghcr.io/livendb/liven:latest` now points at the 0.1.4 build and that the
+   image starts with `-v ./data:/var/lib/liven` (the 0.1.4 `WORKDIR` path).
+6. **Update the install script / one-liner** to fetch 0.1.4
+   (`install.sh` resolves the latest release; verify the pinned fallback, if
+   any).
+7. **Add the CHANGELOG entry** from this repository to the release notes and the
+   site changelog page.
+8. **Notify 0.1.x operators** that `--repair` must be run once against
+   directories written by the affected versions and that `*.torn-*.bak`
+   sidecars must be kept until the data is verified.
+
+Do not bump the version, tag, publish, or retag anything from an automated
+change: steps 2–7 are deliberately manual.
