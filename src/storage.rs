@@ -303,37 +303,6 @@ fn decode_frame_payload(
 }
 
 /// Reads only the 26-byte frame headers of a segment and returns the highest
-/// sequence ID among complete frames plus whether any complete frame exists.
-/// Used during recovery to choose the active segment by write recency.
-fn segment_scan_summary(path: &Path) -> crate::error::Result<(u64, bool)> {
-    let mut file = File::open(path).map_err(LivenError::Io)?;
-    let file_len = file.metadata().map_err(LivenError::Io)?.len();
-    let mut offset = 0u64;
-    let mut max_seq = 0u64;
-    let mut has_frame = false;
-    let mut header = [0u8; 26];
-
-    while offset + 26 <= file_len {
-        file.seek(SeekFrom::Start(offset)).map_err(LivenError::Io)?;
-        if file.read_exact(&mut header).is_err() {
-            break;
-        }
-        let seq_id = u64::from_be_bytes([
-            header[0], header[1], header[2], header[3], header[4], header[5], header[6], header[7],
-        ]);
-        let payload_len =
-            u32::from_be_bytes([header[18], header[19], header[20], header[21]]) as u64;
-        if offset + 26 + payload_len > file_len {
-            break;
-        }
-        max_seq = max_seq.max(seq_id);
-        has_frame = true;
-        offset += 26 + payload_len;
-    }
-
-    Ok((max_seq, has_frame))
-}
-
 impl StorageEngine {
     pub fn new<P: AsRef<Path>>(data_dir: P, max_segment_size: u64) -> crate::error::Result<Self> {
         Self::new_with_recovery_mode(data_dir, max_segment_size, RecoveryMode::Default)
@@ -734,40 +703,28 @@ impl StorageEngine {
 
         segments.sort_by_key(|a| a.0);
 
-        // Determine which normal segment was the write target before the crash.
-        // It is *not* simply the highest file ID: compaction output lives in a
-        // reserved high range and must never become the active segment. Among
-        // normal segments, the active one is the newest rollover target if that
-        // file is empty (a crash immediately after rollover), otherwise the
-        // segment containing the highest sequence ID (write recency).
+        // Track the id ceilings up front (no file I/O). The active normal
+        // segment is chosen *after* the single replay pass below using the
+        // highest complete sequence id per segment, so a segment file is never
+        // scanned twice just to pick the write target. Compaction output lives
+        // in a reserved high range and must never become active.
         let mut max_normal_segment_id = 0;
         let mut max_segment_id = 0;
-        let mut normal_summaries: Vec<(u64, u64, bool)> = Vec::new();
-        for (segment_id, path) in &segments {
+        for (segment_id, _) in &segments {
             max_segment_id = max_segment_id.max(*segment_id);
             if *segment_id < COMPACTION_ID_BASE {
                 max_normal_segment_id = max_normal_segment_id.max(*segment_id);
-                let (max_seq, has_frame) = segment_scan_summary(path)?;
-                normal_summaries.push((*segment_id, max_seq, has_frame));
             }
         }
         self.max_normal_segment_id = max_normal_segment_id;
         self.max_segment_id = max_segment_id;
 
-        let highest_normal = normal_summaries
-            .iter()
-            .max_by_key(|(segment_id, _, _)| *segment_id);
-        let active_id = match highest_normal {
-            // The newest normal file exists but holds no complete frame: it is
-            // the rollover target and must be kept as the active file.
-            Some((segment_id, _, false)) => *segment_id,
-            _ => normal_summaries
-                .iter()
-                .filter(|(_, _, has_frame)| *has_frame)
-                .max_by_key(|(segment_id, max_seq, _)| (*max_seq, *segment_id))
-                .map(|(segment_id, _, _)| *segment_id)
-                .unwrap_or(1),
-        };
+        // Per-normal-segment summary collected during the single replay pass:
+        // (segment_id, highest complete seq, has at least one complete frame).
+        let mut normal_summaries: Vec<(u64, u64, bool)> = Vec::new();
+        // Tears are deferred until the active segment is known; this is what
+        // lets the replay pass be the only pass over each segment file.
+        let mut deferred_tears: Vec<DeferredTear> = Vec::new();
 
         let mut highest_seq = 0;
         // Highest sequence ID seen for each key during this replay, including
@@ -778,60 +735,45 @@ impl StorageEngine {
         let mut report = RecoveryReport::default();
 
         for (segment_id, path) in &segments {
-            // Only the active normal segment may have a torn tail truncated.
-            // Compacted segments are always inactive.
-            let is_last = *segment_id == active_id;
-
             let mut file = File::open(path).map_err(LivenError::Io)?;
             self.lock_segment_with_timeout(&mut file, *segment_id, path)?;
 
             let file_len = file.metadata().map_err(LivenError::Io)?.len();
             if file_len == 0 {
                 file.unlock().map_err(LivenError::Io)?;
+                if *segment_id < COMPACTION_ID_BASE {
+                    normal_summaries.push((*segment_id, 0, false));
+                }
                 continue;
             }
             let mut offset = 0;
             let mut header_buf = [0u8; 26];
-            let mut segment_corrupted = false;
+            // Highest complete seq in this segment (header + payload fits).
+            // Mirrors the removed `segment_scan_summary` and feeds active-id
+            // selection; it intentionally ignores CRC/decode failures.
+            let mut seg_max_seq = 0u64;
+            let mut seg_has_frame = false;
+            // Highest successfully-decoded seq before a tear, used for resync.
             let mut max_seq_in_prefix = 0u64;
-            // Physical truncation target for a torn tail. Recovery must shrink the
-            // file: otherwise new appends land after the garbage and the next
-            // restart stops at the torn frame and discards them.
-            let mut truncate_to: Option<u64> = None;
-            let mut truncate_marker: Option<PathBuf> = None;
+            // True once a tear is recorded for this segment; suppresses the
+            // trailing-byte check and prevents a second tear being recorded.
+            let mut segment_torn = false;
 
             while offset + 26 <= file_len {
                 file.seek(SeekFrom::Start(offset)).map_err(LivenError::Io)?;
                 if file.read_exact(&mut header_buf).is_err() {
                     // Partial header at end of file — torn write.
                     if offset < file_len {
-                        match self.handle_tear(
-                            *segment_id,
-                            path,
-                            &file,
+                        deferred_tears.push(DeferredTear {
+                            segment_id: *segment_id,
                             file_len,
                             offset,
                             max_seq_in_prefix,
-                            is_last,
-                            TearKind::Header,
-                            &mut report,
-                        )? {
-                            TearDecision::Truncate { offset: t, marker } => {
-                                warn!(
-                                    "Torn header at offset {} in segment {} ({} bytes discarded). Truncating to {}.",
-                                    offset,
-                                    segment_id,
-                                    file_len - offset,
-                                    t
-                                );
-                                report
-                                    .truncated_segments
-                                    .push((*segment_id, t, file_len - t));
-                                truncate_to = Some(t);
-                                truncate_marker = marker;
-                            }
-                            TearDecision::SkipRemainder => {}
-                        }
+                            kind: TearKind::Header,
+                            declared_payload_len: 0,
+                            parse_error: None,
+                        });
+                        segment_torn = true;
                     }
                     break;
                 }
@@ -871,45 +813,25 @@ impl StorageEngine {
                     header_buf[25],
                 ]);
 
-                // Incomplete payload — torn write
+                // Incomplete payload — torn write.
                 if offset + 26 + payload_len > file_len {
-                    match self.handle_tear(
-                        *segment_id,
-                        path,
-                        &file,
+                    deferred_tears.push(DeferredTear {
+                        segment_id: *segment_id,
                         file_len,
                         offset,
                         max_seq_in_prefix,
-                        is_last,
-                        TearKind::Payload,
-                        &mut report,
-                    )? {
-                        TearDecision::Truncate { offset: t, marker } => {
-                            warn!(
-                                "Torn payload at offset {} in segment {} (declared {} bytes, {} available). Truncating to {}.",
-                                offset,
-                                segment_id,
-                                payload_len,
-                                file_len.saturating_sub(offset + 26),
-                                t
-                            );
-                            report
-                                .truncated_segments
-                                .push((*segment_id, t, file_len - t));
-                            truncate_to = Some(t);
-                            truncate_marker = marker;
-                        }
-                        TearDecision::SkipRemainder => {
-                            warn!(
-                                "Incomplete payload in inactive segment {} at offset {}. Skipping remainder.",
-                                segment_id, offset
-                            );
-                            report.skipped_segments.push((*segment_id, offset, 0));
-                            report.had_issues = true;
-                        }
-                    }
+                        kind: TearKind::Payload,
+                        declared_payload_len: payload_len,
+                        parse_error: None,
+                    });
+                    segment_torn = true;
                     break;
                 }
+
+                // A complete frame (header and payload both fit). Count it for
+                // active-id selection before any CRC/decode validation.
+                seg_max_seq = seg_max_seq.max(seq_id);
+                seg_has_frame = true;
 
                 // Read payload and verify CRC
                 let mut payload_buf = vec![0u8; payload_len as usize];
@@ -917,49 +839,16 @@ impl StorageEngine {
 
                 let actual_crc = crc32fast::hash(&payload_buf);
                 if actual_crc != declared_crc {
-                    self.maybe_backup_for_repair(path, *segment_id, &mut report)?;
-                    match self.handle_tear(
-                        *segment_id,
-                        path,
-                        &file,
+                    deferred_tears.push(DeferredTear {
+                        segment_id: *segment_id,
                         file_len,
                         offset,
                         max_seq_in_prefix,
-                        is_last,
-                        TearKind::Crc,
-                        &mut report,
-                    )? {
-                        TearDecision::Truncate { offset: t, marker } => {
-                            warn!(
-                                "CRC mismatch at offset {} in segment {} - torn write assumed. Truncating to offset {} ({} bytes discarded).",
-                                offset,
-                                segment_id,
-                                t,
-                                file_len - t
-                            );
-                            report
-                                .truncated_segments
-                                .push((*segment_id, t, file_len - t));
-                            truncate_to = Some(t);
-                            truncate_marker = marker;
-                        }
-                        TearDecision::SkipRemainder => {
-                            let approx_keys = self
-                                .skipmap
-                                .iter()
-                                .filter(|e| e.value().segment_id == *segment_id)
-                                .count();
-                            warn!(
-                                "CRC mismatch in inactive segment {} at offset {} - skipping segment (~{} keys potentially affected).",
-                                segment_id, offset, approx_keys
-                            );
-                            report
-                                .skipped_segments
-                                .push((*segment_id, offset, approx_keys));
-                            report.had_issues = true;
-                            segment_corrupted = true;
-                        }
-                    }
+                        kind: TearKind::Crc,
+                        declared_payload_len: 0,
+                        parse_error: None,
+                    });
+                    segment_torn = true;
                     break;
                 }
 
@@ -1069,55 +958,16 @@ impl StorageEngine {
                         }
                     }
                     Err(e) => {
-                        self.maybe_backup_for_repair(path, *segment_id, &mut report)?;
-                        if self.recovery_mode == RecoveryMode::Strict {
-                            error!(
-                                "Strict mode: unparseable payload in segment {} at offset {}: {}",
-                                segment_id, offset, e
-                            );
-                        }
-                        match self.handle_tear(
-                            *segment_id,
-                            path,
-                            &file,
+                        deferred_tears.push(DeferredTear {
+                            segment_id: *segment_id,
                             file_len,
                             offset,
                             max_seq_in_prefix,
-                            is_last,
-                            TearKind::Parse,
-                            &mut report,
-                        )? {
-                            TearDecision::Truncate { offset: t, marker } => {
-                                warn!(
-                                    "Unparseable payload at offset {} in segment {} - torn write assumed. Truncating to {} ({} bytes discarded).",
-                                    offset,
-                                    segment_id,
-                                    t,
-                                    file_len - t
-                                );
-                                report
-                                    .truncated_segments
-                                    .push((*segment_id, t, file_len - t));
-                                truncate_to = Some(t);
-                                truncate_marker = marker;
-                            }
-                            TearDecision::SkipRemainder => {
-                                let approx_keys = self
-                                    .skipmap
-                                    .iter()
-                                    .filter(|entry| entry.value().segment_id == *segment_id)
-                                    .count();
-                                warn!(
-                                    "Unparseable payload in inactive segment {} at offset {} - skipping segment (~{} keys affected).",
-                                    segment_id, offset, approx_keys
-                                );
-                                report
-                                    .skipped_segments
-                                    .push((*segment_id, offset, approx_keys));
-                                report.had_issues = true;
-                                segment_corrupted = true;
-                            }
-                        }
+                            kind: TearKind::Parse,
+                            declared_payload_len: 0,
+                            parse_error: Some(e.to_string()),
+                        });
+                        segment_torn = true;
                         break;
                     }
                 }
@@ -1128,78 +978,44 @@ impl StorageEngine {
 
             file.unlock().map_err(LivenError::Io)?;
 
-            // If this segment was corrupted mid-file, evict skipmap entries
-            // that may have been added from earlier frames in this segment.
-            if segment_corrupted {
-                let keys_to_remove: Vec<String> = self
-                    .skipmap
-                    .iter()
-                    .filter(|e| e.value().segment_id == *segment_id)
-                    .map(|e| e.key().clone())
-                    .collect();
-                for key in &keys_to_remove {
-                    if self.skipmap.remove(key).is_some() {
-                        let overhead = primary_charge(key);
-                        self.index_ram_bytes.fetch_sub(overhead, Ordering::SeqCst);
-                    }
-                }
-            }
-
-            // Detect trailing bytes after last complete frame (torn write
-            // that leaves a partial header between frame boundaries).
-            if truncate_to.is_none() && !segment_corrupted && is_last && offset < file_len {
-                match self.handle_tear(
-                    *segment_id,
-                    path,
-                    &file,
+            // Detect trailing bytes after the last complete frame (a torn write
+            // that leaves a partial header between frame boundaries). Only the
+            // active segment is truncated; the decision is deferred below.
+            if !segment_torn && offset < file_len {
+                deferred_tears.push(DeferredTear {
+                    segment_id: *segment_id,
                     file_len,
                     offset,
                     max_seq_in_prefix,
-                    is_last,
-                    TearKind::Trailing,
-                    &mut report,
-                )? {
-                    TearDecision::Truncate { offset: t, marker } => {
-                        warn!(
-                            "Trailing bytes after last frame in segment {} (offset {}, {} bytes discarded). Truncating to {}.",
-                            segment_id,
-                            offset,
-                            file_len - offset,
-                            t
-                        );
-                        report
-                            .truncated_segments
-                            .push((*segment_id, t, file_len - t));
-                        truncate_to = Some(t);
-                        truncate_marker = marker;
-                    }
-                    TearDecision::SkipRemainder => {}
-                }
+                    kind: TearKind::Trailing,
+                    declared_payload_len: 0,
+                    parse_error: None,
+                });
             }
 
-            // Shrink the file to the last complete frame. Without this, the next
-            // append lands after the torn bytes and the *following* recovery stops
-            // at the torn frame and silently drops every record after it.
-            if let Some(target) = truncate_to {
-                let w = OpenOptions::new()
-                    .write(true)
-                    .open(path)
-                    .map_err(LivenError::Io)?;
-                w.set_len(target).map_err(LivenError::Io)?;
-                w.sync_all().map_err(LivenError::Io)?;
-                pl_truncate_sync(path, target);
-                test_crash_point("repair_after_truncate");
-                info!(
-                    "Truncated segment {} to {} bytes (torn tail removed)",
-                    segment_id, target
-                );
-                if let Some(marker) = truncate_marker.take() {
-                    pl_unlink(&marker);
-                    let _ = fs::remove_file(&marker);
-                    sync_data_dir(&self.data_dir).map_err(LivenError::Io)?;
-                }
+            if *segment_id < COMPACTION_ID_BASE {
+                normal_summaries.push((*segment_id, seg_max_seq, seg_has_frame));
             }
         }
+
+        // Choose the active normal segment with the exact pre-pass rules: the
+        // newest normal file wins when it holds no complete frame (a crash
+        // immediately after rollover), otherwise the segment with the highest
+        // complete sequence id (write recency) — never by max file id.
+        let highest_normal = normal_summaries
+            .iter()
+            .max_by_key(|(segment_id, _, _)| *segment_id);
+        let active_id = match highest_normal {
+            Some((segment_id, _, false)) => *segment_id,
+            _ => normal_summaries
+                .iter()
+                .filter(|(_, _, has_frame)| *has_frame)
+                .max_by_key(|(segment_id, max_seq, _)| (*max_seq, *segment_id))
+                .map(|(segment_id, _, _)| *segment_id)
+                .unwrap_or(1),
+        };
+
+        self.process_deferred_tears(deferred_tears, active_id, &mut report)?;
 
         self.current_sequence_id
             .store(highest_seq + 1, Ordering::SeqCst);
@@ -1275,6 +1091,161 @@ impl StorageEngine {
 
         self.recovery_report = Some(report);
 
+        Ok(())
+    }
+
+    /// Applies deferred tear decisions after the active segment has been chosen
+    /// by the single replay pass. This replaces the inline tear handling that
+    /// previously required a pre-pass to know the active segment up front.
+    fn process_deferred_tears(
+        &mut self,
+        deferred_tears: Vec<DeferredTear>,
+        active_id: u64,
+        report: &mut RecoveryReport,
+    ) -> crate::error::Result<()> {
+        for tear in deferred_tears {
+            // Leftover bytes in an inactive segment are ignored, not truncated.
+            if tear.kind == TearKind::Trailing && tear.segment_id != active_id {
+                continue;
+            }
+            let is_active = tear.segment_id == active_id;
+            let path = self.segment_path(tear.segment_id);
+            let file = File::open(&path).map_err(LivenError::Io)?;
+
+            if matches!(tear.kind, TearKind::Crc | TearKind::Parse) {
+                self.maybe_backup_for_repair(&path, tear.segment_id, report)?;
+            }
+            if tear.kind == TearKind::Parse && self.recovery_mode == RecoveryMode::Strict {
+                error!(
+                    "Strict mode: unparseable payload in segment {} at offset {}: {}",
+                    tear.segment_id,
+                    tear.offset,
+                    tear.parse_error.as_deref().unwrap_or("")
+                );
+            }
+
+            let mut segment_corrupted = false;
+            let mut truncate_to: Option<u64> = None;
+            let mut truncate_marker: Option<PathBuf> = None;
+
+            match self.handle_tear(
+                tear.segment_id,
+                &path,
+                &file,
+                tear.file_len,
+                tear.offset,
+                tear.max_seq_in_prefix,
+                is_active,
+                tear.kind,
+                report,
+            )? {
+                TearDecision::Truncate { offset: t, marker } => {
+                    match tear.kind {
+                        TearKind::Header => warn!(
+                            "Torn header at offset {} in segment {} ({} bytes discarded). Truncating to {}.",
+                            tear.offset, tear.segment_id, tear.file_len - tear.offset, t
+                        ),
+                        TearKind::Payload => warn!(
+                            "Torn payload at offset {} in segment {} (declared {} bytes, {} available). Truncating to {}.",
+                            tear.offset,
+                            tear.segment_id,
+                            tear.declared_payload_len,
+                            tear.file_len.saturating_sub(tear.offset + 26),
+                            t
+                        ),
+                        TearKind::Crc => warn!(
+                            "CRC mismatch at offset {} in segment {} - torn write assumed. Truncating to offset {} ({} bytes discarded).",
+                            tear.offset, tear.segment_id, t, tear.file_len - t
+                        ),
+                        TearKind::Parse => warn!(
+                            "Unparseable payload at offset {} in segment {} - torn write assumed. Truncating to {} ({} bytes discarded).",
+                            tear.offset, tear.segment_id, t, tear.file_len - t
+                        ),
+                        TearKind::Trailing => warn!(
+                            "Trailing bytes after last frame in segment {} (offset {}, {} bytes discarded). Truncating to {}.",
+                            tear.segment_id, tear.offset, tear.file_len - tear.offset, t
+                        ),
+                    }
+                    report
+                        .truncated_segments
+                        .push((tear.segment_id, t, tear.file_len - t));
+                    truncate_to = Some(t);
+                    truncate_marker = marker;
+                }
+                TearDecision::SkipRemainder => match tear.kind {
+                    TearKind::Header => {}
+                    TearKind::Payload => {
+                        warn!(
+                            "Incomplete payload in inactive segment {} at offset {}. Skipping remainder.",
+                            tear.segment_id, tear.offset
+                        );
+                        report
+                            .skipped_segments
+                            .push((tear.segment_id, tear.offset, 0));
+                        report.had_issues = true;
+                    }
+                    TearKind::Crc | TearKind::Parse => {
+                        let approx_keys = self
+                            .skipmap
+                            .iter()
+                            .filter(|e| e.value().segment_id == tear.segment_id)
+                            .count();
+                        if tear.kind == TearKind::Crc {
+                            warn!(
+                                "CRC mismatch in inactive segment {} at offset {} - skipping segment (~{} keys potentially affected).",
+                                tear.segment_id, tear.offset, approx_keys
+                            );
+                        } else {
+                            warn!(
+                                "Unparseable payload in inactive segment {} at offset {} - skipping segment (~{} keys affected).",
+                                tear.segment_id, tear.offset, approx_keys
+                            );
+                        }
+                        report
+                            .skipped_segments
+                            .push((tear.segment_id, tear.offset, approx_keys));
+                        report.had_issues = true;
+                        segment_corrupted = true;
+                    }
+                    TearKind::Trailing => {}
+                },
+            }
+
+            if segment_corrupted {
+                let keys_to_remove: Vec<String> = self
+                    .skipmap
+                    .iter()
+                    .filter(|e| e.value().segment_id == tear.segment_id)
+                    .map(|e| e.key().clone())
+                    .collect();
+                for key in &keys_to_remove {
+                    if self.skipmap.remove(key).is_some() {
+                        let overhead = primary_charge(key);
+                        self.index_ram_bytes.fetch_sub(overhead, Ordering::SeqCst);
+                    }
+                }
+            }
+
+            if let Some(target) = truncate_to {
+                let w = OpenOptions::new()
+                    .write(true)
+                    .open(&path)
+                    .map_err(LivenError::Io)?;
+                w.set_len(target).map_err(LivenError::Io)?;
+                w.sync_all().map_err(LivenError::Io)?;
+                pl_truncate_sync(&path, target);
+                test_crash_point("repair_after_truncate");
+                info!(
+                    "Truncated segment {} to {} bytes (torn tail removed)",
+                    tear.segment_id, target
+                );
+                if let Some(marker) = truncate_marker.take() {
+                    pl_unlink(&marker);
+                    let _ = fs::remove_file(&marker);
+                    sync_data_dir(&self.data_dir).map_err(LivenError::Io)?;
+                }
+            }
+        }
         Ok(())
     }
 
@@ -2702,6 +2673,19 @@ enum TearDecision {
     /// Leave the file untouched and stop replaying this segment (inactive
     /// segments only, matching pre-salvage behavior).
     SkipRemainder,
+}
+
+/// A tear recorded during the single replay pass and resolved after the active
+/// segment is known (see `process_deferred_tears`). Keeping the tear decision
+/// out of the replay loop is what lets recovery read each segment only once.
+struct DeferredTear {
+    segment_id: u64,
+    file_len: u64,
+    offset: u64,
+    max_seq_in_prefix: u64,
+    kind: TearKind,
+    declared_payload_len: u64,
+    parse_error: Option<String>,
 }
 
 /// Hard ceiling for a salvaged frame payload. A garbage header must not make
