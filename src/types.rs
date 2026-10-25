@@ -525,6 +525,10 @@ impl DataValue {
 pub struct LogPointer {
     pub segment_id: u64,
     pub file_offset: u64,
+    /// Sequence id of the frame this pointer refers to. Recovery merges
+    /// segments by sequence id, because a compacted segment has a higher
+    /// segment id than the writes that followed it.
+    pub seq_id: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

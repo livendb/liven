@@ -99,6 +99,12 @@ impl PositionalReader for File {
     }
 }
 
+/// First segment ID reserved for compaction output. Normal segment rollovers must
+/// stay strictly below this value; compaction output must be at or above it.
+/// This makes the two ID spaces structurally disjoint instead of relying on
+/// counter seeding.
+const COMPACTION_ID_BASE: u64 = u64::MAX / 2;
+
 pub struct StorageEngine {
     data_dir: PathBuf,
     max_segment_size: u64,
@@ -160,6 +166,13 @@ pub struct StorageEngine {
     /// Populated after `recover()` completes; contains details of any
     /// truncation or segment-skipping that occurred.
     pub recovery_report: Option<RecoveryReport>,
+    /// Highest segment ID observed in the normal (non-compaction) range.
+    /// Used to seed the rollover counter without ever entering the reserved
+    /// compaction range.
+    max_normal_segment_id: u64,
+    /// Highest segment ID observed across both ranges. Used only to seed the
+    /// compaction counter so a leftover compacted file is never reused.
+    max_segment_id: u64,
 }
 
 use std::cell::RefCell;
@@ -216,6 +229,38 @@ fn decode_frame_payload(
         key: stream_key,
         value,
     })
+}
+
+/// Reads only the 26-byte frame headers of a segment and returns the highest
+/// sequence ID among complete frames plus whether any complete frame exists.
+/// Used during recovery to choose the active segment by write recency.
+fn segment_scan_summary(path: &Path) -> crate::error::Result<(u64, bool)> {
+    let mut file = File::open(path).map_err(LivenError::Io)?;
+    let file_len = file.metadata().map_err(LivenError::Io)?.len();
+    let mut offset = 0u64;
+    let mut max_seq = 0u64;
+    let mut has_frame = false;
+    let mut header = [0u8; 26];
+
+    while offset + 26 <= file_len {
+        file.seek(SeekFrom::Start(offset)).map_err(LivenError::Io)?;
+        if file.read_exact(&mut header).is_err() {
+            break;
+        }
+        let seq_id = u64::from_be_bytes([
+            header[0], header[1], header[2], header[3], header[4], header[5], header[6], header[7],
+        ]);
+        let payload_len =
+            u32::from_be_bytes([header[18], header[19], header[20], header[21]]) as u64;
+        if offset + 26 + payload_len > file_len {
+            break;
+        }
+        max_seq = max_seq.max(seq_id);
+        has_frame = true;
+        offset += 26 + payload_len;
+    }
+
+    Ok((max_seq, has_frame))
 }
 
 impl StorageEngine {
@@ -327,18 +372,38 @@ impl StorageEngine {
             recovery_mode,
             lock_timeout_secs: 5,
             recovery_report: None,
+            max_normal_segment_id: 0,
+            max_segment_id: 0,
         };
 
         engine.recover()?;
 
-        // Initialize segment_id_counter to max(existing_segment_ids) + 1.
-        // The recover() method already identifies the highest segment ID, so
-        // we seed the counter from active_segment_id + 1 so the next rollover
-        // produces a strictly greater ID.
-        let max_seen_id = engine.active_segment_id.load(Ordering::SeqCst);
+        // Normal rollover IDs and compaction IDs live in disjoint ranges.
+        // Seed the rollover counter from the highest *normal* segment only; a
+        // compacted segment must never advance it into the reserved range.
+        let active_id = engine.active_segment_id.load(Ordering::SeqCst);
+        let next_normal = engine
+            .max_normal_segment_id
+            .max(active_id)
+            .saturating_add(1);
+        if next_normal >= COMPACTION_ID_BASE {
+            return Err(LivenError::Internal(
+                "normal segment ID space exhausted".to_string(),
+            ));
+        }
         engine
             .segment_id_counter
-            .store(max_seen_id + 1, Ordering::SeqCst);
+            .store(next_normal.max(1), Ordering::SeqCst);
+        // Seed the compaction counter above any existing compacted file so a
+        // retry after a crash never reuses an ID and `create_new` never hits a
+        // stale leftover.
+        engine.compaction_counter.store(
+            engine
+                .max_segment_id
+                .saturating_add(1)
+                .max(COMPACTION_ID_BASE),
+            Ordering::SeqCst,
+        );
 
         let flusher_data_dir = engine.data_dir.clone();
         let flusher_max_size = engine.max_segment_size;
@@ -488,6 +553,8 @@ impl StorageEngine {
             recovery_mode: mode,
             lock_timeout_secs: 5,
             recovery_report: None,
+            max_normal_segment_id: 0,
+            max_segment_id: 0,
         };
 
         engine.recover()?;
@@ -497,6 +564,12 @@ impl StorageEngine {
     /// Gets the next monotonic sequence ID
     pub fn next_sequence_id(&self) -> u64 {
         self.current_sequence_id.load(Ordering::SeqCst)
+    }
+
+    /// Returns the segment ID currently receiving writes. Normal rollover IDs
+    /// are always below `u64::MAX / 2`; compaction output is always above it.
+    pub fn active_segment_id(&self) -> u64 {
+        self.active_segment_id.load(Ordering::SeqCst)
     }
 
     /// Helper to get a segment path from its ID
@@ -545,16 +618,53 @@ impl StorageEngine {
 
         segments.sort_by_key(|a| a.0);
 
-        // Determine the last (highest-ID) segment for torn-write detection.
-        let last_segment_id = segments.last().map(|(id, _)| *id);
-        let mut highest_seq = 0;
-        let mut active_id = 1;
+        // Determine which normal segment was the write target before the crash.
+        // It is *not* simply the highest file ID: compaction output lives in a
+        // reserved high range and must never become the active segment. Among
+        // normal segments, the active one is the newest rollover target if that
+        // file is empty (a crash immediately after rollover), otherwise the
+        // segment containing the highest sequence ID (write recency).
+        let mut max_normal_segment_id = 0;
+        let mut max_segment_id = 0;
+        let mut normal_summaries: Vec<(u64, u64, bool)> = Vec::new();
+        for (segment_id, path) in &segments {
+            max_segment_id = max_segment_id.max(*segment_id);
+            if *segment_id < COMPACTION_ID_BASE {
+                max_normal_segment_id = max_normal_segment_id.max(*segment_id);
+                let (max_seq, has_frame) = segment_scan_summary(path)?;
+                normal_summaries.push((*segment_id, max_seq, has_frame));
+            }
+        }
+        self.max_normal_segment_id = max_normal_segment_id;
+        self.max_segment_id = max_segment_id;
 
+        let highest_normal = normal_summaries
+            .iter()
+            .max_by_key(|(segment_id, _, _)| *segment_id);
+        let active_id = match highest_normal {
+            // The newest normal file exists but holds no complete frame: it is
+            // the rollover target and must be kept as the active file.
+            Some((segment_id, _, false)) => *segment_id,
+            _ => normal_summaries
+                .iter()
+                .filter(|(_, _, has_frame)| *has_frame)
+                .max_by_key(|(segment_id, max_seq, _)| (*max_seq, *segment_id))
+                .map(|(segment_id, _, _)| *segment_id)
+                .unwrap_or(1),
+        };
+
+        let mut highest_seq = 0;
+        // Highest sequence ID seen for each key during this replay, including
+        // tombstones. A tombstone removes the SkipMap entry, so without this
+        // watermark an older frame replayed later (for example from a compacted
+        // segment) would see `current = None` and resurrect a deleted key.
+        let mut seq_watermarks: HashMap<String, u64> = HashMap::new();
         let mut report = RecoveryReport::default();
 
         for (segment_id, path) in &segments {
-            active_id = *segment_id;
-            let is_last = Some(*segment_id) == last_segment_id;
+            // Only the active normal segment may have a torn tail truncated.
+            // Compacted segments are always inactive.
+            let is_last = *segment_id == active_id;
 
             let mut file = File::open(path).map_err(LivenError::Io)?;
             self.lock_segment_with_timeout(&mut file, *segment_id, path)?;
@@ -568,6 +678,10 @@ impl StorageEngine {
             let mut header_buf = [0u8; 26];
             let mut segment_corrupted = false;
             let mut last_good_offset = 0u64;
+            // Physical truncation target for a torn tail. Recovery must shrink the
+            // file: otherwise new appends land after the garbage and the next
+            // restart stops at the torn frame and discards them.
+            let mut truncate_to: Option<u64> = None;
 
             while offset + 26 <= file_len {
                 file.seek(SeekFrom::Start(offset)).map_err(LivenError::Io)?;
@@ -583,6 +697,7 @@ impl StorageEngine {
                             .truncated_segments
                             .push((*segment_id, offset, discarded));
                         report.had_issues = true;
+                        truncate_to = Some(offset);
                     }
                     break;
                 }
@@ -637,6 +752,7 @@ impl StorageEngine {
                             .truncated_segments
                             .push((*segment_id, offset, discarded));
                         report.had_issues = true;
+                        truncate_to = Some(offset);
                     } else {
                         warn!(
                             "Incomplete payload in inactive segment {} at offset {}. Skipping remainder.",
@@ -676,6 +792,7 @@ impl StorageEngine {
                             .truncated_segments
                             .push((*segment_id, last_good_offset, discarded));
                         report.had_issues = true;
+                        truncate_to = Some(last_good_offset);
                         break;
                     } else {
                         // Mid-file corruption in inactive segment
@@ -728,13 +845,30 @@ impl StorageEngine {
                         ]);
 
                         let node_overhead = compound_key.len() as u64 + 64;
+
+                        // Segments are replayed in ascending segment-id order, but a
+                        // compacted segment carries an id in the reserved high range
+                        // while holding *older* sequence ids. Merge by sequence id so a
+                        // stale compacted frame can never overwrite a newer write, and an
+                        // old tombstone can never resurrect or delete a newer record.
+                        let current_seq = seq_watermarks
+                            .get(&compound_key)
+                            .copied()
+                            .or_else(|| self.skipmap.get(&compound_key).map(|e| e.value().seq_id));
+                        let is_newer = current_seq.is_none_or(|cur| seq_id > cur);
+                        if is_newer {
+                            seq_watermarks.insert(compound_key.clone(), seq_id);
+                        }
+
                         if flags & 0x02 != 0 {
                             // Tombstone — drop the timestamp-index entry, then remove
                             // from skipmap only; do not add stream to streams_set
-                            self.prune_timestamp_index(stream_name, key);
-                            if self.skipmap.remove(&compound_key).is_some() {
-                                self.index_ram_bytes
-                                    .fetch_sub(node_overhead, Ordering::SeqCst);
+                            if is_newer {
+                                self.prune_timestamp_index(stream_name, key);
+                                if self.skipmap.remove(&compound_key).is_some() {
+                                    self.index_ram_bytes
+                                        .fetch_sub(node_overhead, Ordering::SeqCst);
+                                }
                             }
                         } else if flags & 0x01 != 0 {
                             // Active — register the stream in streams_set and check limit
@@ -747,34 +881,37 @@ impl StorageEngine {
                                     });
                                 }
                             }
-                            let pointer = LogPointer {
-                                segment_id: *segment_id,
-                                file_offset: offset,
-                            };
-                            let existed = self.skipmap.contains_key(&compound_key);
-                            self.skipmap.insert(compound_key, pointer);
-                            if !existed {
-                                let current_ram = self
-                                    .index_ram_bytes
-                                    .fetch_add(node_overhead, Ordering::SeqCst)
-                                    + node_overhead;
-                                if current_ram > self.max_index_ram_bytes {
-                                    return Err(create_index_ram_limit_error(
-                                        self.max_index_ram_bytes,
-                                        current_ram,
-                                    ));
+                            if is_newer {
+                                let pointer = LogPointer {
+                                    segment_id: *segment_id,
+                                    file_offset: offset,
+                                    seq_id,
+                                };
+                                let existed = self.skipmap.contains_key(&compound_key);
+                                self.skipmap.insert(compound_key, pointer);
+                                if !existed {
+                                    let current_ram = self
+                                        .index_ram_bytes
+                                        .fetch_add(node_overhead, Ordering::SeqCst)
+                                        + node_overhead;
+                                    if current_ram > self.max_index_ram_bytes {
+                                        return Err(create_index_ram_limit_error(
+                                            self.max_index_ram_bytes,
+                                            current_ram,
+                                        ));
+                                    }
                                 }
-                            }
 
-                            // Populate timestamp index
-                            let mut ts_idx = self.timestamp_indexes.lock().unwrap();
-                            let entry =
-                                ts_idx.entry(stream_name.to_string()).or_insert_with(|| {
-                                    Arc::new(timestamp_index::TimestampIndex::new())
-                                });
-                            Arc::get_mut(entry)
-                                .unwrap()
-                                .insert(_timestamp, seq_id, pointer);
+                                // Populate timestamp index
+                                let mut ts_idx = self.timestamp_indexes.lock().unwrap();
+                                let entry =
+                                    ts_idx.entry(stream_name.to_string()).or_insert_with(|| {
+                                        Arc::new(timestamp_index::TimestampIndex::new())
+                                    });
+                                Arc::get_mut(entry)
+                                    .unwrap()
+                                    .insert(_timestamp, seq_id, pointer);
+                            }
                         }
                     }
                     Err(e) => {
@@ -798,6 +935,7 @@ impl StorageEngine {
                                 discarded,
                             ));
                             report.had_issues = true;
+                            truncate_to = Some(last_good_offset);
                             break;
                         } else {
                             if self.recovery_mode == RecoveryMode::Strict {
@@ -858,10 +996,27 @@ impl StorageEngine {
                     "Trailing bytes after last frame in segment {} (offset {}, {} bytes discarded). Truncating.",
                     segment_id, offset, discarded
                 );
+                truncate_to = Some(offset);
                 report
                     .truncated_segments
                     .push((*segment_id, offset, discarded));
                 report.had_issues = true;
+            }
+
+            // Shrink the file to the last complete frame. Without this, the next
+            // append lands after the torn bytes and the *following* recovery stops
+            // at the torn frame and silently drops every record after it.
+            if let Some(target) = truncate_to {
+                let w = OpenOptions::new()
+                    .write(true)
+                    .open(path)
+                    .map_err(LivenError::Io)?;
+                w.set_len(target).map_err(LivenError::Io)?;
+                w.sync_all().map_err(LivenError::Io)?;
+                info!(
+                    "Truncated segment {} to {} bytes (torn tail removed)",
+                    segment_id, target
+                );
             }
         }
 
@@ -1631,11 +1786,12 @@ impl StorageEngine {
                 && path.extension().and_then(|s| s.to_str()) == Some("liven")
                 && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
                 && let Ok(segment_id) = stem.parse::<u64>()
-                && segment_id < active_id
+                && segment_id != active_id
             {
                 inactive_segments.push((segment_id, path));
             }
         }
+        inactive_segments.sort_by_key(|(segment_id, _)| *segment_id);
 
         if inactive_segments.is_empty() {
             info!("No inactive segments available for compaction.");
@@ -1646,7 +1802,7 @@ impl StorageEngine {
         let mut active_pointers_to_rewrite = Vec::new();
         for entry in self.skipmap.iter() {
             let pointer = *entry.value();
-            if pointer.segment_id < active_id {
+            if pointer.segment_id != active_id {
                 active_pointers_to_rewrite.push((entry.key().clone(), pointer));
             }
         }
@@ -1660,21 +1816,32 @@ impl StorageEngine {
         // To avoid conflicts, we use a dedicated compaction counter that lives in a reserved
         // range (starting at u64::MAX / 2) that sequence IDs will never reach during normal operation.
         let compacted_segment_id = self.compaction_counter.fetch_add(1, Ordering::SeqCst);
+        if compacted_segment_id < COMPACTION_ID_BASE || compacted_segment_id == active_id {
+            return Err(LivenError::Internal(format!(
+                "compaction produced an invalid segment ID {compacted_segment_id} (active {active_id})"
+            )));
+        }
         let compacted_path = self.segment_path(compacted_segment_id);
 
+        // create_new: a collision must fail loudly instead of truncating a live
+        // segment. The disjoint ID ranges make this unreachable in practice.
         let mut comp_file = OpenOptions::new()
-            .create(true)
+            .create_new(true)
+            .write(true)
             .read(true)
-            .append(true)
             .open(&compacted_path)
             .map_err(LivenError::Io)?;
 
         comp_file.lock_exclusive().map_err(LivenError::Io)?;
+        test_crash_point("after_create");
 
         let mut offset = 0u64;
 
-        // Group rewritten pointers to batch updates
-        let mut new_pointers = HashMap::new();
+        // Group rewritten pointers to batch updates: (old, new) so the swap can
+        // verify the entry still points at the frame we read.
+        let mut new_pointers: HashMap<String, (LogPointer, LogPointer)> = HashMap::new();
+        // If any live record cannot be read, abort instead of deleting segments.
+        let mut read_failed = false;
         // (stream, timestamp, sequence_id) per rewritten key, used to re-point the
         // per-stream timestamp index at the compacted frame (the timestamp index
         // stores pointers, which go stale when a segment is rewritten and deleted).
@@ -1685,9 +1852,10 @@ impl StorageEngine {
                 Ok(rec) => rec,
                 Err(e) => {
                     warn!(
-                        "Compaction skipped record for key {} due to read error: {}",
+                        "Compaction cannot read record for key {}: {} — aborting to avoid data loss",
                         compound_key, e
                     );
+                    read_failed = true;
                     continue;
                 }
             };
@@ -1695,6 +1863,7 @@ impl StorageEngine {
             let new_ptr = LogPointer {
                 segment_id: compacted_segment_id,
                 file_offset: offset,
+                seq_id: record.sequence_id,
             };
             rewritten_meta.insert(
                 compound_key.clone(),
@@ -1727,38 +1896,60 @@ impl StorageEngine {
 
                 comp_file.write_all(&frame_buf).map_err(LivenError::Io)?;
 
-                new_pointers.insert(compound_key, new_ptr);
+                new_pointers.insert(compound_key, (pointer, new_ptr));
 
                 offset += frame_buf.len() as u64;
                 Ok::<(), LivenError>(())
             })?;
         }
 
+        test_crash_point("after_write");
         comp_file.sync_data().map_err(LivenError::Io)?;
+        test_crash_point("after_sync_data");
         comp_file.unlock().map_err(LivenError::Io)?;
 
-        // Update SkipMap pointers
-        for (compound_key, new_ptr) in new_pointers {
-            // Verify if the SkipMap pointer hasn't been updated concurrently by a writer
-            let should_update = if let Some(current_ptr) = self.skipmap.get(&compound_key) {
-                current_ptr.value().segment_id < active_id
-            } else {
-                false
-            };
+        if read_failed {
+            // Never delete sources we may have failed to copy.
+            return Err(LivenError::Internal(
+                "compaction aborted: a live record could not be read; old segments kept"
+                    .to_string(),
+            ));
+        }
 
-            if should_update {
-                // Re-point the timestamp index at the compacted frame before the old
-                // segment is deleted; otherwise time-range scans would follow stale
-                // pointers into a removed file and silently drop the record.
-                if let Some((stream_name, ts, seq_id)) = rewritten_meta.get(&compound_key) {
-                    let guard = self.timestamp_indexes.lock().unwrap();
-                    if let Some(idx) = guard.get(stream_name) {
-                        idx.insert(*ts, *seq_id, new_ptr);
+        // Make the new segment's directory entry durable *before* removing the
+        // sources. A crash from here on therefore leaves either the old or the new
+        // copy on disk, never neither.
+        sync_data_dir(&self.data_dir).map_err(LivenError::Io)?;
+        test_crash_point("after_sync_dir");
+
+        // Swap pointers. The flusher holds  while applying a group
+        // commit, including its index updates, so taking the same mutex here closes
+        // the race with concurrent upserts and tombstones.
+        {
+            let _flusher_guard = self.active_file.lock().unwrap();
+            for (compound_key, (old_ptr, new_ptr)) in new_pointers {
+                // Only swap if the entry still points at the exact frame we read.
+                // A concurrent update or delete has moved or removed it and must win.
+                let should_update = self
+                    .skipmap
+                    .get(&compound_key)
+                    .is_some_and(|cur| *cur.value() == old_ptr);
+
+                if should_update {
+                    // Re-point the timestamp index at the compacted frame before the old
+                    // segment is deleted; otherwise time-range scans would follow stale
+                    // pointers into a removed file and silently drop the record.
+                    if let Some((stream_name, ts, seq_id)) = rewritten_meta.get(&compound_key) {
+                        let guard = self.timestamp_indexes.lock().unwrap();
+                        if let Some(idx) = guard.get(stream_name) {
+                            idx.insert(*ts, *seq_id, new_ptr);
+                        }
                     }
+                    self.skipmap.insert(compound_key, new_ptr);
                 }
-                self.skipmap.insert(compound_key, new_ptr);
             }
         }
+        test_crash_point("after_pointer_swap");
 
         // Remove inactive file handles from the cache first to prevent Windows sharing violations!
         {
@@ -1769,14 +1960,58 @@ impl StorageEngine {
         }
 
         // Now we can safely remove the old inactive segment files!
+        test_crash_point("before_unlink");
+        let mut removed_any = false;
         for (_, path) in inactive_segments {
             let _ = fs::remove_file(path);
+            if !removed_any {
+                removed_any = true;
+                test_crash_point("after_first_unlink");
+            }
         }
+        test_crash_point("after_unlinks");
+        // Best-effort: persist the unlinks. If this is lost, recovery finds both
+        // copies and the sequence-id merge picks the newer frames.
+        let _ = sync_data_dir(&self.data_dir);
+        test_crash_point("after_final_sync");
 
         info!(
             "Log compaction completed successfully. Compacted Segment ID: {}, Size: {} bytes",
             compacted_segment_id, offset
         );
+        Ok(())
+    }
+}
+
+/// Test-only crash injection point for the compaction crash-consistency test.
+/// Active only in debug builds; a matching env var aborts the process without
+/// running destructors, simulating a hard crash.
+#[inline]
+fn test_crash_point(point: &str) {
+    #[cfg(debug_assertions)]
+    {
+        if let Ok(value) = std::env::var("LIVEN_TEST_CRASH_POINT")
+            && value == point
+        {
+            std::process::abort();
+        }
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        let _ = point;
+    }
+}
+
+/// Flushes a directory entry so freshly created or removed segment files are
+/// durable. No-op on platforms where directories cannot be opened as files.
+fn sync_data_dir(dir: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        File::open(dir)?.sync_all()
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = dir;
         Ok(())
     }
 }
@@ -1833,7 +2068,7 @@ impl StorageEngine {
                     && path.extension().and_then(|s| s.to_str()) == Some("liven")
                     && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
                     && let Ok(segment_id) = stem.parse::<u64>()
-                    && segment_id < active_id
+                    && segment_id != active_id
                 {
                     inactive_count += 1;
                     if let Ok(meta) = path.metadata() {
@@ -2211,6 +2446,11 @@ fn execute_batch_append(
         }
 
         let new_active_id = segment_id_counter.fetch_add(1, Ordering::SeqCst);
+        if new_active_id >= COMPACTION_ID_BASE {
+            return Err(LivenError::Internal(
+                "normal segment ID space exhausted".to_string(),
+            ));
+        }
         active_segment_id.store(new_active_id, Ordering::SeqCst);
 
         let new_path = data_dir.join(format!("{:020}.liven", new_active_id));
@@ -2220,6 +2460,9 @@ fn execute_batch_append(
             .append(true)
             .open(&new_path)
             .map_err(LivenError::Io)?;
+        // Persist the directory entry before acknowledging records written into
+        // this segment; otherwise a crash can lose the file (and the writes).
+        sync_data_dir(data_dir).map_err(LivenError::Io)?;
 
         *active_file_guard = Some(file);
         *active_size_guard = 0;
@@ -2264,6 +2507,7 @@ fn execute_batch_append(
                         let pointer = LogPointer {
                             segment_id,
                             file_offset: offset_acc,
+                            seq_id: record.sequence_id,
                         };
                         let existed = skipmap.contains_key(&compound_key);
                         skipmap.insert(compound_key, pointer);
@@ -2301,6 +2545,7 @@ fn execute_batch_append(
                             let pointer = LogPointer {
                                 segment_id,
                                 file_offset: offset_acc,
+                                seq_id: record.sequence_id,
                             };
                             let existed = skipmap.contains_key(&compound_key);
                             skipmap.insert(compound_key, pointer);
