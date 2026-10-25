@@ -1445,13 +1445,8 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> crate::error::Res
             // Acquire write_lock to prevent concurrent operations on the same key
             let _guard = engine.write_lock.lock().unwrap();
 
-            // Check if key exists and tombstone it if it does
-            if engine.get(stream_name, key)?.is_some() {
-                let _ = engine.append(stream_name, key, DataValue::Null, true)?;
-            }
-
-            let record =
-                engine.append(stream_name, key, json_to_datavalue(value.clone()), false)?;
+            // One active frame replaces any previous value atomically.
+            let record = engine.replace(stream_name, key, json_to_datavalue(value.clone()))?;
             Ok(vec![record])
         }
         Query::UpsertBatch { stream_name, batch } => {
@@ -1465,13 +1460,7 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> crate::error::Res
 
             let mut inserted = Vec::new();
             for (key, val) in batch {
-                // Check if key exists and tombstone it if it does
-                if engine.get(stream_name, key)?.is_some() {
-                    let _ = engine.append(stream_name, key, DataValue::Null, true)?;
-                }
-
-                let record =
-                    engine.append(stream_name, key, json_to_datavalue(val.clone()), false)?;
+                let record = engine.replace(stream_name, key, json_to_datavalue(val.clone()))?;
                 inserted.push(record);
             }
             Ok(inserted)
@@ -1496,9 +1485,6 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> crate::error::Res
 
             let mut affected_rows = 0;
             if let Some(existing) = engine.get(stream_name, key)? {
-                // Tombstone the old record first
-                let _ = engine.append(stream_name, key, DataValue::Null, true)?;
-
                 let mut existing_val = match &existing.value {
                     DataValue::String(s) => serde_json::from_str::<serde_json::Value>(s)
                         .unwrap_or_else(|_| serde_json::Value::String(s.clone())),
@@ -1515,7 +1501,7 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> crate::error::Res
                 } else {
                     existing_val = value.clone();
                 }
-                let _ = engine.append(stream_name, key, json_to_datavalue(existing_val), false)?;
+                let _ = engine.replace(stream_name, key, json_to_datavalue(existing_val))?;
                 affected_rows = 1;
             }
             let timestamp = SystemTime::now()
@@ -1575,6 +1561,7 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> crate::error::Res
             }])
         }
         Query::Empty { stream_name } => {
+            let _guard = engine.write_lock.lock().unwrap();
             if !engine.list_streams().contains(stream_name) {
                 return Err(LivenError::Query(format!(
                     "Stream '{}' does not exist",
@@ -1604,6 +1591,7 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> crate::error::Res
             }])
         }
         Query::Drop { stream_name } => {
+            let _guard = engine.write_lock.lock().unwrap();
             if !engine.list_streams().contains(stream_name) {
                 return Err(LivenError::Query(format!(
                     "Stream '{}' does not exist",
@@ -1678,12 +1666,7 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> crate::error::Res
                 } else {
                     val = update_value.clone();
                 }
-                let _ = engine.append(
-                    &r.stream_name,
-                    r.key.as_str(),
-                    json_to_datavalue(val),
-                    false,
-                )?;
+                let _ = engine.replace(&r.stream_name, r.key.as_str(), json_to_datavalue(val))?;
             }
             let timestamp = SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)

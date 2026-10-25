@@ -368,3 +368,40 @@ fn probe_3_write_lock_on_single_insert() {
 (both serialize on the global write_lock; the struct doc comment claiming otherwise is wrong)"
     );
 }
+
+/// Empty and Drop mutate the whole stream, so they must take the same
+/// write_lock as Insert/Upsert/Delete to avoid interleaving with a writer.
+#[test]
+fn probe_4_empty_and_drop_take_write_lock() {
+    let dir = tempfile::Builder::new()
+        .prefix("liven_probe_p4_")
+        .tempdir()
+        .unwrap();
+    let engine = Arc::new(StorageEngine::new(dir.path(), 64 * 1024 * 1024).unwrap());
+    for i in 0..4 {
+        engine
+            .append(
+                "t",
+                &format!("k{i}"),
+                DataValue::String(r#"{"v":1}"#.to_string()),
+                false,
+            )
+            .unwrap();
+    }
+
+    let empty_blocked = blocked_by_write_lock(&engine, |e| {
+        let q = parse_query(r#"from("t").empty()"#).expect("empty parses");
+        let _ = execute_query(e.as_ref(), &q);
+    });
+    let drop_blocked = blocked_by_write_lock(&engine, |e| {
+        let q = parse_query(r#"drop("t")"#).expect("drop parses");
+        let _ = execute_query(e.as_ref(), &q);
+    });
+
+    println!(
+        "[probe4] Empty holds write_lock: {}, Drop holds write_lock: {}",
+        empty_blocked, drop_blocked
+    );
+    assert!(empty_blocked, "Empty must acquire write_lock");
+    assert!(drop_blocked, "Drop must acquire write_lock");
+}

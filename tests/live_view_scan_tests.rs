@@ -67,13 +67,13 @@ fn superseded_versions_never_returned() {
         other => panic!("expected String JSON value, got {other:?}"),
     }
 
-    // The raw-log view still sees every version. Each upsert writes a tombstone
-    // frame plus a new active frame, so 1 insert + 2 upserts = 5 k1 frames.
+    // Upsert is a one-frame replacement now, so history sees the insert plus
+    // one replacement frame per upsert: 1 + 2 = 3 k1 frames.
     let history = db.query(r#"from("mem") | history()"#).unwrap();
     let k1_versions = history.iter().filter(|r| r.key.as_str() == "k1").count();
     assert_eq!(
-        k1_versions, 5,
-        "history() returns every frame: 1 insert + (tombstone + value) per upsert"
+        k1_versions, 3,
+        "history() returns every frame: 1 insert + 1 replacement per upsert"
     );
 }
 

@@ -122,6 +122,10 @@ pub struct StorageEngine {
     #[allow(dead_code)]
     sync_interval_ms: u64,
     is_running: Arc<std::sync::atomic::AtomicBool>,
+    /// Set when an I/O or fsync failure leaves the on-disk state uncertain.
+    /// Once set, all future writes fail fast and the database must be reopened
+    /// (which runs recovery and truncates any torn tail).
+    failed: Arc<std::sync::atomic::AtomicBool>,
     max_streams: usize,
     max_fds: usize,
     max_index_ram_bytes: u64,
@@ -321,6 +325,7 @@ impl StorageEngine {
         let skipmap = Arc::new(SkipMap::new());
         let file_handles = Arc::new(Mutex::new(HashMap::new()));
         let is_running = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let failed = Arc::new(std::sync::atomic::AtomicBool::new(false));
 
         let (tx, rx) = std::sync::mpsc::sync_channel(2048);
         let ring_buffer = ring_buffer::LogRingBuffer::new(tx);
@@ -350,6 +355,7 @@ impl StorageEngine {
             sync_mode: sync_mode.clone(),
             sync_interval_ms,
             is_running: is_running.clone(),
+            failed: failed.clone(),
             max_streams,
             max_fds,
             max_index_ram_bytes,
@@ -417,6 +423,7 @@ impl StorageEngine {
         let flusher_handles = file_handles;
         let flusher_sync_mode = sync_mode.clone();
         let flusher_running = is_running.clone();
+        let flusher_failed = failed.clone();
         let flusher_index_ram_bytes = index_ram_bytes.clone();
         let flusher_timestamp_indexes = engine.timestamp_indexes.clone();
         let flusher_drain_window_us = engine.commit_drain_window_us;
@@ -437,6 +444,7 @@ impl StorageEngine {
                 flusher_handles,
                 flusher_sync_mode,
                 flusher_running,
+                flusher_failed,
                 flusher_index_ram_bytes,
                 flusher_timestamp_indexes,
                 flusher_drain_window_us,
@@ -531,6 +539,7 @@ impl StorageEngine {
             sync_mode: String::new(),
             sync_interval_ms: 0,
             is_running: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            failed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             max_streams: 32,
             max_fds: 64,
             max_index_ram_bytes: 16 * 1024 * 1024,
@@ -886,6 +895,7 @@ impl StorageEngine {
                                     segment_id: *segment_id,
                                     file_offset: offset,
                                     seq_id,
+                                    timestamp: _timestamp,
                                 };
                                 let existed = self.skipmap.contains_key(&compound_key);
                                 self.skipmap.insert(compound_key, pointer);
@@ -1132,6 +1142,75 @@ impl StorageEngine {
     }
 
     /// Appends a new record to the storage engine
+    fn ensure_writable(&self) -> crate::error::Result<()> {
+        if self.failed.load(Ordering::SeqCst) {
+            return Err(LivenError::Storage(
+                "storage engine is in a failed state after an I/O error; reopen the database"
+                    .to_string(),
+            ));
+        }
+        if !self.is_running.load(Ordering::Relaxed) {
+            return Err(LivenError::FlusherTerminated);
+        }
+        Ok(())
+    }
+
+    /// True after a write/fsync failure. Future writes are rejected until the
+    /// database is reopened (which runs recovery).
+    pub fn is_failed(&self) -> bool {
+        self.failed.load(Ordering::SeqCst)
+    }
+
+    /// Atomically replaces a key with a single active frame.
+    ///
+    /// Unlike the old tombstone-then-append sequence, a crash while the frame
+    /// is being written leaves the previous value live. This is the write path
+    /// used by upsert and update.
+    pub fn replace(
+        &self,
+        stream_name: &str,
+        key: &str,
+        value: DataValue,
+    ) -> crate::error::Result<Record> {
+        self.ensure_writable()?;
+        let compound_key = format!("{}:{}", stream_name, key);
+
+        {
+            let mut streams_guard = self.streams_set.lock().unwrap();
+            if !streams_guard.contains(stream_name) {
+                if streams_guard.len() >= self.max_streams {
+                    return Err(LivenError::StreamLimitExceeded {
+                        max: self.max_streams,
+                    });
+                }
+                streams_guard.insert(stream_name.to_string());
+            }
+        }
+
+        if !self.skipmap.contains_key(&compound_key) {
+            let size = compound_key.len() as u64 + 64;
+            let current_ram = self.index_ram_bytes.load(Ordering::SeqCst);
+            if current_ram + size > self.max_index_ram_bytes {
+                return Err(create_index_ram_limit_error(
+                    self.max_index_ram_bytes,
+                    current_ram + size,
+                ));
+            }
+        }
+
+        let stream_key = crate::storage::key::StreamKey::from_str(key)?;
+        let (response_tx, rx) = std::sync::mpsc::sync_channel(1);
+        self.ring_buffer.tx_send(ring_buffer::LogEntry::Replace {
+            stream_name: stream_name.to_string(),
+            key: stream_key,
+            value,
+            response_tx,
+        })?;
+        rx.recv()
+            .map_err(|e| LivenError::Internal(format!("LogRingBuffer coordination error: {}", e)))?
+            .map_err(Into::into)
+    }
+
     pub fn append(
         &self,
         stream_name: &str,
@@ -1139,6 +1218,7 @@ impl StorageEngine {
         value: DataValue,
         is_tombstone: bool,
     ) -> crate::error::Result<Record> {
+        self.ensure_writable()?;
         let compound_key = format!("{}:{}", stream_name, key);
 
         // 1. Stream Limit Check
@@ -1186,6 +1266,7 @@ impl StorageEngine {
         &self,
         batch: Vec<(String, String, DataValue)>,
     ) -> crate::error::Result<Vec<Record>> {
+        self.ensure_writable()?;
         // Pre-validate streams count and index RAM limits transactionally
         let mut new_streams = HashSet::new();
         let mut new_keys_size = 0u64;
@@ -1259,6 +1340,7 @@ impl StorageEngine {
         stream_name: &str,
         keys: &[String],
     ) -> crate::error::Result<Vec<Record>> {
+        self.ensure_writable()?;
         // Stream Limit Check
         {
             let mut streams_guard = self.streams_set.lock().unwrap();
@@ -1304,12 +1386,9 @@ impl StorageEngine {
         let Some(ptr) = self.skipmap.get(&compound_key).map(|e| *e.value()) else {
             return;
         };
-        let Ok(rec) = self.read_record(ptr) else {
-            return;
-        };
         let guard = self.timestamp_indexes.lock().unwrap();
-        if let Some(idx) = guard.get(&rec.stream_name) {
-            idx.remove(rec.timestamp, rec.sequence_id);
+        if let Some(idx) = guard.get(stream_name) {
+            idx.remove(ptr.timestamp, ptr.seq_id);
         }
     }
 
@@ -1864,6 +1943,7 @@ impl StorageEngine {
                 segment_id: compacted_segment_id,
                 file_offset: offset,
                 seq_id: record.sequence_id,
+                timestamp: record.timestamp,
             };
             rewritten_meta.insert(
                 compound_key.clone(),
@@ -1986,6 +2066,18 @@ impl StorageEngine {
 /// Test-only crash injection point for the compaction crash-consistency test.
 /// Active only in debug builds; a matching env var aborts the process without
 /// running destructors, simulating a hard crash.
+#[inline]
+fn test_should_fail_sync() -> bool {
+    #[cfg(debug_assertions)]
+    {
+        std::env::var_os("LIVEN_TEST_FAIL_SYNC").is_some()
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        false
+    }
+}
+
 #[inline]
 fn test_crash_point(point: &str) {
     #[cfg(debug_assertions)]
@@ -2189,6 +2281,7 @@ fn run_flusher_loop(
     file_handles: Arc<Mutex<HashMap<u64, Arc<File>>>>,
     sync_mode: String,
     is_running: Arc<std::sync::atomic::AtomicBool>,
+    failed: Arc<std::sync::atomic::AtomicBool>,
     index_ram_bytes: Arc<AtomicU64>,
     timestamp_indexes: Arc<Mutex<HashMap<String, Arc<timestamp_index::TimestampIndex>>>>,
     drain_window_us: u64,
@@ -2255,6 +2348,7 @@ fn run_flusher_loop(
             &broadcast_tx,
             &file_handles,
             &sync_mode,
+            &failed,
             &index_ram_bytes,
             &timestamp_indexes,
         ) {
@@ -2268,10 +2362,16 @@ fn run_flusher_loop(
                     ring_buffer::LogEntry::TombstoneBatch { response_tx, .. } => {
                         let _ = response_tx.send(Err(err_str.clone()));
                     }
+                    ring_buffer::LogEntry::Replace { response_tx, .. } => {
+                        let _ = response_tx.send(Err(err_str.clone()));
+                    }
                     ring_buffer::LogEntry::Shutdown => {
                         // Shutdown sentinel, no response needed
                     }
                 }
+            }
+            if failed.load(Ordering::Relaxed) {
+                is_running.store(false, Ordering::Relaxed);
             }
         }
         batch.clear();
@@ -2291,6 +2391,7 @@ fn execute_batch_append(
     broadcast_tx: &broadcast::Sender<Record>,
     file_handles: &Arc<Mutex<HashMap<u64, Arc<File>>>>,
     sync_mode: &str,
+    failed: &Arc<std::sync::atomic::AtomicBool>,
     index_ram_bytes: &Arc<AtomicU64>,
     timestamp_indexes: &Arc<Mutex<HashMap<String, Arc<timestamp_index::TimestampIndex>>>>,
 ) -> crate::error::Result<()> {
@@ -2303,12 +2404,18 @@ fn execute_batch_append(
         Single {
             response_tx: std::sync::mpsc::SyncSender<Result<Record, String>>,
         },
+        Replace {
+            response_tx: std::sync::mpsc::SyncSender<Result<Record, String>>,
+        },
         Batch {
             response_tx: std::sync::mpsc::SyncSender<Result<Vec<Record>, String>>,
             count: usize,
         },
     }
 
+    let batch_has_replace = batch
+        .iter()
+        .any(|entry| matches!(entry, ring_buffer::LogEntry::Replace { .. }));
     let mut pending_completes = Vec::with_capacity(batch.len());
     let mut batch_records_to_add = Vec::new();
 
@@ -2368,8 +2475,52 @@ fn execute_batch_append(
                         value: value.clone(),
                     };
 
-                    batch_records_to_add.push((record, frame_len, *is_tombstone));
+                    batch_records_to_add.push((record, frame_len, *is_tombstone, false));
                     pending_completes.push(PendingComplete::Single {
+                        response_tx: response_tx.clone(),
+                    });
+                }
+                ring_buffer::LogEntry::Replace {
+                    stream_name,
+                    key,
+                    value,
+                    response_tx,
+                } => {
+                    let seq_id = current_seq;
+                    current_seq += 1;
+
+                    let timestamp = SystemTime::now()
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .map_err(|e| LivenError::Internal(e.to_string()))?
+                        .as_millis() as i64;
+
+                    let type_tag = value.type_tag();
+                    serialize_payload_into(stream_name, key.as_str(), value, &mut local_buf);
+                    let payload_len = local_buf.len() as u32;
+                    let crc32 = crc32fast::hash(&local_buf);
+
+                    let start_idx = frame_buf.len() as u64;
+                    frame_buf.extend_from_slice(&seq_id.to_be_bytes());
+                    frame_buf.extend_from_slice(&timestamp.to_be_bytes());
+                    frame_buf.push(type_tag);
+                    frame_buf.push(0x01);
+                    frame_buf.extend_from_slice(&payload_len.to_be_bytes());
+                    frame_buf.extend_from_slice(&crc32.to_be_bytes());
+                    frame_buf.extend_from_slice(&local_buf);
+                    let end_idx = frame_buf.len() as u64;
+                    let frame_len = end_idx - start_idx;
+
+                    let record = Record {
+                        sequence_id: seq_id,
+                        timestamp,
+                        type_tag,
+                        flags: 0x01,
+                        stream_name: stream_name.clone(),
+                        key: *key,
+                        value: value.clone(),
+                    };
+                    batch_records_to_add.push((record, frame_len, false, true));
+                    pending_completes.push(PendingComplete::Replace {
                         response_tx: response_tx.clone(),
                     });
                 }
@@ -2423,7 +2574,7 @@ fn execute_batch_append(
                             value: DataValue::Null,
                         };
 
-                        batch_records_to_add.push((record, frame_len, true));
+                        batch_records_to_add.push((record, frame_len, true, false));
                         count += 1;
                     }
                     pending_completes.push(PendingComplete::Batch {
@@ -2442,7 +2593,10 @@ fn execute_batch_append(
 
     if *active_size_guard + (frame_buf.len() as u64) > max_segment_size {
         if let Some(old_file) = active_file_guard.take() {
-            let _ = old_file.sync_all();
+            if let Err(e) = old_file.sync_all() {
+                failed.store(true, Ordering::SeqCst);
+                return Err(LivenError::Io(e));
+            }
         }
 
         let new_active_id = segment_id_counter.fetch_add(1, Ordering::SeqCst);
@@ -2459,22 +2613,32 @@ fn execute_batch_append(
             .read(true)
             .append(true)
             .open(&new_path)
-            .map_err(LivenError::Io)?;
+            .map_err(|e| {
+                failed.store(true, Ordering::SeqCst);
+                LivenError::Io(e)
+            })?;
         // Persist the directory entry before acknowledging records written into
         // this segment; otherwise a crash can lose the file (and the writes).
-        sync_data_dir(data_dir).map_err(LivenError::Io)?;
+        sync_data_dir(data_dir).map_err(|e| {
+            failed.store(true, Ordering::SeqCst);
+            LivenError::Io(e)
+        })?;
 
         *active_file_guard = Some(file);
         *active_size_guard = 0;
         info!("Rolled over to new active segment: {}", new_active_id);
     }
 
-    let file = active_file_guard
-        .as_mut()
-        .ok_or_else(|| LivenError::Internal("No active file handle found".to_string()))?;
+    let file = active_file_guard.as_mut().ok_or_else(|| {
+        failed.store(true, Ordering::SeqCst);
+        LivenError::Internal("No active file handle found".to_string())
+    })?;
     let current_offset = *active_size_guard;
 
     file.write_all(&frame_buf).map_err(|e| {
+        // A partial write leaves the file in an unknown state. Stop accepting
+        // writes; recovery will truncate the torn tail on reopen.
+        failed.store(true, Ordering::SeqCst);
         if e.kind() == std::io::ErrorKind::StorageFull || e.kind() == std::io::ErrorKind::WriteZero
         {
             LivenError::DiskFull
@@ -2482,9 +2646,24 @@ fn execute_batch_append(
             LivenError::Io(e)
         }
     })?;
+    if batch_has_replace {
+        test_crash_point("replace_after_write");
+    }
 
     if sync_mode == "always" {
-        file.sync_data().map_err(LivenError::Io)?;
+        if test_should_fail_sync() {
+            failed.store(true, Ordering::SeqCst);
+            return Err(LivenError::Io(std::io::Error::other(
+                "injected fsync failure",
+            )));
+        }
+        file.sync_data().map_err(|e| {
+            failed.store(true, Ordering::SeqCst);
+            LivenError::Io(e)
+        })?;
+    }
+    if batch_has_replace {
+        test_crash_point("replace_after_sync");
     }
 
     let segment_id = active_segment_id.load(Ordering::SeqCst);
@@ -2495,7 +2674,7 @@ fn execute_batch_append(
     for comp in pending_completes {
         match comp {
             PendingComplete::Single { response_tx } => {
-                if let Some((record, frame_len, is_tombstone)) = records_iter.next() {
+                if let Some((record, frame_len, is_tombstone, _)) = records_iter.next() {
                     let compound_key = format!("{}:{}", record.stream_name, record.key.as_str());
 
                     let node_overhead = compound_key.len() as u64 + 64;
@@ -2508,6 +2687,7 @@ fn execute_batch_append(
                             segment_id,
                             file_offset: offset_acc,
                             seq_id: record.sequence_id,
+                            timestamp: record.timestamp,
                         };
                         let existed = skipmap.contains_key(&compound_key);
                         skipmap.insert(compound_key, pointer);
@@ -2529,10 +2709,47 @@ fn execute_batch_append(
                     offset_acc += frame_len;
                 }
             }
+            PendingComplete::Replace { response_tx } => {
+                if let Some((record, frame_len, _, _)) = records_iter.next() {
+                    let compound_key = format!("{}:{}", record.stream_name, record.key.as_str());
+                    let node_overhead = compound_key.len() as u64 + 64;
+
+                    // Supersede in place: drop the old timestamp-index entry
+                    // before inserting the replacement's entry. This is a
+                    // single frame, so a torn tail keeps the old value live.
+                    let mut ts_idx_guard = timestamp_indexes.lock().unwrap();
+                    if let Some(old) = skipmap.get(&compound_key).map(|e| *e.value())
+                        && let Some(idx) = ts_idx_guard.get(&record.stream_name)
+                    {
+                        idx.remove(old.timestamp, old.seq_id);
+                    }
+
+                    let pointer = LogPointer {
+                        segment_id,
+                        file_offset: offset_acc,
+                        seq_id: record.sequence_id,
+                        timestamp: record.timestamp,
+                    };
+                    let existed = skipmap.contains_key(&compound_key);
+                    skipmap.insert(compound_key, pointer);
+                    if !existed {
+                        index_ram_bytes.fetch_add(node_overhead, Ordering::SeqCst);
+                    }
+                    let entry = ts_idx_guard
+                        .entry(record.stream_name.clone())
+                        .or_insert_with(|| Arc::new(timestamp_index::TimestampIndex::new()));
+                    entry.insert(record.timestamp, record.sequence_id, pointer);
+                    drop(ts_idx_guard);
+
+                    let _ = broadcast_tx.send(record.clone());
+                    let _ = response_tx.send(Ok(record));
+                    offset_acc += frame_len;
+                }
+            }
             PendingComplete::Batch { response_tx, count } => {
                 let mut added_records = Vec::with_capacity(count);
                 for _ in 0..count {
-                    if let Some((record, frame_len, is_tombstone)) = records_iter.next() {
+                    if let Some((record, frame_len, is_tombstone, _)) = records_iter.next() {
                         let compound_key =
                             format!("{}:{}", record.stream_name, record.key.as_str());
 
@@ -2546,6 +2763,7 @@ fn execute_batch_append(
                                 segment_id,
                                 file_offset: offset_acc,
                                 seq_id: record.sequence_id,
+                                timestamp: record.timestamp,
                             };
                             let existed = skipmap.contains_key(&compound_key);
                             skipmap.insert(compound_key, pointer);
@@ -2770,11 +2988,13 @@ impl Drop for StorageEngine {
             let _ = handle.join();
         }
 
-        // Clean up active file
+        // Clean up active file. A failure here cannot be returned from Drop,
+        // but it must not be silent: the next open will recover from the log.
         if let Ok(mut active_file_guard) = self.active_file.lock()
             && let Some(file) = active_file_guard.take()
+            && let Err(e) = file.sync_all()
         {
-            let _ = file.sync_all();
+            error!("final fsync on shutdown failed: {}", e);
         }
     }
 }

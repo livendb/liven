@@ -666,6 +666,25 @@ match &record.value {
 
 ---
 
+## Durability
+
+Every operation that returns successfully has been written and `fsync`ed. The
+only implemented sync mode is `"always"`.
+
+- `insert` appends one active frame.
+- `upsert` and `update` write **one active replacement frame**, not a tombstone
+  followed by a value. A crash while that frame is being written leaves the old
+  value live.
+- `delete` writes a tombstone; `empty`/`drop` write a tombstone batch in one
+  group commit. A crash before the call returns may apply a prefix.
+- Compaction is crash-atomic. Recovery merges segments by sequence ID, truncates
+  only the active segment's torn tail, and never reopens a compacted segment for
+  append.
+- A failed write or `fsync` fails the pending acknowledgements and puts the
+  engine into a failed state; reopen it to run recovery.
+
+See `docs/DURABILITY.md` in the repository for the full table.
+
 ## Configuration
 
 ### Embedded config

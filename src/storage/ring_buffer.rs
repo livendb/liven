@@ -21,6 +21,15 @@ pub enum LogEntry {
         keys: Vec<StreamKey>,
         response_tx: SyncSender<Result<Vec<Record>, String>>,
     },
+    /// One-frame replacement of an existing key. A single active frame (no
+    /// tombstone) makes upsert/update atomic with respect to torn tails: the
+    /// old frame stays live until the new frame is durable.
+    Replace {
+        stream_name: String,
+        key: StreamKey,
+        value: DataValue,
+        response_tx: SyncSender<Result<Record, String>>,
+    },
     /// Shutdown signal for clean flusher thread termination.
     Shutdown,
 }

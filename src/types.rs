@@ -529,6 +529,9 @@ pub struct LogPointer {
     /// segments by sequence id, because a compacted segment has a higher
     /// segment id than the writes that followed it.
     pub seq_id: u64,
+    /// Timestamp of the frame. Kept in the pointer so superseding a key can
+    /// prune its timestamp-index entry without an extra disk read.
+    pub timestamp: i64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

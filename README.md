@@ -370,14 +370,14 @@ flowchart LR
     Index -->|broadcast| Subscriber[Live Subscribers]
 ```
 
-- **Writes** are appended to segment files. A background flusher batches them for throughput without sacrificing durability.
-- **Reads** go through a lock-free in-memory index. Point lookups resolve in microseconds.
+- **Writes** are appended to segment files and acknowledged only after the group-commit batch is `fsync`ed. Upsert/update are a single replacement frame, so a torn write leaves the old value live.
+- **Reads** go through a concurrent in-memory skip-list index (the segment-handle cache is a small mutex). Point lookups resolve in microseconds.
 - **Subscriptions** broadcast every write to all listeners. The server evaluates pipeline filters before delivery.
 - **Compaction** rewrites live records into a new segment and drops superseded
   versions. The server runs it in the background once the configured thresholds
   are exceeded; embedded callers opt in with `db.start_auto_compact(...)` or call
   `db.compact()` directly.
-- **Recovery** replays segments on startup. Checksums catch corruption.
+- **Recovery** replays segments on startup, merges by sequence ID, and truncates only the active segment's torn tail. Checksums catch corruption. A failed write or fsync fails the pending acknowledgements and puts the engine into a failed state until it is reopened.
 
 ---
 

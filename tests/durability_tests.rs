@@ -3,8 +3,9 @@
 //! Phase 1 of the fix: these tests reproduce the losses. They are expected to
 //! fail on the current implementation and become permanent regression tests.
 
+use liven::executor::execute_query;
 use liven::storage::StorageEngine;
-use liven::types::DataValue;
+use liven::types::{DataValue, Query};
 use std::fs;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -304,6 +305,65 @@ fn randomized_ops_match_the_model_across_restarts_and_compactions() {
                 }
             }
         }
+    }
+}
+
+/// Upsert must be a one-frame replacement. Tearing the replacement frame at
+/// every byte offset must leave the previous value, never delete the key.
+#[test]
+fn upsert_is_atomic_under_a_torn_tail() {
+    let probe = tempfile::tempdir().unwrap();
+    {
+        let engine = StorageEngine::new(probe.path(), 1024 * 1024).unwrap();
+        engine
+            .append("s", "k", DataValue::String("v1".to_string()), false)
+            .unwrap();
+        execute_query(
+            &engine,
+            &Query::Upsert {
+                stream_name: "s".to_string(),
+                key: "k".to_string(),
+                value: serde_json::json!("v2"),
+            },
+        )
+        .unwrap();
+    }
+    let probe_segments = segment_files(probe.path());
+    let (_, last_frame_len) = last_frame_geometry(probe_segments.last().expect("a segment"));
+
+    for cut in 1..last_frame_len {
+        let dir = tempfile::tempdir().unwrap();
+        {
+            let engine = StorageEngine::new(dir.path(), 1024 * 1024).unwrap();
+            engine
+                .append("s", "k", DataValue::String("v1".to_string()), false)
+                .unwrap();
+            execute_query(
+                &engine,
+                &Query::Upsert {
+                    stream_name: "s".to_string(),
+                    key: "k".to_string(),
+                    value: serde_json::json!("v2"),
+                },
+            )
+            .unwrap();
+        }
+        let segments = segment_files(dir.path());
+        let last = segments.last().unwrap();
+        let len = fs::metadata(last).unwrap().len();
+        truncate_to(last, len - cut);
+
+        let engine = StorageEngine::new(dir.path(), 1024 * 1024).unwrap();
+        let got = engine.get("s", "k").unwrap();
+        assert!(
+            got.is_some(),
+            "cut={cut}: a torn upsert deleted the previously acknowledged value"
+        );
+        assert_eq!(
+            got.unwrap().value,
+            DataValue::String("v1".to_string()),
+            "cut={cut}: expected the old value to survive a torn replacement"
+        );
     }
 }
 
