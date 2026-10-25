@@ -120,6 +120,52 @@ fn index_above_limit_reopens_and_rejects_only_new_keys() {
 }
 
 #[test]
+fn over_limit_mixed_batch_rejects_only_the_new_key() {
+    let dir = tempdir().unwrap();
+    let sname = "b".repeat(60);
+    let key = |i: u32| format!("k{i:031}");
+    build_old_accounting_dataset(dir.path(), &sname);
+
+    let e = open(dir.path(), 1024, 16).unwrap();
+
+    // Replace an existing key.
+    e.replace(&sname, &key(0), DataValue::String("replaced".into()))
+        .unwrap();
+    // Delete an existing key.
+    e.append_tombstone_batch(&sname, &[key(1)]).unwrap();
+
+    // Existing + one new key: only the new key is rejected; the existing
+    // entry in the same batch is still applied.
+    let err = e
+        .append_batch(vec![
+            (
+                sname.clone(),
+                key(2),
+                DataValue::String("batch-value".into()),
+            ),
+            (
+                sname.clone(),
+                "brand-new".to_string(),
+                DataValue::String("n".into()),
+            ),
+        ])
+        .expect_err("the new key must be rejected");
+    assert!(
+        matches!(err, LivenError::IndexRamLimitExceeded { .. }),
+        "expected typed IndexRamLimitExceeded, got: {err:?}"
+    );
+    assert_eq!(
+        e.get(&sname, &key(2)).unwrap().unwrap().value,
+        DataValue::String("batch-value".into()),
+        "existing key in the mixed batch must be applied"
+    );
+    assert!(
+        e.get(&sname, "brand-new").unwrap().is_none(),
+        "new key must not be applied"
+    );
+}
+
+#[test]
 fn retention_and_deletes_clear_the_live_high_water_flag() {
     let dir = tempdir().unwrap();
     let sname = "b".repeat(60);

@@ -169,7 +169,7 @@ fn stranded_frames_are_salvaged_by_repair() {
 }
 
 #[test]
-fn no_stranded_frames_truncates_with_sidecar() {
+fn plain_torn_tail_starts_in_default_mode_with_sidecar() {
     let dir = tempfile::tempdir().unwrap();
     setup_prefix(dir.path(), 5);
     let seg = segment_files(dir.path()).pop().unwrap();
@@ -558,6 +558,58 @@ fn real_v013_stranded_directory_is_salvaged() {
                 .unwrap()
                 .is_some(),
             "real v0.1.3 stranded{i} lost"
+        );
+    }
+}
+
+#[test]
+fn repair_mid_file_crc_keeps_later_frames_and_backs_up() {
+    let dir = tempfile::tempdir().unwrap();
+    {
+        let engine = StorageEngine::new(dir.path(), 120).unwrap();
+        for i in 0..8 {
+            engine
+                .append(
+                    STREAM,
+                    &format!("k{i}"),
+                    DataValue::String("v".into()),
+                    false,
+                )
+                .unwrap();
+        }
+    }
+    let segs = segment_files(dir.path());
+    assert!(segs.len() >= 2, "need an inactive segment");
+    let seg = segs.first().unwrap().clone();
+
+    // Corrupt the first frame's CRC but leave later frames in the file intact.
+    let mut data = fs::read(&seg).unwrap();
+    data[22] ^= 0xFF;
+    fs::write(&seg, &data).unwrap();
+    let corrupted = fs::read(&seg).unwrap();
+
+    let err = StorageEngine::new(dir.path(), 120)
+        .err()
+        .expect("valid frames after a mid-file CRC error must require repair");
+    assert!(err.to_string().contains("stranded"), "got: {err}");
+
+    let report = StorageEngine::repair(dir.path(), 120, RecoveryMode::Repair).unwrap();
+    assert!(report.salvaged_frames > 0);
+    assert!(!report.torn_backups.is_empty());
+    assert!(!report.repair_backups.is_empty());
+
+    // The sidecar is the whole corrupted region (the tear is at offset 0).
+    let sidecar = fs::read(&report.torn_backups[0]).unwrap();
+    assert_eq!(sidecar, corrupted);
+    let full_backup = fs::read(&report.repair_backups[0]).unwrap();
+    assert_eq!(full_backup, corrupted);
+
+    // Later valid frames were kept; only the corrupted frame's key is gone.
+    let engine = StorageEngine::new(dir.path(), 120).unwrap();
+    for i in 1..8 {
+        assert!(
+            engine.get(STREAM, &format!("k{i}")).unwrap().is_some(),
+            "k{i} lost after mid-file CRC repair"
         );
     }
 }

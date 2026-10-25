@@ -1187,12 +1187,14 @@ impl StorageEngine {
                     .map_err(LivenError::Io)?;
                 w.set_len(target).map_err(LivenError::Io)?;
                 w.sync_all().map_err(LivenError::Io)?;
+                pl_truncate_sync(path, target);
                 test_crash_point("repair_after_truncate");
                 info!(
                     "Truncated segment {} to {} bytes (torn tail removed)",
                     segment_id, target
                 );
                 if let Some(marker) = truncate_marker.take() {
+                    pl_unlink(&marker);
                     let _ = fs::remove_file(&marker);
                     sync_data_dir(&self.data_dir).map_err(LivenError::Io)?;
                 }
@@ -1205,12 +1207,20 @@ impl StorageEngine {
 
         // Open active file handle
         let active_path = self.segment_path(active_id);
+        let active_existed = active_path.exists();
         let file = OpenOptions::new()
             .create(true)
             .read(true)
             .append(true)
             .open(&active_path)
             .map_err(LivenError::Io)?;
+        if !active_existed {
+            pl_create(&active_path);
+            // The active segment was just created. Persist its directory entry
+            // before any write can be acknowledged; otherwise a power loss can
+            // remove the whole file even though its data was fsynced.
+            sync_data_dir(&self.data_dir).map_err(LivenError::Io)?;
+        }
 
         let active_len = file.metadata().map_err(LivenError::Io)?.len();
 
@@ -1441,6 +1451,7 @@ impl StorageEngine {
                 .truncate(true)
                 .open(&target_path)
                 .map_err(LivenError::Io)?;
+            pl_create(&target_path);
             let mut buf = vec![0u8; 64 * 1024];
             for frame in frames {
                 let mut read = 0u64;
@@ -1453,7 +1464,10 @@ impl StorageEngine {
                 }
             }
             out.sync_all().map_err(LivenError::Io)?;
+            pl_sync(&target_path, total_len);
+            test_crash_point("repair_after_salvage_write");
             sync_data_dir(&self.data_dir).map_err(LivenError::Io)?;
+            test_crash_point("repair_after_salvage_dir_sync");
         }
 
         self.max_normal_segment_id = self.max_normal_segment_id.max(target_id);
@@ -1508,6 +1522,9 @@ impl StorageEngine {
         let backup_name = format!("{:020}.liven.repair-{}", segment_id, timestamp);
         let backup_path = self.data_dir.join(&backup_name);
         fs::copy(path, &backup_path).map_err(LivenError::Io)?;
+        let backup_len = fs::metadata(&backup_path).map(|m| m.len()).unwrap_or(0);
+        pl_create(&backup_path);
+        pl_write(&backup_path, 0, backup_len);
         // The copy must be durable before the caller truncates the source.
         OpenOptions::new()
             .read(true)
@@ -1516,6 +1533,7 @@ impl StorageEngine {
             .map_err(LivenError::Io)?
             .sync_all()
             .map_err(LivenError::Io)?;
+        pl_sync(&backup_path, backup_len);
         sync_data_dir(&self.data_dir).map_err(LivenError::Io)?;
         info!(
             "Repair backup: {} -> {}",
@@ -1731,20 +1749,16 @@ impl StorageEngine {
         batch: Vec<(String, String, DataValue)>,
     ) -> crate::error::Result<Vec<Record>> {
         self.ensure_writable()?;
-        // Pre-validate streams count and index RAM limits transactionally
+        // Validate the stream budget up front. Index-RAM decisions are left to
+        // the flusher's per-entry authoritative check so a mixed batch (existing
+        // keys + one new key over budget) does not reject the whole batch.
         let mut new_streams = HashSet::new();
-        let mut new_keys_size = 0u64;
 
         {
             let streams_guard = self.streams_set.lock().unwrap();
-            for (stream_name, key, _) in &batch {
+            for (stream_name, _, _) in &batch {
                 if !streams_guard.contains(stream_name) && !new_streams.contains(stream_name) {
                     new_streams.insert(stream_name.clone());
-                }
-
-                let compound_key = format!("{}:{}", stream_name, key);
-                if !self.skipmap.contains_key(&compound_key) {
-                    new_keys_size += primary_charge(&compound_key) + TIMESTAMP_INDEX_NODE_BYTES;
                 }
             }
 
@@ -1754,16 +1768,6 @@ impl StorageEngine {
                 });
             }
         }
-
-        let current_ram = self.index_ram_bytes.load(Ordering::SeqCst);
-        let projected = current_ram + new_keys_size;
-        if projected > self.max_index_ram_bytes {
-            return Err(create_index_ram_limit_error(
-                self.max_index_ram_bytes,
-                projected,
-            ));
-        }
-        self.note_high_water(projected);
 
         // Apply stream registration
         if !new_streams.is_empty() {
@@ -1789,12 +1793,31 @@ impl StorageEngine {
             rx_channels.push(rx);
         }
 
+        // Wait for every acknowledgement before returning, so entries that fit
+        // the budget are applied even when another entry in the same batch is
+        // rejected by the flusher's per-entry index-RAM check.
         let mut results = Vec::with_capacity(rx_channels.len());
+        let mut first_error: Option<LivenError> = None;
         for rx in rx_channels {
-            let record = rx.recv().map_err(|e| {
-                LivenError::Internal(format!("LogRingBuffer coordination error: {}", e))
-            })??;
-            results.push(record);
+            match rx.recv() {
+                Ok(Ok(record)) => results.push(record),
+                Ok(Err(e)) => {
+                    if first_error.is_none() {
+                        first_error = Some(e.into());
+                    }
+                }
+                Err(e) => {
+                    if first_error.is_none() {
+                        first_error = Some(LivenError::Internal(format!(
+                            "LogRingBuffer coordination error: {}",
+                            e
+                        )));
+                    }
+                }
+            }
+        }
+        if let Some(e) = first_error {
+            return Err(e);
         }
 
         Ok(results)
@@ -2374,6 +2397,7 @@ impl StorageEngine {
             .read(true)
             .open(&compacted_path)
             .map_err(LivenError::Io)?;
+        pl_create(&compacted_path);
 
         comp_file.lock_exclusive().map_err(LivenError::Io)?;
         test_crash_point("after_create");
@@ -2438,7 +2462,13 @@ impl StorageEngine {
                 frame_buf.extend_from_slice(&crc32.to_be_bytes());
                 frame_buf.extend_from_slice(&local_buf);
 
+                let frame_start = offset;
                 comp_file.write_all(&frame_buf).map_err(LivenError::Io)?;
+                pl_write(
+                    &compacted_path,
+                    frame_start,
+                    frame_start + frame_buf.len() as u64,
+                );
 
                 new_pointers.insert(compound_key, (pointer, new_ptr));
 
@@ -2449,6 +2479,7 @@ impl StorageEngine {
 
         test_crash_point("after_write");
         comp_file.sync_data().map_err(LivenError::Io)?;
+        pl_sync(&compacted_path, offset);
         test_crash_point("after_sync_data");
         comp_file.unlock().map_err(LivenError::Io)?;
 
@@ -2507,6 +2538,7 @@ impl StorageEngine {
         test_crash_point("before_unlink");
         let mut removed_any = false;
         for (_, path) in inactive_segments {
+            pl_unlink(&path);
             let _ = fs::remove_file(path);
             if !removed_any {
                 removed_any = true;
@@ -2549,6 +2581,9 @@ fn test_crash_point(point: &str) {
         if let Ok(value) = std::env::var("LIVEN_TEST_CRASH_POINT")
             && value == point
         {
+            if std::env::var_os("LIVEN_POWER_LOSS").is_some() {
+                crate::power_loss::materialize();
+            }
             std::process::abort();
         }
     }
@@ -2558,18 +2593,71 @@ fn test_crash_point(point: &str) {
     }
 }
 
+#[inline]
+fn pl_create(path: &Path) {
+    #[cfg(debug_assertions)]
+    crate::power_loss::record_create(path);
+    #[cfg(not(debug_assertions))]
+    let _ = path;
+}
+
+#[inline]
+fn pl_write(path: &Path, start: u64, end: u64) {
+    #[cfg(debug_assertions)]
+    crate::power_loss::record_write(path, start, end);
+    #[cfg(not(debug_assertions))]
+    let _ = (path, start, end);
+}
+
+#[inline]
+fn pl_sync(path: &Path, offset: u64) {
+    #[cfg(debug_assertions)]
+    crate::power_loss::record_sync(path, offset);
+    #[cfg(not(debug_assertions))]
+    let _ = (path, offset);
+}
+
+#[inline]
+fn pl_truncate_sync(path: &Path, len: u64) {
+    #[cfg(debug_assertions)]
+    crate::power_loss::record_truncate_sync(path, len);
+    #[cfg(not(debug_assertions))]
+    let _ = (path, len);
+}
+
+#[inline]
+fn pl_unlink(path: &Path) {
+    #[cfg(debug_assertions)]
+    crate::power_loss::record_unlink(path);
+    #[cfg(not(debug_assertions))]
+    let _ = path;
+}
+
+#[inline]
+fn pl_dir_sync(dir: &Path) {
+    #[cfg(debug_assertions)]
+    crate::power_loss::record_dir_sync(dir);
+    #[cfg(not(debug_assertions))]
+    let _ = dir;
+}
+
 /// Flushes a directory entry so freshly created or removed segment files are
 /// durable. No-op on platforms where directories cannot be opened as files.
 fn sync_data_dir(dir: &Path) -> std::io::Result<()> {
+    #[cfg(debug_assertions)]
+    if std::env::var_os("LIVEN_TEST_SKIP_DIR_SYNC").is_some() {
+        return Ok(());
+    }
     #[cfg(unix)]
     {
-        File::open(dir)?.sync_all()
+        File::open(dir)?.sync_all()?;
     }
     #[cfg(not(unix))]
     {
         let _ = dir;
-        Ok(())
     }
+    pl_dir_sync(dir);
+    Ok(())
 }
 
 /// Why recovery stopped replaying a segment.
@@ -2900,8 +2988,11 @@ fn backup_torn_region(path: &Path, tear_offset: u64) -> crate::error::Result<Pat
         .truncate(true)
         .open(&backup)
         .map_err(LivenError::Io)?;
+    pl_create(&backup);
     std::io::copy(&mut src.take(file_len - tear_offset), &mut dst).map_err(LivenError::Io)?;
+    pl_write(&backup, 0, file_len - tear_offset);
     dst.sync_all().map_err(LivenError::Io)?;
+    pl_sync(&backup, file_len - tear_offset);
     if let Some(parent) = backup.parent() {
         sync_data_dir(parent).map_err(LivenError::Io)?;
     }
@@ -2933,8 +3024,12 @@ fn write_salvage_marker(path: &Path, target_id: u64, total_len: u64) -> crate::e
         .truncate(true)
         .open(path)
         .map_err(LivenError::Io)?;
+    pl_create(path);
     writeln!(file, "{} {}", target_id, total_len).map_err(LivenError::Io)?;
+    let marker_len = file.metadata().map(|m| m.len()).unwrap_or(0);
+    pl_write(path, 0, marker_len);
     file.sync_all().map_err(LivenError::Io)?;
+    pl_sync(path, marker_len);
     if let Some(parent) = path.parent() {
         sync_data_dir(parent).map_err(LivenError::Io)?;
     }
@@ -3537,13 +3632,20 @@ fn execute_batch_append(
         Ok::<(), LivenError>(())
     })?;
 
+    let mut rolled_over = false;
     if *active_size_guard + (frame_buf.len() as u64) > max_segment_size {
+        rolled_over = true;
+        let old_segment_id = active_segment_id.load(Ordering::SeqCst);
+        let old_path = data_dir.join(format!("{:020}.liven", old_segment_id));
+        let old_size = *active_size_guard;
         if let Some(old_file) = active_file_guard.take() {
             if let Err(e) = old_file.sync_all() {
                 failed.store(true, Ordering::SeqCst);
                 return Err(LivenError::Io(e));
             }
         }
+        pl_sync(&old_path, old_size);
+        test_crash_point("rollover_after_old_sync");
 
         let new_active_id = segment_id_counter.fetch_add(1, Ordering::SeqCst);
         if new_active_id >= COMPACTION_ID_BASE {
@@ -3563,12 +3665,15 @@ fn execute_batch_append(
                 failed.store(true, Ordering::SeqCst);
                 LivenError::Io(e)
             })?;
+        pl_create(&new_path);
+        test_crash_point("rollover_after_create");
         // Persist the directory entry before acknowledging records written into
         // this segment; otherwise a crash can lose the file (and the writes).
         sync_data_dir(data_dir).map_err(|e| {
             failed.store(true, Ordering::SeqCst);
             LivenError::Io(e)
         })?;
+        test_crash_point("rollover_after_dir_sync");
 
         *active_file_guard = Some(file);
         *active_size_guard = 0;
@@ -3580,6 +3685,8 @@ fn execute_batch_append(
         LivenError::Internal("No active file handle found".to_string())
     })?;
     let current_offset = *active_size_guard;
+    let write_segment_id = active_segment_id.load(Ordering::SeqCst);
+    let write_path = data_dir.join(format!("{:020}.liven", write_segment_id));
 
     file.write_all(&frame_buf).map_err(|e| {
         // A partial write leaves the file in an unknown state. Stop accepting
@@ -3592,6 +3699,15 @@ fn execute_batch_append(
             LivenError::Io(e)
         }
     })?;
+    pl_write(
+        &write_path,
+        current_offset,
+        current_offset + frame_buf.len() as u64,
+    );
+    test_crash_point("flush_after_write");
+    if rolled_over {
+        test_crash_point("rollover_after_write");
+    }
     if batch_has_replace {
         test_crash_point("replace_after_write");
     }
@@ -3609,11 +3725,16 @@ fn execute_batch_append(
         })?;
         flush_fsyncs.fetch_add(1, Ordering::Relaxed);
     }
+    pl_sync(&write_path, current_offset + frame_buf.len() as u64);
+    test_crash_point("flush_after_sync");
+    if rolled_over {
+        test_crash_point("rollover_after_sync");
+    }
     if batch_has_replace {
         test_crash_point("replace_after_sync");
     }
 
-    let segment_id = active_segment_id.load(Ordering::SeqCst);
+    let segment_id = write_segment_id;
 
     let mut offset_acc = current_offset;
     let mut records_iter = batch_records_to_add.into_iter();
@@ -3769,6 +3890,7 @@ fn execute_batch_append(
         *fb.borrow_mut() = frame_buf;
     });
 
+    test_crash_point("flush_after_ack");
     Ok(())
 }
 
@@ -3996,6 +4118,8 @@ impl StorageEngine {
         segments.sort_by_key(|(id, _)| *id);
 
         let mut report = RetentionReport::default();
+        let mut first_unlink = true;
+        test_crash_point("retention_before_unlink");
         for (segment_id, path) in segments {
             report.checked_segments += 1;
             if !segment_is_fully_expired(&path, now, &policy).unwrap_or(false) {
@@ -4030,13 +4154,19 @@ impl StorageEngine {
             }
 
             self.file_handles.lock().unwrap().remove(&segment_id);
+            pl_unlink(&path);
             fs::remove_file(&path).map_err(LivenError::Io)?;
+            if first_unlink {
+                first_unlink = false;
+                test_crash_point("retention_after_unlink");
+            }
             report.deleted_segments += 1;
             report.freed_bytes += freed_bytes;
         }
 
         if report.deleted_segments > 0 {
             sync_data_dir(&self.data_dir).map_err(LivenError::Io)?;
+            test_crash_point("retention_after_dir_sync");
             info!(
                 "Retention: deleted {} segment(s), {} key(s), {} bytes",
                 report.deleted_segments, report.deleted_keys, report.freed_bytes
@@ -4198,9 +4328,16 @@ impl Drop for StorageEngine {
         // but it must not be silent: the next open will recover from the log.
         if let Ok(mut active_file_guard) = self.active_file.lock()
             && let Some(file) = active_file_guard.take()
-            && let Err(e) = file.sync_all()
         {
-            error!("final fsync on shutdown failed: {}", e);
+            let path = self
+                .data_dir
+                .join(format!("{:020}.liven", self.active_segment_id()));
+            let len = file.metadata().map(|m| m.len()).unwrap_or(0);
+            if let Err(e) = file.sync_all() {
+                error!("final fsync on shutdown failed: {}", e);
+            } else {
+                pl_sync(&path, len);
+            }
         }
     }
 }
