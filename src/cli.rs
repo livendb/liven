@@ -300,6 +300,16 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                     for backup in &report.repair_backups {
                         println!("  Backup written: {}", backup.display());
                     }
+                    for backup in &report.torn_backups {
+                        println!("  Torn-tail backup: {}", backup.display());
+                    }
+                    if report.salvaged_frames > 0 {
+                        println!(
+                            "  Salvaged {} frame(s) into {} segment(s)",
+                            report.salvaged_frames,
+                            report.salvage_segments.len()
+                        );
+                    }
                 } else {
                     println!("No issues found — all segments are intact.");
                 }
