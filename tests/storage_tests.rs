@@ -1,4 +1,4 @@
-use liven::storage::{StorageEngine, deserialize_payload, serialize_payload_into};
+use liven::storage::{RecoveryMode, StorageEngine, deserialize_payload, serialize_payload_into};
 use liven::types::DataValue;
 use std::fs;
 
@@ -604,8 +604,15 @@ fn test_recovery_mid_file_corruption_skips_segment() {
         }
     }
 
-    // Recover - should skip corrupted segment and still start
-    let engine = StorageEngine::new(&path, 1024 * 1024).unwrap();
+    // Default recovery refuses to discard the valid frames after the bad one.
+    let err = StorageEngine::new(&path, 1024 * 1024)
+        .err()
+        .expect("mid-file corruption with valid later frames must require repair");
+    assert!(err.to_string().contains("stranded"), "got: {err}");
+
+    // Repair salvages the later frames, truncates the bad segment, and starts.
+    let engine =
+        StorageEngine::new_with_recovery_mode(&path, 1024 * 1024, RecoveryMode::Repair).unwrap();
 
     assert!(engine.recovery_report.is_some());
     let report = engine.recovery_report.as_ref().unwrap();

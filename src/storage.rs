@@ -1034,10 +1034,18 @@ impl StorageEngine {
                                     self.index_ram_bytes.fetch_add(charge, Ordering::SeqCst)
                                         + charge;
                                 if current_ram > self.max_index_ram_bytes {
-                                    return Err(create_index_ram_limit_error(
-                                        self.max_index_ram_bytes,
-                                        current_ram,
-                                    ));
+                                    if self.recovery_mode == RecoveryMode::Strict {
+                                        return Err(create_index_ram_limit_error(
+                                            self.max_index_ram_bytes,
+                                            current_ram,
+                                        ));
+                                    }
+                                    let needed_mb = current_ram.div_ceil(1024 * 1024).max(1);
+                                    warn!(
+                                        "RECOVERY: index RAM limit exceeded: {} bytes used of {} allowed. Loaded anyway; new keys will be rejected until usage drops or the limit is raised. Set limits.max_index_ram_mb to at least {} to clear this.",
+                                        current_ram, self.max_index_ram_bytes, needed_mb
+                                    );
+                                    self.index_high_water_reached.store(true, Ordering::SeqCst);
                                 }
 
                                 let pointer = LogPointer {
@@ -1288,23 +1296,45 @@ impl StorageEngine {
             None
         };
         let start = tear_offset.saturating_add(1);
-        let stranded = match find_resync(file, file_len, start, now_ms, min_seq)? {
+        let (stranded, stranded_end) = match find_resync(file, file_len, start, now_ms, min_seq)? {
             Some(resync) => collect_stranded(file, file_len, resync, now_ms, min_seq)?,
-            None => Vec::new(),
+            None => (Vec::new(), tear_offset),
         };
 
         if !stranded.is_empty() {
             if self.recovery_mode != RecoveryMode::Repair {
+                // Name the bad frame and any torn frame after the last good
+                // stranded frame so an operator knows what is at risk.
+                let mut keys = Vec::new();
+                if kind != TearKind::Trailing
+                    && let Some(key) = extract_key_at(file, file_len, tear_offset)
+                {
+                    keys.push(key);
+                }
+                if stranded_end < file_len
+                    && let Some(key) = extract_key_at(file, file_len, stranded_end)
+                {
+                    keys.push(key);
+                }
+                keys.sort();
+                keys.dedup();
+                let keys_label = if keys.is_empty() {
+                    "none parseable".to_string()
+                } else {
+                    keys.join(", ")
+                };
                 warn!(
-                    "RECOVERY REPORT: segment {} has a torn region at offset {} followed by {} valid stranded frame(s). Refusing to truncate.",
+                    "RECOVERY REPORT: segment {} has a torn region at offset {} followed by {} valid stranded frame(s). Unrecoverable key(s): {}. Refusing to truncate.",
                     segment_id,
                     tear_offset,
-                    stranded.len()
+                    stranded.len(),
+                    keys_label
                 );
                 return Err(LivenError::RecoveryRequired {
                     segment_id,
                     offset: tear_offset,
                     stranded: stranded.len(),
+                    keys: keys_label,
                 });
             }
 
@@ -1540,11 +1570,13 @@ impl StorageEngine {
         let high_water_bytes = limit_bytes
             .saturating_mul(self.index_high_water_percent.load(Ordering::Relaxed) as u64)
             / 100;
+        let used_bytes = self.index_ram_bytes.load(Ordering::SeqCst);
         IndexUsage {
-            used_bytes: self.index_ram_bytes.load(Ordering::SeqCst),
+            used_bytes,
             limit_bytes,
             high_water_bytes,
-            high_water_reached: self.index_high_water_reached.load(Ordering::SeqCst),
+            // Live value: retention and deletes must clear it.
+            high_water_reached: used_bytes >= high_water_bytes,
         }
     }
 
@@ -1586,7 +1618,8 @@ impl StorageEngine {
         key: &str,
         value: DataValue,
         is_tombstone: bool,
-    ) -> crate::error::Result<std::sync::mpsc::Receiver<Result<Record, String>>> {
+    ) -> crate::error::Result<std::sync::mpsc::Receiver<Result<Record, ring_buffer::AckError>>>
+    {
         self.ensure_writable()?;
         let compound_key = format!("{}:{}", stream_name, key);
 
@@ -2581,12 +2614,7 @@ fn is_plausible_timestamp(ts: i64, now_ms: i64) -> bool {
 /// Cheap header checks run before any payload I/O. The header is not covered
 /// by the payload CRC, so these checks plus the payload CRC and structural
 /// checks are what make a resync candidate credible.
-fn plausible_header(
-    header: &[u8; 26],
-    offset: u64,
-    file_len: u64,
-    now_ms: i64,
-) -> Option<(u64, i64, u8, u8, u64, u32)> {
+fn header_shape_plausible(header: &[u8; 26], now_ms: i64) -> Option<(u64, i64, u8, u8, u64, u32)> {
     let (seq_id, timestamp, type_tag, flags, payload_len, crc32) = decode_frame_header(header);
     let payload_len = payload_len as u64;
     if seq_id == 0
@@ -2594,8 +2622,21 @@ fn plausible_header(
         || type_tag > 9
         || (flags != 0x01 && flags != 0x02)
         || !(4..=MAX_SALVAGE_PAYLOAD).contains(&payload_len)
-        || offset.saturating_add(26).saturating_add(payload_len) > file_len
     {
+        return None;
+    }
+    Some((seq_id, timestamp, type_tag, flags, payload_len, crc32))
+}
+
+fn plausible_header(
+    header: &[u8; 26],
+    offset: u64,
+    file_len: u64,
+    now_ms: i64,
+) -> Option<(u64, i64, u8, u8, u64, u32)> {
+    let (seq_id, timestamp, type_tag, flags, payload_len, crc32) =
+        header_shape_plausible(header, now_ms)?;
+    if offset.saturating_add(26).saturating_add(payload_len) > file_len {
         return None;
     }
     Some((seq_id, timestamp, type_tag, flags, payload_len, crc32))
@@ -2720,24 +2761,58 @@ fn find_resync(
         if plausible_header(&header, pos, file_len, now_ms).is_some()
             && let Some((frame_len, seq_id)) = validate_frame_at(file, file_len, pos, now_ms)?
             && min_seq.is_none_or(|min| seq_id > min)
-            && let Some((_, next_seq)) = validate_frame_at(file, file_len, pos + frame_len, now_ms)?
-            && min_seq.is_none_or(|_| next_seq > seq_id)
         {
-            return Ok(Some(pos));
+            let next = pos + frame_len;
+            let next_valid = validate_frame_at(file, file_len, next, now_ms)?
+                .is_some_and(|(_, next_seq)| min_seq.is_none_or(|_| next_seq > seq_id));
+            // A single valid frame is credible when it is the last frame (EOF)
+            // or when the bytes after it are a torn header/payload. This is the
+            // 0.1.3 shape where the last stranded frame was itself torn.
+            if next_valid || tail_looks_torn(file, file_len, next, now_ms)? {
+                return Ok(Some(pos));
+            }
         }
         pos += 1;
     }
     Ok(None)
 }
 
-/// Collect every consecutive valid frame starting at `resync`.
+/// True when `offset` is EOF or the bytes there cannot form a complete frame
+/// but do look like the beginning of one (partial header or truncated payload).
+fn tail_looks_torn(
+    file: &File,
+    file_len: u64,
+    offset: u64,
+    now_ms: i64,
+) -> crate::error::Result<bool> {
+    if offset >= file_len {
+        return Ok(true);
+    }
+    let remaining = file_len - offset;
+    if remaining < 26 {
+        return Ok(true);
+    }
+    let mut header = [0u8; 26];
+    if file.read_exact_at(&mut header, offset).is_err() {
+        return Ok(false);
+    }
+    let Some((_seq, _ts, _tag, _flags, payload_len, _crc)) =
+        header_shape_plausible(&header, now_ms)
+    else {
+        return Ok(false);
+    };
+    Ok(offset.saturating_add(26).saturating_add(payload_len) > file_len)
+}
+
+/// Collect every consecutive valid frame starting at `resync`. Returns the
+/// frames and the offset immediately after the last valid one.
 fn collect_stranded(
     file: &File,
     file_len: u64,
     resync: u64,
     now_ms: i64,
     min_seq: Option<u64>,
-) -> crate::error::Result<Vec<StrandedFrame>> {
+) -> crate::error::Result<(Vec<StrandedFrame>, u64)> {
     let mut frames = Vec::new();
     let mut pos = resync;
     let mut last_seq = min_seq.unwrap_or(0);
@@ -2754,7 +2829,44 @@ fn collect_stranded(
         last_seq = seq_id;
         pos += frame_len;
     }
-    Ok(frames)
+    Ok((frames, pos))
+}
+
+/// Extract a `"stream:key"` label from a frame at `offset` even if the payload
+/// is torn or its CRC is bad. Used only to make `RecoveryRequired` actionable.
+fn extract_key_at(file: &File, file_len: u64, offset: u64) -> Option<String> {
+    if offset.saturating_add(30) > file_len {
+        return None;
+    }
+    let mut header = [0u8; 26];
+    file.read_exact_at(&mut header, offset).ok()?;
+    let (_seq, _ts, type_tag, _flags, payload_len, _crc) = decode_frame_header(&header);
+    let payload_len = payload_len as u64;
+    if type_tag > 9 || payload_len < 4 {
+        return None;
+    }
+    let mut len_buf = [0u8; 2];
+    file.read_exact_at(&mut len_buf, offset + 26).ok()?;
+    let stream_len = u16::from_be_bytes(len_buf) as u64;
+    if 4 + stream_len > payload_len || offset + 30 + stream_len > file_len {
+        return None;
+    }
+    let mut prefix = vec![0u8; (4 + stream_len) as usize];
+    file.read_exact_at(&mut prefix, offset + 26).ok()?;
+    let stream = std::str::from_utf8(&prefix[2..(2 + stream_len) as usize]).ok()?;
+    let key_len = u16::from_be_bytes([
+        prefix[(2 + stream_len) as usize],
+        prefix[(3 + stream_len) as usize],
+    ]) as u64;
+    if 4 + stream_len + key_len > payload_len || offset + 26 + 4 + stream_len + key_len > file_len {
+        return None;
+    }
+    let mut key = vec![0u8; key_len as usize];
+    file.read_exact_at(&mut key, offset + 26 + 4 + stream_len)
+        .ok()?;
+    let key = std::str::from_utf8(&key).ok()?;
+    crate::storage::key::StreamKey::from_str(key).ok()?;
+    Some(format!("{}:{}", stream, key))
 }
 
 /// Copy `tear_offset..EOF` to `<segment>.torn-<offset>.bak` and fsync both the
@@ -3117,13 +3229,16 @@ fn run_flusher_loop(
                 let err_str = e.to_string();
                 match entry {
                     ring_buffer::LogEntry::Single { response_tx, .. } => {
-                        let _ = response_tx.send(Err(err_str.clone()));
+                        let _ =
+                            response_tx.send(Err(ring_buffer::AckError::Message(err_str.clone())));
                     }
                     ring_buffer::LogEntry::TombstoneBatch { response_tx, .. } => {
-                        let _ = response_tx.send(Err(err_str.clone()));
+                        let _ =
+                            response_tx.send(Err(ring_buffer::AckError::Message(err_str.clone())));
                     }
                     ring_buffer::LogEntry::Replace { response_tx, .. } => {
-                        let _ = response_tx.send(Err(err_str.clone()));
+                        let _ =
+                            response_tx.send(Err(ring_buffer::AckError::Message(err_str.clone())));
                     }
                     ring_buffer::LogEntry::Shutdown => {
                         // Shutdown sentinel, no response needed
@@ -3166,13 +3281,13 @@ fn execute_batch_append(
 
     enum PendingComplete {
         Single {
-            response_tx: std::sync::mpsc::SyncSender<Result<Record, String>>,
+            response_tx: std::sync::mpsc::SyncSender<Result<Record, ring_buffer::AckError>>,
         },
         Replace {
-            response_tx: std::sync::mpsc::SyncSender<Result<Record, String>>,
+            response_tx: std::sync::mpsc::SyncSender<Result<Record, ring_buffer::AckError>>,
         },
         Batch {
-            response_tx: std::sync::mpsc::SyncSender<Result<Vec<Record>, String>>,
+            response_tx: std::sync::mpsc::SyncSender<Result<Vec<Record>, ring_buffer::AckError>>,
             count: usize,
         },
     }
@@ -3217,11 +3332,10 @@ fn execute_batch_append(
                             let projected =
                                 index_ram_bytes.load(Ordering::SeqCst) + projected_new_bytes + size;
                             if projected > max_index_ram_bytes {
-                                let _ = response_tx.send(Err(create_index_ram_limit_error(
-                                    max_index_ram_bytes,
-                                    projected,
-                                )
-                                .to_string()));
+                                let _ = response_tx.send(Err(ring_buffer::AckError::IndexRam {
+                                    max_bytes: max_index_ram_bytes,
+                                    current_bytes: projected,
+                                }));
                                 continue;
                             }
                             if projected >= high_water_bytes
@@ -3297,11 +3411,10 @@ fn execute_batch_append(
                         let projected =
                             index_ram_bytes.load(Ordering::SeqCst) + projected_new_bytes + size;
                         if projected > max_index_ram_bytes {
-                            let _ = response_tx.send(Err(create_index_ram_limit_error(
-                                max_index_ram_bytes,
-                                projected,
-                            )
-                            .to_string()));
+                            let _ = response_tx.send(Err(ring_buffer::AckError::IndexRam {
+                                max_bytes: max_index_ram_bytes,
+                                current_bytes: projected,
+                            }));
                             continue;
                         }
                         if projected >= high_water_bytes
@@ -3998,6 +4111,76 @@ fn segment_is_fully_expired(
 
     // Empty segments and tombstone-only segments carry no live data.
     Ok(saw_live_frame || offset == 0)
+}
+
+#[cfg(test)]
+#[allow(clippy::items_after_test_module)]
+mod ack_tests {
+    use super::*;
+
+    #[test]
+    fn flusher_budget_rejection_is_typed() {
+        let dir = tempfile::tempdir().unwrap();
+        let active_path = dir.path().join(format!("{:020}.liven", 1u64));
+        let active = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&active_path)
+            .unwrap();
+
+        let (response_tx, response_rx) = std::sync::mpsc::sync_channel(1);
+        let mut batch = vec![ring_buffer::LogEntry::Single {
+            stream_name: "s".to_string(),
+            key: crate::storage::key::StreamKey::from_str("k").unwrap(),
+            value: DataValue::String("v".to_string()),
+            is_tombstone: false,
+            response_tx,
+        }];
+
+        let seq = Arc::new(AtomicU64::new(1));
+        let active_id = Arc::new(AtomicU64::new(1));
+        let id_counter = Arc::new(AtomicU64::new(2));
+        let file = Arc::new(Mutex::new(Some(active)));
+        let size = Arc::new(Mutex::new(0u64));
+        let skipmap = Arc::new(SkipMap::new());
+        let (broadcast_tx, _) = broadcast::channel(16);
+        let handles = Arc::new(Mutex::new(HashMap::new()));
+        let failed = Arc::new(AtomicBool::new(false));
+        let index_ram = Arc::new(AtomicU64::new(0));
+        let high_water = Arc::new(AtomicBool::new(false));
+        let fsyncs = Arc::new(AtomicU64::new(0));
+        let timestamp_indexes = Arc::new(Mutex::new(HashMap::new()));
+
+        execute_batch_append(
+            &mut batch,
+            dir.path(),
+            1024 * 1024,
+            &seq,
+            &active_id,
+            &id_counter,
+            &file,
+            &size,
+            &skipmap,
+            &broadcast_tx,
+            &handles,
+            "always",
+            &failed,
+            &index_ram,
+            1,
+            1,
+            &high_water,
+            &fsyncs,
+            &timestamp_indexes,
+        )
+        .unwrap();
+
+        match response_rx.recv().unwrap() {
+            Err(ring_buffer::AckError::IndexRam { max_bytes, .. }) => {
+                assert_eq!(max_bytes, 1);
+            }
+            other => panic!("expected typed IndexRam ack error, got {other:?}"),
+        }
+    }
 }
 
 impl Drop for StorageEngine {

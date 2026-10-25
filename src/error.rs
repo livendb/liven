@@ -119,12 +119,13 @@ pub enum LivenError {
     /// Normal recovery found valid frames stranded after a torn region. It will
     /// not truncate them; the operator must run offline repair.
     #[error(
-        "segment {segment_id} has a torn region at offset {offset} followed by {stranded} valid stranded frame(s). Refusing to truncate; run `liven start --repair` to salvage them."
+        "segment {segment_id} has a torn region at offset {offset} followed by {stranded} valid stranded frame(s). Unrecoverable key(s): {keys}. Refusing to truncate; run `liven start --repair` to salvage them."
     )]
     RecoveryRequired {
         segment_id: u64,
         offset: u64,
         stranded: usize,
+        keys: String,
     },
 }
 
@@ -133,6 +134,21 @@ pub type Result<T> = std::result::Result<T, LivenError>;
 impl From<String> for LivenError {
     fn from(s: String) -> Self {
         LivenError::Storage(s)
+    }
+}
+
+impl From<crate::storage::ring_buffer::AckError> for LivenError {
+    fn from(e: crate::storage::ring_buffer::AckError) -> Self {
+        match e {
+            crate::storage::ring_buffer::AckError::IndexRam {
+                max_bytes,
+                current_bytes,
+            } => LivenError::IndexRamLimitExceeded {
+                max_bytes,
+                current_bytes,
+            },
+            crate::storage::ring_buffer::AckError::Message(m) => LivenError::Storage(m),
+        }
     }
 }
 

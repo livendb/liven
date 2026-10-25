@@ -91,10 +91,18 @@ pub fn calculate_auto_budget(system_ram_mb: u64) -> u64 {
     budget.clamp(32, 4096) // Min 32MB, Max 4GB
 }
 
-/// Estimates key capacity based on RAM budget
-/// Formula: budget_mb * 1024 * 1024 / 84 bytes per key
+/// Representative `"stream:key"` length used for capacity estimates.
+pub const ESTIMATE_COMPOUND_KEY_LEN: u64 = 20;
+
+/// Real per-key charge: the compound key bytes plus the 64-byte primary node
+/// and 64-byte timestamp-index node.
+pub const ESTIMATE_BYTES_PER_KEY: u64 = ESTIMATE_COMPOUND_KEY_LEN + 128;
+
+/// Estimates key capacity based on the real index charge for a representative
+/// 20-byte `"stream:key"`: `budget_bytes / (20 + 128)`. Actual RSS is slightly
+/// higher because of allocator rounding; see docs/RAM_CAPACITY.md.
 pub fn estimate_key_capacity(budget_mb: u64) -> u64 {
-    (budget_mb * 1024 * 1024).div_ceil(84)
+    (budget_mb * 1024 * 1024).div_ceil(ESTIMATE_BYTES_PER_KEY)
 }
 
 #[cfg(test)]
@@ -114,26 +122,9 @@ mod tests {
 
     #[test]
     fn test_estimate_key_capacity() {
-        // Test key capacity estimation (approximate due to integer division)
-        let capacity_16 = estimate_key_capacity(16);
-        assert!(
-            capacity_16 > 190_000 && capacity_16 < 200_000,
-            "16MB should be ~190K keys, got {}",
-            capacity_16
-        );
-
-        let capacity_64 = estimate_key_capacity(64);
-        assert!(
-            capacity_64 > 790_000 && capacity_64 < 800_000,
-            "64MB should be ~798K keys, got {}",
-            capacity_64
-        );
-
-        let capacity_256 = estimate_key_capacity(256);
-        assert!(
-            capacity_256 > 3_100_000 && capacity_256 < 3_200_000,
-            "256MB should be ~3.19M keys, got {}",
-            capacity_256
-        );
+        // budget_bytes / (20-byte compound key + 128-byte charge).
+        assert_eq!(estimate_key_capacity(16), 113_360);
+        assert_eq!(estimate_key_capacity(64), 453_439);
+        assert_eq!(estimate_key_capacity(256), 1_813_754);
     }
 }

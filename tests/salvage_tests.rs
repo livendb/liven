@@ -231,21 +231,181 @@ fn garbage_that_resembles_one_frame_is_not_a_resync_point() {
     setup_prefix(dir.path(), 4);
     let seg = segment_files(dir.path()).pop().unwrap();
 
-    // A header + payload that fails CRC, followed by exactly one valid frame.
+    // A header + payload that fails CRC, then bytes that are not a frame.
     let mut fake = frame_bytes(99, "phantom", "nope");
-    let crc_at = 22;
-    fake[crc_at] ^= 0xFF;
+    fake[22] ^= 0xFF;
     let mut file = OpenOptions::new().append(true).open(&seg).unwrap();
     file.write_all(&fake).unwrap();
-    file.write_all(&frame_bytes(100, "real_but_alone", "v"))
+    file.write_all(&[0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x11, 0x22])
         .unwrap();
     file.sync_all().unwrap();
 
-    // One valid frame is not enough: recovery truncates instead of resyncing.
+    // No valid frame at all: recovery truncates instead of resyncing.
     let engine = StorageEngine::new(dir.path(), SEG).unwrap();
     assert!(engine.get(STREAM, "phantom").unwrap().is_none());
-    assert!(engine.get(STREAM, "real_but_alone").unwrap().is_none());
     drop(engine);
+}
+
+#[test]
+fn single_stranded_frame_at_eof_is_salvaged() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_seg, _offset, _torn) = make_stranded_fixture(dir.path(), 5, 1);
+
+    let err = StorageEngine::new(dir.path(), SEG)
+        .err()
+        .expect("one stranded frame must still be reported");
+    assert!(err.to_string().contains("stranded"), "got: {err}");
+
+    let report = StorageEngine::repair(dir.path(), SEG, RecoveryMode::Repair).unwrap();
+    assert_eq!(report.salvaged_frames, 1);
+    assert_all_present(dir.path(), 5, 1);
+}
+
+#[test]
+fn last_stranded_frame_may_itself_be_torn() {
+    let dir = tempfile::tempdir().unwrap();
+    let (seg, _offset, _torn) = make_stranded_fixture(dir.path(), 5, 1);
+
+    // Append a second stranded frame, then tear it in half.
+    let second = frame_bytes(7, "stranded1", &"y".repeat(200));
+    let mut file = OpenOptions::new().append(true).open(&seg).unwrap();
+    file.write_all(&second).unwrap();
+    file.sync_all().unwrap();
+    let len = fs::metadata(&seg).unwrap().len();
+    OpenOptions::new()
+        .write(true)
+        .open(&seg)
+        .unwrap()
+        .set_len(len - second.len() as u64 / 2)
+        .unwrap();
+
+    let err = StorageEngine::new(dir.path(), SEG)
+        .err()
+        .expect("valid frames before a torn last frame must be salvaged");
+    let msg = err.to_string();
+    assert!(msg.contains("stranded"), "got: {msg}");
+    assert!(
+        msg.contains("s:stranded1"),
+        "error should name the torn key: {msg}"
+    );
+
+    let report = StorageEngine::repair(dir.path(), SEG, RecoveryMode::Repair).unwrap();
+    assert_eq!(report.salvaged_frames, 1);
+    let engine = StorageEngine::new(dir.path(), SEG).unwrap();
+    for i in 0..4 {
+        assert!(engine.get(STREAM, &format!("k{i}")).unwrap().is_some());
+    }
+    assert!(engine.get(STREAM, "stranded0").unwrap().is_some());
+    assert!(engine.get(STREAM, "stranded1").unwrap().is_none());
+}
+
+#[test]
+fn recovery_required_names_unrecoverable_keys() {
+    let dir = tempfile::tempdir().unwrap();
+    // A long value lets the tear fall inside the value, leaving the key intact.
+    let engine = StorageEngine::new(dir.path(), SEG).unwrap();
+    for i in 0..5 {
+        engine
+            .append(
+                STREAM,
+                &format!("k{i}"),
+                DataValue::String("v".into()),
+                false,
+            )
+            .unwrap();
+    }
+    engine
+        .append(STREAM, "k5", DataValue::String("x".repeat(200)), false)
+        .unwrap();
+    drop(engine);
+
+    let seg = segment_files(dir.path()).pop().unwrap();
+    let (_, len) = last_frame_geometry(&seg);
+    let original_len = fs::metadata(&seg).unwrap().len();
+    OpenOptions::new()
+        .write(true)
+        .open(&seg)
+        .unwrap()
+        .set_len(original_len - len / 4)
+        .unwrap();
+    let mut file = OpenOptions::new().append(true).open(&seg).unwrap();
+    for i in 0..2 {
+        file.write_all(&frame_bytes(100 + i, &format!("stranded{i}"), "sv"))
+            .unwrap();
+    }
+    file.sync_all().unwrap();
+
+    let err = StorageEngine::new(dir.path(), SEG)
+        .err()
+        .expect("default recovery must fail");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("s:k5"),
+        "error should name the torn key: {msg}"
+    );
+}
+
+#[test]
+fn sidecar_and_repair_files_are_ignored_by_recovery() {
+    let dir = tempfile::tempdir().unwrap();
+    setup_prefix(dir.path(), 3);
+    let seg = segment_files(dir.path()).pop().unwrap();
+    let name = seg.file_name().unwrap().to_string_lossy().to_string();
+    fs::write(
+        dir.path().join(format!("{name}.torn-0.bak")),
+        b"not a segment",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join(format!("{name}.repair-123")),
+        b"not a segment",
+    )
+    .unwrap();
+    fs::write(dir.path().join(format!("{name}.salvage-0")), b"3 12\n").unwrap();
+
+    let engine = StorageEngine::new(dir.path(), SEG).unwrap();
+    for i in 0..3 {
+        assert!(engine.get(STREAM, &format!("k{i}")).unwrap().is_some());
+    }
+}
+
+#[test]
+fn post_repair_ids_stay_in_the_normal_range_and_repair_is_clean() {
+    let dir = tempfile::tempdir().unwrap();
+    make_stranded_fixture(dir.path(), 5, 2);
+    let report = StorageEngine::repair(dir.path(), 120, RecoveryMode::Repair).unwrap();
+    let salvage_id = report.salvage_segments[0].0;
+    assert!(salvage_id < u64::MAX / 2);
+
+    // A default-mode start is clean, and a rollover picks an ID above the
+    // salvage segment without entering the compaction range.
+    let engine = StorageEngine::new(dir.path(), 120).unwrap();
+    for i in 0..6 {
+        engine
+            .append(
+                STREAM,
+                &format!("post{i}"),
+                DataValue::String("x".into()),
+                false,
+            )
+            .unwrap();
+    }
+    let active = engine.active_segment_id();
+    assert!(active < u64::MAX / 2);
+    assert!(
+        active > salvage_id,
+        "active {active} must follow salvage {salvage_id}"
+    );
+    drop(engine);
+
+    let engine = StorageEngine::new(dir.path(), 120).unwrap();
+    for i in 0..6 {
+        assert!(engine.get(STREAM, &format!("post{i}")).unwrap().is_some());
+    }
+    drop(engine);
+
+    let again = StorageEngine::repair(dir.path(), 120, RecoveryMode::Repair).unwrap();
+    assert_eq!(again.salvaged_frames, 0);
 }
 
 #[test]
@@ -367,6 +527,39 @@ fn compacted_segment_stranded_frames_are_salvaged() {
     assert_eq!(complete, 5, "complete compacted prefix frames must survive");
     assert!(engine.get(STREAM, "c0").unwrap().is_some());
     assert!(engine.get(STREAM, "c1").unwrap().is_some());
+}
+
+const V013_SEGMENT: &[u8] = include_bytes!("fixtures/v0.1.3-stranded/00000000000000000001.liven");
+
+/// Real directory produced by the tagged v0.1.3 binary: six records, the last
+/// frame physically torn, then three more records ingested after the tear.
+#[test]
+fn real_v013_stranded_directory_is_salvaged() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("00000000000000000001.liven"), V013_SEGMENT).unwrap();
+
+    let err = StorageEngine::new(dir.path(), SEG)
+        .err()
+        .expect("v0.1.3 stranded frames must be reported");
+    assert!(err.to_string().contains("stranded"), "got: {err}");
+
+    let report = StorageEngine::repair(dir.path(), SEG, RecoveryMode::Repair).unwrap();
+    assert_eq!(report.salvaged_frames, 3);
+
+    let engine = StorageEngine::new(dir.path(), SEG).unwrap();
+    for i in 0..5 {
+        assert!(engine.get(STREAM, &format!("k{i}")).unwrap().is_some());
+    }
+    assert!(engine.get(STREAM, "k5").unwrap().is_none());
+    for i in 0..3 {
+        assert!(
+            engine
+                .get(STREAM, &format!("stranded{i}"))
+                .unwrap()
+                .is_some(),
+            "real v0.1.3 stranded{i} lost"
+        );
+    }
 }
 
 // ── Crash during repair, at each durable step ────────────────────────────────

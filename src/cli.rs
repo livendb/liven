@@ -85,7 +85,7 @@ fn print_usage() {
         "  --repair               Offline repair: backup and truncate corrupted segments, print report, exit"
     );
     println!(
-        "  --strict-recovery      Fail hard on any CRC mismatch during recovery (investigate manually)"
+        "  --strict-recovery      Fail hard on any CRC mismatch or over-budget index during recovery"
     );
 }
 

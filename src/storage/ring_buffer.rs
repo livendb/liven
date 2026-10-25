@@ -3,6 +3,15 @@ use crate::types::DataValue;
 use crate::types::Record;
 use std::sync::mpsc::SyncSender;
 
+/// Acknowledgement failure. Kept structured so the flusher's authoritative
+/// index-budget rejection survives the channel as `IndexRamLimitExceeded`
+/// instead of degrading to a `Storage(String)`.
+#[derive(Debug, Clone)]
+pub enum AckError {
+    IndexRam { max_bytes: u64, current_bytes: u64 },
+    Message(String),
+}
+
 /// Sentinel value to signal flusher thread shutdown.
 #[derive(Debug, Clone, Copy)]
 pub struct ShutdownSentinel;
@@ -14,12 +23,12 @@ pub enum LogEntry {
         key: StreamKey,
         value: DataValue,
         is_tombstone: bool,
-        response_tx: SyncSender<Result<Record, String>>,
+        response_tx: SyncSender<Result<Record, AckError>>,
     },
     TombstoneBatch {
         stream_name: String,
         keys: Vec<StreamKey>,
-        response_tx: SyncSender<Result<Vec<Record>, String>>,
+        response_tx: SyncSender<Result<Vec<Record>, AckError>>,
     },
     /// One-frame replacement of an existing key. A single active frame (no
     /// tombstone) makes upsert/update atomic with respect to torn tails: the
@@ -28,7 +37,7 @@ pub enum LogEntry {
         stream_name: String,
         key: StreamKey,
         value: DataValue,
-        response_tx: SyncSender<Result<Record, String>>,
+        response_tx: SyncSender<Result<Record, AckError>>,
     },
     /// Shutdown signal for clean flusher thread termination.
     Shutdown,

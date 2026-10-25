@@ -13,27 +13,11 @@ fn test_auto_budget_calculation() {
 
 #[test]
 fn test_key_capacity_estimation() {
-    // Test the key capacity formula: budget_mb * 1024 * 1024 / 84
-    let capacity_16 = sysinfo::estimate_key_capacity(16);
-    let capacity_64 = sysinfo::estimate_key_capacity(64);
-    let capacity_256 = sysinfo::estimate_key_capacity(256);
-
-    // Approximate checks due to integer division
-    assert!(
-        capacity_16 > 199_000 && capacity_16 < 200_000,
-        "16MB: got {}",
-        capacity_16
-    );
-    assert!(
-        capacity_64 > 798_000 && capacity_64 < 799_000,
-        "64MB: got {}",
-        capacity_64
-    );
-    assert!(
-        capacity_256 > 3_195_000 && capacity_256 < 3_196_000,
-        "256MB: got {}",
-        capacity_256
-    );
+    // Real charge: 20-byte representative compound key + 128 bytes/node.
+    assert_eq!(sysinfo::ESTIMATE_BYTES_PER_KEY, 148);
+    assert_eq!(sysinfo::estimate_key_capacity(16), 113_360);
+    assert_eq!(sysinfo::estimate_key_capacity(64), 453_439);
+    assert_eq!(sysinfo::estimate_key_capacity(256), 1_813_754);
 }
 
 #[test]

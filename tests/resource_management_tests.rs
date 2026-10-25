@@ -181,8 +181,8 @@ fn test_auto_ram_detection_in_config() {
 
     // Test key capacity estimation
     let capacity_16mb = liven::sysinfo::estimate_key_capacity(16);
-    assert!(capacity_16mb > 190_000, "16MB should hold ~190K keys");
+    assert_eq!(capacity_16mb, 113_360, "16MB at 148 B/key");
 
     let capacity_256mb = liven::sysinfo::estimate_key_capacity(256);
-    assert!(capacity_256mb > 3_000_000, "256MB should hold ~3M keys");
+    assert_eq!(capacity_256mb, 1_813_754, "256MB at 148 B/key");
 }

@@ -10,10 +10,11 @@ fn auto_detect_index_ram_budget() -> u64 {
         let capacity = crate::sysinfo::estimate_key_capacity(budget);
 
         tracing::info!(
-            "Index RAM: {}MB (auto, 25% of {}MB) — ~{}M key capacity",
+            "Index RAM: {}MB (auto, 25% of {}MB) — ~{}M key capacity at ~{} B/key (compound key + 128)",
             budget,
             system_ram,
-            capacity / 1_000_000
+            capacity / 1_000_000,
+            crate::sysinfo::ESTIMATE_BYTES_PER_KEY
         );
         return budget;
     }
@@ -22,9 +23,10 @@ fn auto_detect_index_ram_budget() -> u64 {
     let fallback = 512; // 512MB fallback
     let capacity = crate::sysinfo::estimate_key_capacity(fallback);
     tracing::warn!(
-        "System RAM detection failed, using fallback: {}MB — ~{}M key capacity",
+        "System RAM detection failed, using fallback: {}MB — ~{}M key capacity at ~{} B/key",
         fallback,
-        capacity / 1_000_000
+        capacity / 1_000_000,
+        crate::sysinfo::ESTIMATE_BYTES_PER_KEY
     );
     fallback
 }
@@ -315,9 +317,10 @@ impl AppConfig {
             let capacity =
                 crate::sysinfo::estimate_key_capacity(config.limits.max_index_ram_mb as u64);
             tracing::info!(
-                "Index RAM: {}MB (config override) — ~{}M key capacity",
+                "Index RAM: {}MB (config override) — ~{}M key capacity at ~{} B/key (compound key + 128)",
                 config.limits.max_index_ram_mb,
-                capacity / 1_000_000
+                capacity / 1_000_000,
+                crate::sysinfo::ESTIMATE_BYTES_PER_KEY
             );
         }
 
