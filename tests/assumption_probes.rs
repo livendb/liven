@@ -339,29 +339,25 @@ fn probe_3_write_lock_on_single_insert() {
     });
 
     println!(
-        "[probe3] single Insert holds write_lock for its duration: {}",
+        "[probe3] single Insert acquires write_lock: {}",
         insert_blocked
     );
     println!(
-        "[probe3] single Upsert holds write_lock for its duration: {}",
+        "[probe3] single Upsert acquires write_lock: {}",
         upsert_blocked
     );
 
-    // CURRENT: both single Insert and single Upsert DO acquire write_lock
-    // (executor.rs `execute_query`, Insert arm ~L1224 and Upsert arm ~L1272).
+    // Insert still acquires write_lock for the existence check and enqueue, but
+    // releases it before the ack wait. Upsert is a one-frame last-writer-wins
+    // replacement and does not take the lock.
     assert!(
         insert_blocked,
-        "CURRENT behavior: single Insert acquires write_lock"
+        "CURRENT behavior: single Insert acquires write_lock for validation"
     );
     assert!(
-        upsert_blocked,
-        "CURRENT behavior: single Upsert acquires write_lock"
+        !upsert_blocked,
+        "CURRENT behavior: single Upsert does not acquire write_lock"
     );
-    // NOTE / doc-vs-code conflict: `StorageEngine::write_lock`'s doc comment in
-    // storage.rs claims "NOT held by single Insert or Upsert (last-writer-wins)".
-    // The code does hold it. The comment is wrong.
-    // SHOULD: reconcile the doc comment with the code, or narrow the lock scope so
-    // single inserts really are last-writer-wins without a global mutex.
 
     println!(
         "PROBE RESULT: probe_3_write_lock_on_single_insert - Insert=YES, Upsert=YES \

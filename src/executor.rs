@@ -1394,18 +1394,35 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> crate::error::Res
             // Validate key length at parse layer
             validate_key_length(key)?;
 
-            // Acquire write_lock to prevent concurrent inserts for the same key
-            let _guard = engine.write_lock.lock().unwrap();
-
-            if engine.get(stream_name, key)?.is_some() {
-                return Err(LivenError::Query(format!(
-                    "Key '{}' already exists in stream '{}'.\n   Use upsert to overwrite an existing key or\n   update to merge changes into an existing record.",
-                    key, stream_name
-                )));
-            }
-            let record =
-                engine.append(stream_name, key, json_to_datavalue(value.clone()), false)?;
-            Ok(vec![record])
+            let compound_key = format!("{}:{}", stream_name, key);
+            // Hold write_lock only for validation, sequencing and enqueue. The
+            // ack wait happens after the guard is dropped, so concurrent callers
+            // can share a group-commit batch. The pending set preserves insert
+            // uniqueness while an earlier insert is in flight.
+            let rx = {
+                let _guard = engine.write_lock.lock().unwrap();
+                if engine.get(stream_name, key)?.is_some()
+                    || !engine.mark_insert_pending(&compound_key)
+                {
+                    return Err(LivenError::Query(format!(
+                        "Key '{}' already exists in stream '{}'.\n   Use upsert to overwrite an existing key or\n   update to merge changes into an existing record.",
+                        key, stream_name
+                    )));
+                }
+                match engine.append_async(stream_name, key, json_to_datavalue(value.clone()), false)
+                {
+                    Ok(rx) => rx,
+                    Err(e) => {
+                        engine.clear_insert_pending(&compound_key);
+                        return Err(e);
+                    }
+                }
+            };
+            let result = rx.recv().map_err(|e| {
+                LivenError::Internal(format!("LogRingBuffer coordination error: {}", e))
+            })?;
+            engine.clear_insert_pending(&compound_key);
+            Ok(vec![result?])
         }
         Query::InsertBatch { stream_name, batch } => {
             // Validate all key lengths at parse layer
@@ -1442,10 +1459,8 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> crate::error::Res
             // Validate key length at parse layer
             validate_key_length(key)?;
 
-            // Acquire write_lock to prevent concurrent operations on the same key
-            let _guard = engine.write_lock.lock().unwrap();
-
-            // One active frame replaces any previous value atomically.
+            // One active frame replaces any previous value atomically. Upsert
+            // is last-writer-wins, so it does not need the global write lock.
             let record = engine.replace(stream_name, key, json_to_datavalue(value.clone()))?;
             Ok(vec![record])
         }
@@ -1454,9 +1469,6 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> crate::error::Res
             for (key, _) in batch {
                 validate_key_length(key)?;
             }
-
-            // Acquire write_lock to prevent concurrent operations on any keys in the batch
-            let _guard = engine.write_lock.lock().unwrap();
 
             let mut inserted = Vec::new();
             for (key, val) in batch {

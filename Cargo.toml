@@ -110,6 +110,10 @@ harness = false
 name = "load_bench"
 harness = false
 
+[[bench]]
+name = "write_path_bench"
+harness = false
+
 [package.metadata.deb]
 maintainer = "LIVEN Maintainers <team@livendb.com>"
 copyright = "2026, LIVEN Maintainers <team@livendb.com>"

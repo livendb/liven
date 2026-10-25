@@ -105,6 +105,23 @@ impl PositionalReader for File {
 /// counter seeding.
 const COMPACTION_ID_BASE: u64 = u64::MAX / 2;
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct FlushMetrics {
+    pub fsyncs: u64,
+    pub batches: u64,
+    pub entries: u64,
+}
+
+impl FlushMetrics {
+    pub fn average_batch_size(&self) -> f64 {
+        if self.batches == 0 {
+            0.0
+        } else {
+            self.entries as f64 / self.batches as f64
+        }
+    }
+}
+
 pub struct StorageEngine {
     data_dir: PathBuf,
     max_segment_size: u64,
@@ -128,7 +145,15 @@ pub struct StorageEngine {
     max_fds: usize,
     max_index_ram_bytes: u64,
     pub index_ram_bytes: Arc<AtomicU64>,
+    /// Flusher counters for benchmarks and operational monitoring.
+    flush_fsyncs: Arc<AtomicU64>,
+    flush_batches: Arc<AtomicU64>,
+    flush_entries: Arc<AtomicU64>,
     pub streams_set: Arc<Mutex<HashSet<String>>>,
+    /// Keys with an in-flight `insert` that has been enqueued but not yet
+    /// acknowledged. Used to preserve insert uniqueness after the executor
+    /// releases `write_lock` before the ack wait.
+    pending_inserts: Arc<Mutex<HashSet<String>>>,
     pub max_connections: usize,
     pub broadcast_capacity: usize,
     pub conn_semaphore: Arc<tokio::sync::Semaphore>,
@@ -356,7 +381,11 @@ impl StorageEngine {
         let ring_buffer = ring_buffer::LogRingBuffer::new(tx);
 
         let index_ram_bytes = Arc::new(AtomicU64::new(0));
+        let flush_fsyncs = Arc::new(AtomicU64::new(0));
+        let flush_batches = Arc::new(AtomicU64::new(0));
+        let flush_entries = Arc::new(AtomicU64::new(0));
         let streams_set = Arc::new(Mutex::new(HashSet::new()));
+        let pending_inserts = Arc::new(Mutex::new(HashSet::new()));
         let compaction_counter = Arc::new(AtomicU64::new(u64::MAX / 2));
         let write_lock = Arc::new(Mutex::new(()));
         // Auto-compaction defaults: trigger after 4 inactive segments or 64 MB of inactive data
@@ -384,7 +413,11 @@ impl StorageEngine {
             max_fds,
             max_index_ram_bytes,
             index_ram_bytes: index_ram_bytes.clone(),
+            flush_fsyncs: flush_fsyncs.clone(),
+            flush_batches: flush_batches.clone(),
+            flush_entries: flush_entries.clone(),
             streams_set: streams_set.clone(),
+            pending_inserts: pending_inserts.clone(),
             max_connections,
             broadcast_capacity,
             conn_semaphore,
@@ -449,6 +482,9 @@ impl StorageEngine {
         let flusher_running = is_running.clone();
         let flusher_failed = failed.clone();
         let flusher_index_ram_bytes = index_ram_bytes.clone();
+        let flusher_fsyncs = flush_fsyncs.clone();
+        let flusher_batches = flush_batches.clone();
+        let flusher_entries = flush_entries.clone();
         let flusher_timestamp_indexes = engine.timestamp_indexes.clone();
         let flusher_drain_window_us = engine.commit_drain_window_us;
         let flusher_max_batch = engine.commit_max_batch_size;
@@ -470,6 +506,9 @@ impl StorageEngine {
                 flusher_running,
                 flusher_failed,
                 flusher_index_ram_bytes,
+                flusher_fsyncs,
+                flusher_batches,
+                flusher_entries,
                 flusher_timestamp_indexes,
                 flusher_drain_window_us,
                 flusher_max_batch,
@@ -544,7 +583,11 @@ impl StorageEngine {
             max_fds: 64,
             max_index_ram_bytes: 16 * 1024 * 1024,
             index_ram_bytes: index_ram_bytes.clone(),
+            flush_fsyncs: Arc::new(AtomicU64::new(0)),
+            flush_batches: Arc::new(AtomicU64::new(0)),
+            flush_entries: Arc::new(AtomicU64::new(0)),
             streams_set: streams_set.clone(),
+            pending_inserts: Arc::new(Mutex::new(HashSet::new())),
             max_connections: 1,
             broadcast_capacity: 4096,
             conn_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -1161,6 +1204,83 @@ impl StorageEngine {
         self.failed.load(Ordering::SeqCst)
     }
 
+    pub fn flush_metrics(&self) -> FlushMetrics {
+        FlushMetrics {
+            fsyncs: self.flush_fsyncs.load(Ordering::Relaxed),
+            batches: self.flush_batches.load(Ordering::Relaxed),
+            entries: self.flush_entries.load(Ordering::Relaxed),
+        }
+    }
+
+    pub fn reset_flush_metrics(&self) {
+        self.flush_fsyncs.store(0, Ordering::Relaxed);
+        self.flush_batches.store(0, Ordering::Relaxed);
+        self.flush_entries.store(0, Ordering::Relaxed);
+    }
+
+    /// Marks a key as having an in-flight insert. Returns false if another
+    /// insert for the same key is already pending.
+    pub(crate) fn mark_insert_pending(&self, compound_key: &str) -> bool {
+        self.pending_inserts
+            .lock()
+            .unwrap()
+            .insert(compound_key.to_string())
+    }
+
+    pub(crate) fn clear_insert_pending(&self, compound_key: &str) {
+        self.pending_inserts.lock().unwrap().remove(compound_key);
+    }
+
+    /// Enqueues an append and returns the receiver for its acknowledgement.
+    /// The caller can release application locks before waiting for fsync.
+    pub(crate) fn append_async(
+        &self,
+        stream_name: &str,
+        key: &str,
+        value: DataValue,
+        is_tombstone: bool,
+    ) -> crate::error::Result<std::sync::mpsc::Receiver<Result<Record, String>>> {
+        self.ensure_writable()?;
+        let compound_key = format!("{}:{}", stream_name, key);
+
+        {
+            let mut streams_guard = self.streams_set.lock().unwrap();
+            if !streams_guard.contains(stream_name) {
+                if streams_guard.len() >= self.max_streams {
+                    return Err(LivenError::StreamLimitExceeded {
+                        max: self.max_streams,
+                    });
+                }
+                streams_guard.insert(stream_name.to_string());
+            }
+        }
+
+        if !is_tombstone && !self.skipmap.contains_key(&compound_key) {
+            let size = compound_key.len() as u64 + 64;
+            let current_ram = self.index_ram_bytes.load(Ordering::SeqCst);
+            if current_ram + size > self.max_index_ram_bytes {
+                return Err(create_index_ram_limit_error(
+                    self.max_index_ram_bytes,
+                    current_ram + size,
+                ));
+            }
+        }
+
+        let stream_key = crate::storage::key::StreamKey::from_str(key)?;
+        if is_tombstone {
+            self.prune_timestamp_index(stream_name, key);
+        }
+        let (response_tx, rx) = std::sync::mpsc::sync_channel(1);
+        self.ring_buffer.tx_send(ring_buffer::LogEntry::Single {
+            stream_name: stream_name.to_string(),
+            key: stream_key,
+            value,
+            is_tombstone,
+            response_tx,
+        })?;
+        Ok(rx)
+    }
+
     /// Atomically replaces a key with a single active frame.
     ///
     /// Unlike the old tombstone-then-append sequence, a crash while the frame
@@ -1218,47 +1338,10 @@ impl StorageEngine {
         value: DataValue,
         is_tombstone: bool,
     ) -> crate::error::Result<Record> {
-        self.ensure_writable()?;
-        let compound_key = format!("{}:{}", stream_name, key);
-
-        // 1. Stream Limit Check
-        {
-            let mut streams_guard = self.streams_set.lock().unwrap();
-            if !streams_guard.contains(stream_name) {
-                if streams_guard.len() >= self.max_streams {
-                    return Err(LivenError::StreamLimitExceeded {
-                        max: self.max_streams,
-                    });
-                }
-                streams_guard.insert(stream_name.to_string());
-            }
-        }
-
-        // 2. Index RAM Limit Check
-        if !is_tombstone {
-            let existed = self.skipmap.contains_key(&compound_key);
-            if !existed {
-                let size = compound_key.len() as u64 + 64;
-                let current_ram = self.index_ram_bytes.load(Ordering::SeqCst);
-                if current_ram + size > self.max_index_ram_bytes {
-                    return Err(create_index_ram_limit_error(
-                        self.max_index_ram_bytes,
-                        current_ram + size,
-                    ));
-                }
-            }
-        }
-
-        let stream_key = crate::storage::key::StreamKey::from_str(key)?;
-
-        // Keep the timestamp index consistent: a tombstone means the key is no
-        // longer live, so drop its entry before the frame is written.
-        if is_tombstone {
-            self.prune_timestamp_index(stream_name, key);
-        }
-
-        self.ring_buffer
-            .append(stream_name, stream_key, value, is_tombstone)
+        let rx = self.append_async(stream_name, key, value, is_tombstone)?;
+        rx.recv()
+            .map_err(|e| LivenError::Internal(format!("LogRingBuffer coordination error: {}", e)))?
+            .map_err(Into::into)
     }
 
     /// Appends a batch of records to the storage engine with high performance
@@ -2283,6 +2366,9 @@ fn run_flusher_loop(
     is_running: Arc<std::sync::atomic::AtomicBool>,
     failed: Arc<std::sync::atomic::AtomicBool>,
     index_ram_bytes: Arc<AtomicU64>,
+    flush_fsyncs: Arc<AtomicU64>,
+    flush_batches: Arc<AtomicU64>,
+    flush_entries: Arc<AtomicU64>,
     timestamp_indexes: Arc<Mutex<HashMap<String, Arc<timestamp_index::TimestampIndex>>>>,
     drain_window_us: u64,
     max_batch: usize,
@@ -2335,6 +2421,10 @@ fn run_flusher_loop(
         }
 
         // Process the batch!
+        if !matches!(batch.first(), Some(ring_buffer::LogEntry::Shutdown)) {
+            flush_batches.fetch_add(1, Ordering::Relaxed);
+            flush_entries.fetch_add(batch.len() as u64, Ordering::Relaxed);
+        }
         if let Err(e) = execute_batch_append(
             &mut batch,
             &data_dir,
@@ -2350,6 +2440,7 @@ fn run_flusher_loop(
             &sync_mode,
             &failed,
             &index_ram_bytes,
+            &flush_fsyncs,
             &timestamp_indexes,
         ) {
             // Notify all waiting entries of the failure
@@ -2393,6 +2484,7 @@ fn execute_batch_append(
     sync_mode: &str,
     failed: &Arc<std::sync::atomic::AtomicBool>,
     index_ram_bytes: &Arc<AtomicU64>,
+    flush_fsyncs: &Arc<AtomicU64>,
     timestamp_indexes: &Arc<Mutex<HashMap<String, Arc<timestamp_index::TimestampIndex>>>>,
 ) -> crate::error::Result<()> {
     let mut active_file_guard = active_file.lock().unwrap();
@@ -2661,6 +2753,7 @@ fn execute_batch_append(
             failed.store(true, Ordering::SeqCst);
             LivenError::Io(e)
         })?;
+        flush_fsyncs.fetch_add(1, Ordering::Relaxed);
     }
     if batch_has_replace {
         test_crash_point("replace_after_sync");

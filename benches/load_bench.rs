@@ -447,10 +447,10 @@ fn storage_type() -> String {
     {
         if let Some(out) = cmd_stdout("diskutil", &["info", "/"]) {
             for line in out.lines() {
-                if line.contains("Device / Media Name") {
-                    if let Some((_, v)) = line.split_once(':') {
-                        return v.trim().to_string();
-                    }
+                if line.contains("Device / Media Name")
+                    && let Some((_, v)) = line.split_once(':')
+                {
+                    return v.trim().to_string();
                 }
             }
         }
@@ -1192,9 +1192,7 @@ fn markdown(result: &RunResult) -> String {
         ));
     }
     if let Some(rec) = &result.recover {
-        s.push_str(&format!(
-            "| recover | - | - | - | - | - | - | - | - | - |\n"
-        ));
+        s.push_str("| recover | - | - | - | - | - | - | - | - | - |\n");
         let _ = rec;
     }
     for r in &result.reads {
