@@ -7,6 +7,7 @@ on:
       - "**"
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 # Ensure only one workflow runs per branch at a time to optimize resources
 concurrency:
@@ -45,6 +46,9 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
+          # Pinned: an unpinned `stable` moved to 1.99 mid-release and changed
+          # clippy lints under our feet (clippy::question_mark).
+          toolchain: "1.99.0"
           components: clippy, rustfmt
 
       - name: Cache Cargo dependencies
@@ -67,10 +71,30 @@ jobs:
           cargo install cargo-audit --locked 2>&1 || true
           cargo audit
 
+      # The power-loss and crash-injection hooks are behind the `test-hooks`
+      # feature (off by default). This guards against them leaking back into a
+      # shipped binary via a default feature or a dev-dependency side effect.
+      - name: Verify release binary excludes test hooks
+        shell: bash
+        run: |
+          cargo build --release --no-default-features
+          bin=target/release/liven
+          if strings "$bin" | grep -Eq 'LIVEN_POWER_LOSS|LIVEN_TEST_CRASH_POINT|LIVEN_TEST_SKIP_DIR_SYNC|LIVEN_TEST_FAIL_SYNC'; then
+            echo '::error::test hook strings found in the release binary'
+            strings "$bin" | grep -E 'LIVEN_POWER_LOSS|LIVEN_TEST_' | head -20
+            exit 1
+          fi
+          if nm "$bin" | grep -q 'power_loss'; then
+            echo '::error::power_loss symbols found in the release binary'
+            nm "$bin" | grep 'power_loss' | head -20
+            exit 1
+          fi
+          echo 'release binary contains no test hooks'
+
   # ── Full build: per-target cross-platform matrix ──
   build:
     name: Build (${{ matrix.target }})
-    if: github.event_name == 'push'
+    if: github.event_name != 'pull_request'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
@@ -147,6 +171,7 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: "1.99.0"
           components: clippy
           targets: ${{ matrix.target }}
 
