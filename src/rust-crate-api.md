@@ -460,6 +460,9 @@ let streams = db.streams()?;
 
 // Server status
 let status = db.status()?;
+// value includes max_connections, broadcast_capacity, active_connections,
+// broadcast_subscribers, index_ram_bytes, index_ram_limit_bytes,
+// index_high_water_bytes, index_high_water_reached
 ```
 
 ---
@@ -701,6 +704,10 @@ let config = LivenConfig {
     compaction_threshold_segments: 4,    // Compaction trigger (segments)
     compaction_threshold_bytes: 64_000_000, // Compaction trigger (bytes)
     max_scan_results: 100_000,           // Max scan results
+    index_high_water_percent: 90,        // High-water metric threshold
+    retention_default_secs: 0,           // 0 disables retention
+    retention_streams: Default::default(), // per-stream max-age overrides
+    ..Default::default()
 };
 
 let db = Liven::open_with_config("./data", config)?;

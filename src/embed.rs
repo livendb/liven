@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -34,6 +35,12 @@ pub struct LivenConfig {
     pub commit_drain_window_us: u64,
     /// Maximum number of entries to accumulate in one group-commit batch. Default: 2048.
     pub commit_max_batch_size: usize,
+    /// Index usage percentage at which the high-water metric flips. Default: 90.
+    pub index_high_water_percent: u8,
+    /// Fallback retention max-age in seconds. `0` disables retention.
+    pub retention_default_secs: u64,
+    /// Per-stream retention overrides in seconds.
+    pub retention_streams: HashMap<String, u64>,
 }
 
 impl Default for LivenConfig {
@@ -56,6 +63,9 @@ impl Default for LivenConfig {
             max_scan_results: 100_000,
             commit_drain_window_us: 5000,
             commit_max_batch_size: 2048,
+            index_high_water_percent: 90,
+            retention_default_secs: 0,
+            retention_streams: HashMap::new(),
         }
     }
 }
@@ -108,6 +118,11 @@ impl Liven {
             config.commit_max_batch_size,
         )?;
         engine.set_max_scan_results(config.max_scan_results);
+        engine.set_index_high_water_percent(config.index_high_water_percent);
+        engine.set_default_retention(config.retention_default_secs.saturating_mul(1000));
+        for (stream, secs) in &config.retention_streams {
+            engine.set_stream_retention(stream, Some(secs.saturating_mul(1000)));
+        }
         engine.compaction_threshold_segments = config.compaction_threshold_segments;
         engine.compaction_threshold_bytes = config.compaction_threshold_bytes;
         Ok(Self {
@@ -542,6 +557,20 @@ impl Liven {
     /// is configured.
     pub fn compact(&self) -> crate::error::Result<()> {
         self.engine.compact()
+    }
+
+    /// Sets or clears a per-stream retention max-age (milliseconds).
+    pub fn set_stream_retention(&self, stream_name: &str, max_age_ms: Option<u64>) {
+        self.engine.set_stream_retention(stream_name, max_age_ms);
+    }
+
+    /// Runs one segment-level retention pass.
+    pub fn enforce_retention(&self) -> crate::error::Result<crate::storage::RetentionReport> {
+        self.engine.enforce_retention()
+    }
+
+    pub fn index_usage(&self) -> crate::storage::IndexUsage {
+        self.engine.index_usage()
     }
 
     /// Starts a background compaction loop using the provided Tokio handle.

@@ -27,8 +27,9 @@ impl TimestampIndex {
         self.inner.insert((timestamp, seq_id), pointer);
     }
 
-    pub fn remove(&self, timestamp: i64, seq_id: u64) {
-        self.inner.remove(&(timestamp, seq_id));
+    /// Removes an entry and reports whether it existed.
+    pub fn remove(&self, timestamp: i64, seq_id: u64) -> bool {
+        self.inner.remove(&(timestamp, seq_id)).is_some()
     }
 
     /// Returns all pointers with timestamp in [start_ms, end_ms] inclusive.

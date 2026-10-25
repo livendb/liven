@@ -19,6 +19,10 @@ host = "127.0.0.1"
 data_directory = "/tmp/liven-explicit"
 [security]
 mode = "none"
+[retention]
+default_max_age_secs = 60
+[retention.streams]
+events = 5
 "#,
     )
     .unwrap();
@@ -28,6 +32,9 @@ mode = "none"
     assert_eq!(config.storage.data_directory, "/tmp/liven-explicit");
     // Explicit security.mode must not be auto-switched.
     assert_eq!(config.security.mode, "none");
+    assert_eq!(config.retention.default_max_age_secs, 60);
+    assert_eq!(config.retention.streams.get("events"), Some(&5));
+    assert_eq!(config.limits.index_high_water_percent, 90);
 }
 
 #[test]

@@ -334,6 +334,8 @@ fn start_server(engine: Arc<StorageEngine>, data_dir: &std::path::Path, port: u1
             max_index_ram_mb: 1024,
             max_segment_size_mb: 256,
             max_scan_results: 100_000,
+
+            index_high_water_percent: 90,
         },
         security: SecurityConfig {
             mode: "none".to_string(),
@@ -341,6 +343,8 @@ fn start_server(engine: Arc<StorageEngine>, data_dir: &std::path::Path, port: u1
             master_key: None,
             ztna: None,
         },
+
+        retention: Default::default(),
     };
 
     std::thread::spawn(move || {

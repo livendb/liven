@@ -217,10 +217,10 @@ fn test_index_ram_limits() {
     let _ = fs::remove_dir_all(&path);
 
     let mut engine = StorageEngine::new(&path, 1024 * 1024).unwrap();
-    // Override RAM limits to be very small, e.g. 150 bytes
-    // Each entry compound key: "s1:k1" is 5 chars. Node overhead is 5 + 64 = 69 bytes.
-    // Two keys would be 138 bytes. Three keys would be 207 bytes (exceeds 150 bytes limit).
-    engine.set_max_index_ram_bytes(150);
+    // Each entry charges the compound key + primary node + timestamp node:
+    // "s1:k1" is 5 chars, so 5 + 64 + 64 = 133 bytes per key.
+    // Two keys are 266 bytes; three are 399 (exceeds the 300-byte limit).
+    engine.set_max_index_ram_bytes(300);
 
     // 1st key -> succeeds
     engine.append("s1", "k1", DataValue::Int(1), false).unwrap();
@@ -235,7 +235,7 @@ fn test_index_ram_limits() {
     // Tombstone of an existing key should succeed
     engine.append("s1", "k1", DataValue::Null, true).unwrap();
 
-    // Since s1:k1 was removed, index size is reduced by 69 bytes. We can now insert s1:k3!
+    // Since s1:k1 was removed, 133 bytes are released. s1:k3 now fits.
     engine.append("s1", "k3", DataValue::Int(1), false).unwrap();
 
     // Clean up

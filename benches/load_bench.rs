@@ -780,6 +780,8 @@ fn start_tcp_server(
             max_index_ram_mb: args.max_index_ram_mb,
             max_segment_size_mb: args.segment_mb as usize,
             max_scan_results: 100_000,
+
+            index_high_water_percent: 90,
         },
         security: SecurityConfig {
             mode: "none".to_string(),
@@ -787,6 +789,8 @@ fn start_tcp_server(
             master_key: None,
             ztna: None,
         },
+
+        retention: Default::default(),
     };
 
     let handle = std::thread::spawn(move || {

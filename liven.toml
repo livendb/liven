@@ -35,9 +35,10 @@ max_open_file_descriptors = 64
 # host RAM, clamped to 32 MiB..4096 MiB. The 4 GiB value is an auto-detect
 # ceiling, not a hard cap; an explicit larger value is accepted.
 #
-# The budget charges len("stream:key") + 64 bytes per live key. Actual RSS is
-# higher (timestamp index + allocator overhead): roughly 160 B/key for short
-# keys and 190 B/key for 32-byte keys. See docs/RAM_CAPACITY.md.
+# The budget charges len("stream:key") + 128 bytes per live key: a 64-byte
+# primary-index node and a 64-byte timestamp-index node. Actual RSS is slightly
+# higher (allocator overhead): roughly 157 B/key for short keys and 192 B/key
+# for 32-byte keys. See docs/RAM_CAPACITY.md.
 # Approximate capacities:
 # - 16 MiB  ≈ 87K 32-byte keys / 107K short keys
 # - 64 MiB  ≈ 349K / 427K
@@ -49,6 +50,21 @@ max_open_file_descriptors = 64
 
 # Maximum number of records returned from full scan operations
 max_scan_results = 100000
+
+# Usage percentage at which the index high-water metric flips. Writes are
+# still accepted until max_index_ram_mb is reached.
+index_high_water_percent = 90
+
+[retention]
+# Fallback max-age for streams without an override. 0 disables retention.
+default_max_age_secs = 0
+# How often the server runs a segment-level retention pass.
+check_interval_secs = 60
+
+# Per-stream overrides, in seconds. Example:
+# [retention.streams]
+# events = 3600
+# sessions = 600
 
 # ============================================
 # RECOMMENDED CONFIGURATION PROFILES

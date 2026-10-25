@@ -504,6 +504,33 @@ pub async fn run_server(
         }
     });
 
+    // Retention background task. Segment-level expiry only; the active segment
+    // is left for rollover/compaction.
+    let retention_engine = engine.clone();
+    let retention_interval_secs = config.retention.check_interval_secs.max(1);
+    tokio::spawn(async move {
+        let mut interval =
+            tokio::time::interval(tokio::time::Duration::from_secs(retention_interval_secs));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            interval.tick().await;
+            let eng = retention_engine.clone();
+            match tokio::task::spawn_blocking(move || eng.enforce_retention()).await {
+                Ok(Ok(report)) if report.deleted_segments > 0 => {
+                    tracing::info!(
+                        "Retention deleted {} segment(s), {} key(s), {} bytes",
+                        report.deleted_segments,
+                        report.deleted_keys,
+                        report.freed_bytes
+                    );
+                }
+                Ok(Ok(_)) => {}
+                Ok(Err(e)) => tracing::warn!("Retention pass failed: {}", e),
+                Err(e) => tracing::warn!("Retention task panicked: {}", e),
+            }
+        }
+    });
+
     // Status update background task — updates status file every 5 seconds
     let state_for_status = state.clone();
     tokio::spawn(async move {

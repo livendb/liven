@@ -1,5 +1,6 @@
 use config::{Config, ConfigError, Environment, File};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// Auto-detect system RAM and calculate appropriate budget
 fn auto_detect_index_ram_budget() -> u64 {
@@ -72,6 +73,9 @@ pub struct LimitsConfig {
     pub max_segment_size_mb: usize,
     #[serde(default = "default_max_scan_results")]
     pub max_scan_results: usize,
+    /// Usage percentage at which the index high-water metric flips.
+    #[serde(default = "default_index_high_water_percent")]
+    pub index_high_water_percent: u8,
 }
 
 fn default_limits() -> LimitsConfig {
@@ -81,11 +85,16 @@ fn default_limits() -> LimitsConfig {
         max_index_ram_mb: 16,
         max_segment_size_mb: 16,
         max_scan_results: 100_000,
+        index_high_water_percent: 90,
     }
 }
 
 fn default_max_scan_results() -> usize {
     100_000
+}
+
+fn default_index_high_water_percent() -> u8 {
+    90
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -130,6 +139,31 @@ fn embedded_security_default() -> SecurityConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RetentionConfig {
+    #[serde(default)]
+    pub default_max_age_secs: u64,
+    #[serde(default = "default_retention_check_secs")]
+    pub check_interval_secs: u64,
+    /// Per-stream overrides, in seconds.
+    #[serde(default)]
+    pub streams: HashMap<String, u64>,
+}
+
+fn default_retention_check_secs() -> u64 {
+    60
+}
+
+impl Default for RetentionConfig {
+    fn default() -> Self {
+        Self {
+            default_max_age_secs: 0,
+            check_interval_secs: 60,
+            streams: HashMap::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AppConfig {
     #[serde(default = "default_version")]
     pub version: String,
@@ -139,6 +173,8 @@ pub struct AppConfig {
     pub limits: LimitsConfig,
     #[serde(default = "embedded_security_default")]
     pub security: SecurityConfig,
+    #[serde(default)]
+    pub retention: RetentionConfig,
 }
 
 impl AppConfig {
@@ -176,11 +212,16 @@ impl AppConfig {
             .set_default("limits.max_open_file_descriptors", 64)?
             .set_default("limits.max_index_ram_mb", 16)?
             .set_default("limits.max_segment_size_mb", 16)?
+            .set_default("limits.max_scan_results", 100_000)?
+            .set_default("limits.index_high_water_percent", 90)?
             .set_default("security.mode", "auth_key")? // SECURE BY DEFAULT!
             .set_default("security.ztna.enabled", false)?
             .set_default("security.ztna.cert_path", "./certs/server.crt")?
             .set_default("security.ztna.key_path", "./certs/server.key")?
             .set_default("security.ztna.client_ca_path", "./certs/ca.crt")?
+            .set_default("retention.default_max_age_secs", 0)?
+            .set_default("retention.check_interval_secs", 60)?
+            .set_default("retention.streams", HashMap::<String, u64>::new())?
             // Layer 2: Read and parse local configurations
             .add_source(
                 File::from(std::path::Path::new("liven.toml"))
@@ -428,6 +469,7 @@ impl AppConfig {
                 max_index_ram_mb,
                 max_segment_size_mb: max_segment_mb,
                 max_scan_results: 100_000,
+                index_high_water_percent: 90,
             },
             security: SecurityConfig {
                 mode: "none".to_string(),
@@ -435,6 +477,7 @@ impl AppConfig {
                 master_key: None,
                 ztna: None,
             },
+            retention: RetentionConfig::default(),
         }
     }
 }

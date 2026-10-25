@@ -286,6 +286,10 @@ fn test_status_query() {
     assert_eq!(metrics["max_connections"], 500);
     assert_eq!(metrics["broadcast_capacity"], 100);
     assert_eq!(metrics["active_connections"], 0);
+    assert!(metrics.get("index_ram_bytes").is_some());
+    assert!(metrics.get("index_ram_limit_bytes").is_some());
+    assert!(metrics.get("index_high_water_bytes").is_some());
+    assert!(metrics.get("index_high_water_reached").is_some());
 
     // If we acquire a permit, active_connections increases
     let permit = engine.conn_semaphore.clone().try_acquire_owned().unwrap();

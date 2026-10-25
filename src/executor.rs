@@ -1793,12 +1793,17 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> crate::error::Res
                 .unwrap()
                 .as_millis() as i64;
 
+            let index = engine.index_usage();
             let value_str = format!(
-                r#"{{"max_connections":{},"broadcast_capacity":{},"active_connections":{},"broadcast_subscribers":{}}}"#,
+                r#"{{"max_connections":{},"broadcast_capacity":{},"active_connections":{},"broadcast_subscribers":{},"index_ram_bytes":{},"index_ram_limit_bytes":{},"index_high_water_bytes":{},"index_high_water_reached":{}}}"#,
                 engine.max_connections,
                 engine.broadcast_capacity,
                 active_connections,
-                broadcast_subscribers
+                broadcast_subscribers,
+                index.used_bytes,
+                index.limit_bytes,
+                index.high_water_bytes,
+                index.high_water_reached
             );
 
             Ok(vec![Record {

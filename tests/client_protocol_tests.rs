@@ -50,6 +50,8 @@ async fn test_client_protocol_prefixes() {
             max_index_ram_mb: 10,
             max_segment_size_mb: 10,
             max_scan_results: 100_000,
+
+            index_high_water_percent: 90,
         },
         security: SecurityConfig {
             mode: "none".to_string(),
@@ -57,6 +59,8 @@ async fn test_client_protocol_prefixes() {
             master_key: None,
             ztna: None,
         },
+
+        retention: Default::default(),
     };
 
     // Spin up storage engine
@@ -132,6 +136,8 @@ async fn test_client_listen_stream() {
             max_index_ram_mb: 10,
             max_segment_size_mb: 10,
             max_scan_results: 100_000,
+
+            index_high_water_percent: 90,
         },
         security: SecurityConfig {
             mode: "none".to_string(),
@@ -139,6 +145,8 @@ async fn test_client_listen_stream() {
             master_key: None,
             ztna: None,
         },
+
+        retention: Default::default(),
     };
 
     let engine = Arc::new(StorageEngine::new(&config.storage.data_directory, 1024 * 1024).unwrap());

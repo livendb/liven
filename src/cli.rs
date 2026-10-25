@@ -362,6 +362,12 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
 
             // max_scan_results is a query-time limit, not a recovery limit.
             engine.set_max_scan_results(config.limits.max_scan_results);
+            engine.set_index_high_water_percent(config.limits.index_high_water_percent);
+            engine
+                .set_default_retention(config.retention.default_max_age_secs.saturating_mul(1000));
+            for (stream, secs) in &config.retention.streams {
+                engine.set_stream_retention(stream, Some(secs.saturating_mul(1000)));
+            }
 
             let engine = Arc::new(engine);
 

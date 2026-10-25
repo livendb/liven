@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 use tokio::sync::broadcast;
@@ -105,6 +105,28 @@ impl PositionalReader for File {
 /// counter seeding.
 const COMPACTION_ID_BASE: u64 = u64::MAX / 2;
 
+#[derive(Debug, Clone, Default)]
+pub struct RetentionPolicy {
+    pub default_max_age_ms: u64,
+    pub streams: HashMap<String, u64>,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RetentionReport {
+    pub checked_segments: usize,
+    pub deleted_segments: usize,
+    pub deleted_keys: usize,
+    pub freed_bytes: u64,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct IndexUsage {
+    pub used_bytes: u64,
+    pub limit_bytes: u64,
+    pub high_water_bytes: u64,
+    pub high_water_reached: bool,
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 pub struct FlushMetrics {
     pub fsyncs: u64,
@@ -145,6 +167,9 @@ pub struct StorageEngine {
     max_fds: usize,
     max_index_ram_bytes: u64,
     pub index_ram_bytes: Arc<AtomicU64>,
+    /// Percentage of `max_index_ram_bytes` at which the high-water metric flips.
+    pub index_high_water_percent: AtomicU8,
+    index_high_water_reached: Arc<AtomicBool>,
     /// Flusher counters for benchmarks and operational monitoring.
     flush_fsyncs: Arc<AtomicU64>,
     flush_batches: Arc<AtomicU64>,
@@ -154,6 +179,10 @@ pub struct StorageEngine {
     /// acknowledged. Used to preserve insert uniqueness after the executor
     /// releases `write_lock` before the ack wait.
     pending_inserts: Arc<Mutex<HashSet<String>>>,
+    /// Serializes compaction and retention, which both rewrite/delete inactive
+    /// segments and move index pointers.
+    maintenance_lock: Arc<Mutex<()>>,
+    retention: Arc<Mutex<RetentionPolicy>>,
     pub max_connections: usize,
     pub broadcast_capacity: usize,
     pub conn_semaphore: Arc<tokio::sync::Semaphore>,
@@ -214,6 +243,14 @@ thread_local! {
 /// attempt to resolve from the payload prefix before falling back to reading the
 /// full payload. Stream names are the first field of every payload.
 const STREAM_PEEK_CAP: usize = 128;
+
+/// Charged bytes for one primary-index node (`String` + `LogPointer` + skiplist
+/// tower/allocator). The compound key length is added separately.
+const PRIMARY_INDEX_NODE_BYTES: u64 = 64;
+
+/// Charged bytes for one timestamp-index entry
+/// (`(i64, u64)` key + `LogPointer` + skiplist tower/allocator).
+const TIMESTAMP_INDEX_NODE_BYTES: u64 = 64;
 
 /// Decode the fixed 26-byte on-disk frame header.
 ///
@@ -381,11 +418,14 @@ impl StorageEngine {
         let ring_buffer = ring_buffer::LogRingBuffer::new(tx);
 
         let index_ram_bytes = Arc::new(AtomicU64::new(0));
+        let index_high_water_reached = Arc::new(AtomicBool::new(false));
         let flush_fsyncs = Arc::new(AtomicU64::new(0));
         let flush_batches = Arc::new(AtomicU64::new(0));
         let flush_entries = Arc::new(AtomicU64::new(0));
         let streams_set = Arc::new(Mutex::new(HashSet::new()));
         let pending_inserts = Arc::new(Mutex::new(HashSet::new()));
+        let maintenance_lock = Arc::new(Mutex::new(()));
+        let retention = Arc::new(Mutex::new(RetentionPolicy::default()));
         let compaction_counter = Arc::new(AtomicU64::new(u64::MAX / 2));
         let write_lock = Arc::new(Mutex::new(()));
         // Auto-compaction defaults: trigger after 4 inactive segments or 64 MB of inactive data
@@ -413,11 +453,15 @@ impl StorageEngine {
             max_fds,
             max_index_ram_bytes,
             index_ram_bytes: index_ram_bytes.clone(),
+            index_high_water_percent: AtomicU8::new(90),
+            index_high_water_reached: index_high_water_reached.clone(),
             flush_fsyncs: flush_fsyncs.clone(),
             flush_batches: flush_batches.clone(),
             flush_entries: flush_entries.clone(),
             streams_set: streams_set.clone(),
             pending_inserts: pending_inserts.clone(),
+            maintenance_lock: maintenance_lock.clone(),
+            retention: retention.clone(),
             max_connections,
             broadcast_capacity,
             conn_semaphore,
@@ -482,6 +526,12 @@ impl StorageEngine {
         let flusher_running = is_running.clone();
         let flusher_failed = failed.clone();
         let flusher_index_ram_bytes = index_ram_bytes.clone();
+        let flusher_max_index_ram_bytes = engine.max_index_ram_bytes;
+        let flusher_high_water_bytes = engine
+            .max_index_ram_bytes
+            .saturating_mul(engine.index_high_water_percent.load(Ordering::Relaxed) as u64)
+            / 100;
+        let flusher_high_water_reached = index_high_water_reached.clone();
         let flusher_fsyncs = flush_fsyncs.clone();
         let flusher_batches = flush_batches.clone();
         let flusher_entries = flush_entries.clone();
@@ -506,6 +556,9 @@ impl StorageEngine {
                 flusher_running,
                 flusher_failed,
                 flusher_index_ram_bytes,
+                flusher_max_index_ram_bytes,
+                flusher_high_water_bytes,
+                flusher_high_water_reached,
                 flusher_fsyncs,
                 flusher_batches,
                 flusher_entries,
@@ -583,11 +636,15 @@ impl StorageEngine {
             max_fds: 64,
             max_index_ram_bytes: 16 * 1024 * 1024,
             index_ram_bytes: index_ram_bytes.clone(),
+            index_high_water_percent: AtomicU8::new(90),
+            index_high_water_reached: Arc::new(AtomicBool::new(false)),
             flush_fsyncs: Arc::new(AtomicU64::new(0)),
             flush_batches: Arc::new(AtomicU64::new(0)),
             flush_entries: Arc::new(AtomicU64::new(0)),
             streams_set: streams_set.clone(),
             pending_inserts: Arc::new(Mutex::new(HashSet::new())),
+            maintenance_lock: Arc::new(Mutex::new(())),
+            retention: Arc::new(Mutex::new(RetentionPolicy::default())),
             max_connections: 1,
             broadcast_capacity: 4096,
             conn_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -896,7 +953,7 @@ impl StorageEngine {
                             header_buf[15],
                         ]);
 
-                        let node_overhead = compound_key.len() as u64 + 64;
+                        let node_overhead = primary_charge(&compound_key);
 
                         // Segments are replayed in ascending segment-id order, but a
                         // compacted segment carries an id in the reserved high range
@@ -934,26 +991,33 @@ impl StorageEngine {
                                 }
                             }
                             if is_newer {
+                                // Drop the superseded timestamp entry first, then charge
+                                // for the replacement timestamp entry. A new key also
+                                // pays for its primary-index node.
+                                self.prune_timestamp_index(stream_name, key);
+                                let existed = self.skipmap.contains_key(&compound_key);
+                                let charge = if existed {
+                                    TIMESTAMP_INDEX_NODE_BYTES
+                                } else {
+                                    node_overhead + TIMESTAMP_INDEX_NODE_BYTES
+                                };
+                                let current_ram =
+                                    self.index_ram_bytes.fetch_add(charge, Ordering::SeqCst)
+                                        + charge;
+                                if current_ram > self.max_index_ram_bytes {
+                                    return Err(create_index_ram_limit_error(
+                                        self.max_index_ram_bytes,
+                                        current_ram,
+                                    ));
+                                }
+
                                 let pointer = LogPointer {
                                     segment_id: *segment_id,
                                     file_offset: offset,
                                     seq_id,
                                     timestamp: _timestamp,
                                 };
-                                let existed = self.skipmap.contains_key(&compound_key);
                                 self.skipmap.insert(compound_key, pointer);
-                                if !existed {
-                                    let current_ram = self
-                                        .index_ram_bytes
-                                        .fetch_add(node_overhead, Ordering::SeqCst)
-                                        + node_overhead;
-                                    if current_ram > self.max_index_ram_bytes {
-                                        return Err(create_index_ram_limit_error(
-                                            self.max_index_ram_bytes,
-                                            current_ram,
-                                        ));
-                                    }
-                                }
 
                                 // Populate timestamp index
                                 let mut ts_idx = self.timestamp_indexes.lock().unwrap();
@@ -1035,7 +1099,7 @@ impl StorageEngine {
                     .collect();
                 for key in &keys_to_remove {
                     if self.skipmap.remove(key).is_some() {
-                        let overhead = key.len() as u64 + 64;
+                        let overhead = primary_charge(key);
                         self.index_ram_bytes.fetch_sub(overhead, Ordering::SeqCst);
                     }
                 }
@@ -1218,6 +1282,41 @@ impl StorageEngine {
         self.flush_entries.store(0, Ordering::Relaxed);
     }
 
+    pub fn set_index_high_water_percent(&self, percent: u8) {
+        self.index_high_water_percent
+            .store(percent.clamp(1, 100), Ordering::Relaxed);
+    }
+
+    pub fn index_usage(&self) -> IndexUsage {
+        let limit_bytes = self.max_index_ram_bytes;
+        let high_water_bytes = limit_bytes
+            .saturating_mul(self.index_high_water_percent.load(Ordering::Relaxed) as u64)
+            / 100;
+        IndexUsage {
+            used_bytes: self.index_ram_bytes.load(Ordering::SeqCst),
+            limit_bytes,
+            high_water_bytes,
+            high_water_reached: self.index_high_water_reached.load(Ordering::SeqCst),
+        }
+    }
+
+    fn note_high_water(&self, projected_bytes: u64) {
+        let high_water = self
+            .max_index_ram_bytes
+            .saturating_mul(self.index_high_water_percent.load(Ordering::Relaxed) as u64)
+            / 100;
+        if projected_bytes >= high_water
+            && !self.index_high_water_reached.swap(true, Ordering::SeqCst)
+        {
+            warn!(
+                "index RAM high-water mark reached: {} of {} bytes ({}%)",
+                projected_bytes,
+                self.max_index_ram_bytes,
+                self.index_high_water_percent.load(Ordering::Relaxed)
+            );
+        }
+    }
+
     /// Marks a key as having an in-flight insert. Returns false if another
     /// insert for the same key is already pending.
     pub(crate) fn mark_insert_pending(&self, compound_key: &str) -> bool {
@@ -1256,20 +1355,19 @@ impl StorageEngine {
         }
 
         if !is_tombstone && !self.skipmap.contains_key(&compound_key) {
-            let size = compound_key.len() as u64 + 64;
+            let size = primary_charge(&compound_key) + TIMESTAMP_INDEX_NODE_BYTES;
             let current_ram = self.index_ram_bytes.load(Ordering::SeqCst);
-            if current_ram + size > self.max_index_ram_bytes {
+            let projected = current_ram + size;
+            if projected > self.max_index_ram_bytes {
                 return Err(create_index_ram_limit_error(
                     self.max_index_ram_bytes,
-                    current_ram + size,
+                    projected,
                 ));
             }
+            self.note_high_water(projected);
         }
 
         let stream_key = crate::storage::key::StreamKey::from_str(key)?;
-        if is_tombstone {
-            self.prune_timestamp_index(stream_name, key);
-        }
         let (response_tx, rx) = std::sync::mpsc::sync_channel(1);
         self.ring_buffer.tx_send(ring_buffer::LogEntry::Single {
             stream_name: stream_name.to_string(),
@@ -1308,14 +1406,16 @@ impl StorageEngine {
         }
 
         if !self.skipmap.contains_key(&compound_key) {
-            let size = compound_key.len() as u64 + 64;
+            let size = primary_charge(&compound_key) + TIMESTAMP_INDEX_NODE_BYTES;
             let current_ram = self.index_ram_bytes.load(Ordering::SeqCst);
-            if current_ram + size > self.max_index_ram_bytes {
+            let projected = current_ram + size;
+            if projected > self.max_index_ram_bytes {
                 return Err(create_index_ram_limit_error(
                     self.max_index_ram_bytes,
-                    current_ram + size,
+                    projected,
                 ));
             }
+            self.note_high_water(projected);
         }
 
         let stream_key = crate::storage::key::StreamKey::from_str(key)?;
@@ -1363,7 +1463,7 @@ impl StorageEngine {
 
                 let compound_key = format!("{}:{}", stream_name, key);
                 if !self.skipmap.contains_key(&compound_key) {
-                    new_keys_size += compound_key.len() as u64 + 64;
+                    new_keys_size += primary_charge(&compound_key) + TIMESTAMP_INDEX_NODE_BYTES;
                 }
             }
 
@@ -1375,12 +1475,14 @@ impl StorageEngine {
         }
 
         let current_ram = self.index_ram_bytes.load(Ordering::SeqCst);
-        if current_ram + new_keys_size > self.max_index_ram_bytes {
+        let projected = current_ram + new_keys_size;
+        if projected > self.max_index_ram_bytes {
             return Err(create_index_ram_limit_error(
                 self.max_index_ram_bytes,
-                current_ram + new_keys_size,
+                projected,
             ));
         }
+        self.note_high_water(projected);
 
         // Apply stream registration
         if !new_streams.is_empty() {
@@ -1437,12 +1539,6 @@ impl StorageEngine {
             }
         }
 
-        // Keep the timestamp index consistent with the tombstone: drop each key's
-        // live entry before the tombstone frames are queued.
-        for key in keys {
-            self.prune_timestamp_index(stream_name, key);
-        }
-
         let mut stream_keys = Vec::with_capacity(keys.len());
         for key in keys {
             stream_keys.push(crate::storage::key::StreamKey::from_str(key)?);
@@ -1470,8 +1566,11 @@ impl StorageEngine {
             return;
         };
         let guard = self.timestamp_indexes.lock().unwrap();
-        if let Some(idx) = guard.get(stream_name) {
-            idx.remove(ptr.timestamp, ptr.seq_id);
+        if let Some(idx) = guard.get(stream_name)
+            && idx.remove(ptr.timestamp, ptr.seq_id)
+        {
+            self.index_ram_bytes
+                .fetch_sub(TIMESTAMP_INDEX_NODE_BYTES, Ordering::SeqCst);
         }
     }
 
@@ -1936,6 +2035,7 @@ impl StorageEngine {
 
     /// Performs background compaction of historical files
     pub fn compact(&self) -> crate::error::Result<()> {
+        let _maintenance = self.maintenance_lock.lock().unwrap();
         info!("Starting log compaction...");
         let active_id = self.active_segment_id.load(Ordering::SeqCst);
 
@@ -2192,6 +2292,31 @@ fn sync_data_dir(dir: &Path) -> std::io::Result<()> {
 }
 
 /// Helper function to create IndexRamLimitExceeded errors
+fn primary_charge(compound_key: &str) -> u64 {
+    compound_key.len() as u64 + PRIMARY_INDEX_NODE_BYTES
+}
+
+/// Removes the timestamp-index entry for a key's current pointer (if any) and
+/// releases its charge. Used by the flusher so a failed write never mutates the
+/// index before the frame is durable.
+fn prune_timestamp_entry(
+    skipmap: &Arc<SkipMap<String, LogPointer>>,
+    timestamp_indexes: &Arc<Mutex<HashMap<String, Arc<timestamp_index::TimestampIndex>>>>,
+    stream_name: &str,
+    compound_key: &str,
+    index_ram_bytes: &Arc<AtomicU64>,
+) {
+    let Some(pointer) = skipmap.get(compound_key).map(|entry| *entry.value()) else {
+        return;
+    };
+    let guard = timestamp_indexes.lock().unwrap();
+    if let Some(index) = guard.get(stream_name)
+        && index.remove(pointer.timestamp, pointer.seq_id)
+    {
+        index_ram_bytes.fetch_sub(TIMESTAMP_INDEX_NODE_BYTES, Ordering::SeqCst);
+    }
+}
+
 fn create_index_ram_limit_error(max_bytes: u64, current_bytes: u64) -> LivenError {
     LivenError::IndexRamLimitExceeded {
         max_bytes,
@@ -2366,6 +2491,9 @@ fn run_flusher_loop(
     is_running: Arc<std::sync::atomic::AtomicBool>,
     failed: Arc<std::sync::atomic::AtomicBool>,
     index_ram_bytes: Arc<AtomicU64>,
+    max_index_ram_bytes: u64,
+    high_water_bytes: u64,
+    high_water_reached: Arc<AtomicBool>,
     flush_fsyncs: Arc<AtomicU64>,
     flush_batches: Arc<AtomicU64>,
     flush_entries: Arc<AtomicU64>,
@@ -2440,6 +2568,9 @@ fn run_flusher_loop(
             &sync_mode,
             &failed,
             &index_ram_bytes,
+            max_index_ram_bytes,
+            high_water_bytes,
+            &high_water_reached,
             &flush_fsyncs,
             &timestamp_indexes,
         ) {
@@ -2484,6 +2615,9 @@ fn execute_batch_append(
     sync_mode: &str,
     failed: &Arc<std::sync::atomic::AtomicBool>,
     index_ram_bytes: &Arc<AtomicU64>,
+    max_index_ram_bytes: u64,
+    high_water_bytes: u64,
+    high_water_reached: &Arc<AtomicBool>,
     flush_fsyncs: &Arc<AtomicU64>,
     timestamp_indexes: &Arc<Mutex<HashMap<String, Arc<timestamp_index::TimestampIndex>>>>,
 ) -> crate::error::Result<()> {
@@ -2518,6 +2652,13 @@ fn execute_batch_append(
         std::mem::take(&mut *buf)
     });
 
+    // Authoritative index-budget check. The caller's pre-check is only a fast
+    // path; this runs on the single flusher thread, so concurrent writers cannot
+    // overshoot by racing a stale `index_ram_bytes` read.
+    let mut projected_new_bytes = 0u64;
+    let mut batch_new_keys: HashSet<String> = HashSet::new();
+    let mut high_water_logged = false;
+
     SERIALIZATION_BUFFER.with(|buf_cell| {
         let mut local_buf = buf_cell.borrow_mut();
         for entry in batch.iter() {
@@ -2529,6 +2670,38 @@ fn execute_batch_append(
                     is_tombstone,
                     response_tx,
                 } => {
+                    if !*is_tombstone {
+                        let compound_key = format!("{}:{}", stream_name, key.as_str());
+                        let is_new = !skipmap.contains_key(&compound_key)
+                            && !batch_new_keys.contains(&compound_key);
+                        if is_new {
+                            let size = primary_charge(&compound_key) + TIMESTAMP_INDEX_NODE_BYTES;
+                            let projected =
+                                index_ram_bytes.load(Ordering::SeqCst) + projected_new_bytes + size;
+                            if projected > max_index_ram_bytes {
+                                let _ = response_tx.send(Err(create_index_ram_limit_error(
+                                    max_index_ram_bytes,
+                                    projected,
+                                )
+                                .to_string()));
+                                continue;
+                            }
+                            if projected >= high_water_bytes
+                                && !high_water_reached.swap(true, Ordering::SeqCst)
+                            {
+                                if !high_water_logged {
+                                    warn!(
+                                        "index RAM high-water mark reached: {} of {} bytes",
+                                        projected, max_index_ram_bytes
+                                    );
+                                    high_water_logged = true;
+                                }
+                            }
+                            projected_new_bytes += size;
+                            batch_new_keys.insert(compound_key);
+                        }
+                    }
+
                     let seq_id = current_seq;
                     current_seq += 1;
 
@@ -2578,6 +2751,36 @@ fn execute_batch_append(
                     value,
                     response_tx,
                 } => {
+                    let compound_key = format!("{}:{}", stream_name, key.as_str());
+                    let is_new = !skipmap.contains_key(&compound_key)
+                        && !batch_new_keys.contains(&compound_key);
+                    if is_new {
+                        let size = primary_charge(&compound_key) + TIMESTAMP_INDEX_NODE_BYTES;
+                        let projected =
+                            index_ram_bytes.load(Ordering::SeqCst) + projected_new_bytes + size;
+                        if projected > max_index_ram_bytes {
+                            let _ = response_tx.send(Err(create_index_ram_limit_error(
+                                max_index_ram_bytes,
+                                projected,
+                            )
+                            .to_string()));
+                            continue;
+                        }
+                        if projected >= high_water_bytes
+                            && !high_water_reached.swap(true, Ordering::SeqCst)
+                        {
+                            if !high_water_logged {
+                                warn!(
+                                    "index RAM high-water mark reached: {} of {} bytes",
+                                    projected, max_index_ram_bytes
+                                );
+                                high_water_logged = true;
+                            }
+                        }
+                        projected_new_bytes += size;
+                        batch_new_keys.insert(compound_key);
+                    }
+
                     let seq_id = current_seq;
                     current_seq += 1;
 
@@ -2770,23 +2973,31 @@ fn execute_batch_append(
                 if let Some((record, frame_len, is_tombstone, _)) = records_iter.next() {
                     let compound_key = format!("{}:{}", record.stream_name, record.key.as_str());
 
-                    let node_overhead = compound_key.len() as u64 + 64;
+                    let node_overhead = primary_charge(&compound_key);
+                    prune_timestamp_entry(
+                        skipmap,
+                        timestamp_indexes,
+                        &record.stream_name,
+                        &compound_key,
+                        index_ram_bytes,
+                    );
                     if is_tombstone {
                         if skipmap.remove(&compound_key).is_some() {
                             index_ram_bytes.fetch_sub(node_overhead, Ordering::SeqCst);
                         }
                     } else {
+                        let existed = skipmap.contains_key(&compound_key);
                         let pointer = LogPointer {
                             segment_id,
                             file_offset: offset_acc,
                             seq_id: record.sequence_id,
                             timestamp: record.timestamp,
                         };
-                        let existed = skipmap.contains_key(&compound_key);
                         skipmap.insert(compound_key, pointer);
                         if !existed {
                             index_ram_bytes.fetch_add(node_overhead, Ordering::SeqCst);
                         }
+                        index_ram_bytes.fetch_add(TIMESTAMP_INDEX_NODE_BYTES, Ordering::SeqCst);
 
                         // Maintain timestamp index
                         let mut ts_idx_guard = timestamp_indexes.lock().unwrap();
@@ -2805,29 +3016,32 @@ fn execute_batch_append(
             PendingComplete::Replace { response_tx } => {
                 if let Some((record, frame_len, _, _)) = records_iter.next() {
                     let compound_key = format!("{}:{}", record.stream_name, record.key.as_str());
-                    let node_overhead = compound_key.len() as u64 + 64;
+                    let node_overhead = primary_charge(&compound_key);
 
                     // Supersede in place: drop the old timestamp-index entry
                     // before inserting the replacement's entry. This is a
                     // single frame, so a torn tail keeps the old value live.
-                    let mut ts_idx_guard = timestamp_indexes.lock().unwrap();
-                    if let Some(old) = skipmap.get(&compound_key).map(|e| *e.value())
-                        && let Some(idx) = ts_idx_guard.get(&record.stream_name)
-                    {
-                        idx.remove(old.timestamp, old.seq_id);
-                    }
+                    prune_timestamp_entry(
+                        skipmap,
+                        timestamp_indexes,
+                        &record.stream_name,
+                        &compound_key,
+                        index_ram_bytes,
+                    );
 
+                    let existed = skipmap.contains_key(&compound_key);
                     let pointer = LogPointer {
                         segment_id,
                         file_offset: offset_acc,
                         seq_id: record.sequence_id,
                         timestamp: record.timestamp,
                     };
-                    let existed = skipmap.contains_key(&compound_key);
                     skipmap.insert(compound_key, pointer);
                     if !existed {
                         index_ram_bytes.fetch_add(node_overhead, Ordering::SeqCst);
                     }
+                    index_ram_bytes.fetch_add(TIMESTAMP_INDEX_NODE_BYTES, Ordering::SeqCst);
+                    let mut ts_idx_guard = timestamp_indexes.lock().unwrap();
                     let entry = ts_idx_guard
                         .entry(record.stream_name.clone())
                         .or_insert_with(|| Arc::new(timestamp_index::TimestampIndex::new()));
@@ -2846,23 +3060,31 @@ fn execute_batch_append(
                         let compound_key =
                             format!("{}:{}", record.stream_name, record.key.as_str());
 
-                        let node_overhead = compound_key.len() as u64 + 64;
+                        let node_overhead = primary_charge(&compound_key);
+                        prune_timestamp_entry(
+                            skipmap,
+                            timestamp_indexes,
+                            &record.stream_name,
+                            &compound_key,
+                            index_ram_bytes,
+                        );
                         if is_tombstone {
                             if skipmap.remove(&compound_key).is_some() {
                                 index_ram_bytes.fetch_sub(node_overhead, Ordering::SeqCst);
                             }
                         } else {
+                            let existed = skipmap.contains_key(&compound_key);
                             let pointer = LogPointer {
                                 segment_id,
                                 file_offset: offset_acc,
                                 seq_id: record.sequence_id,
                                 timestamp: record.timestamp,
                             };
-                            let existed = skipmap.contains_key(&compound_key);
                             skipmap.insert(compound_key, pointer);
                             if !existed {
                                 index_ram_bytes.fetch_add(node_overhead, Ordering::SeqCst);
                             }
+                            index_ram_bytes.fetch_add(TIMESTAMP_INDEX_NODE_BYTES, Ordering::SeqCst);
 
                             // Maintain timestamp index
                             let mut ts_idx_guard = timestamp_indexes.lock().unwrap();
@@ -3068,6 +3290,176 @@ impl StorageEngine {
     pub fn active_handles_count(&self) -> usize {
         self.file_handles.lock().unwrap().len()
     }
+
+    /// Sets the fallback max-age for streams without an explicit policy.
+    /// `0` disables retention.
+    pub fn set_default_retention(&self, max_age_ms: u64) {
+        self.retention.lock().unwrap().default_max_age_ms = max_age_ms;
+    }
+
+    /// Sets or clears a per-stream max-age. `None` removes the override.
+    pub fn set_stream_retention(&self, stream_name: &str, max_age_ms: Option<u64>) {
+        let mut policy = self.retention.lock().unwrap();
+        match max_age_ms {
+            Some(ms) if ms > 0 => {
+                policy.streams.insert(stream_name.to_string(), ms);
+            }
+            _ => {
+                policy.streams.remove(stream_name);
+            }
+        }
+    }
+
+    pub fn retention_policy(&self) -> RetentionPolicy {
+        self.retention.lock().unwrap().clone()
+    }
+
+    /// Deletes inactive segments whose live records are all older than their
+    /// stream's max-age. This is segment-level expiry: a segment containing any
+    /// unexpired record (or a stream with retention disabled) is kept.
+    pub fn enforce_retention(&self) -> crate::error::Result<RetentionReport> {
+        let _maintenance = self.maintenance_lock.lock().unwrap();
+        let policy = self.retention.lock().unwrap().clone();
+        if policy.default_max_age_ms == 0 && policy.streams.is_empty() {
+            return Ok(RetentionReport::default());
+        }
+
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as i64;
+        let active_id = self.active_segment_id.load(Ordering::SeqCst);
+        let mut segments = Vec::new();
+        for entry in fs::read_dir(&self.data_dir).map_err(LivenError::Io)? {
+            let entry = entry.map_err(LivenError::Io)?;
+            let path = entry.path();
+            if path.is_file()
+                && path.extension().and_then(|s| s.to_str()) == Some("liven")
+                && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
+                && let Ok(segment_id) = stem.parse::<u64>()
+                && segment_id != active_id
+            {
+                segments.push((segment_id, path));
+            }
+        }
+        segments.sort_by_key(|(id, _)| *id);
+
+        let mut report = RetentionReport::default();
+        for (segment_id, path) in segments {
+            report.checked_segments += 1;
+            if !segment_is_fully_expired(&path, now, &policy).unwrap_or(false) {
+                continue;
+            }
+
+            let freed_bytes = path.metadata().map(|m| m.len()).unwrap_or(0);
+            let keys: Vec<String> = self
+                .skipmap
+                .iter()
+                .filter(|entry| entry.value().segment_id == segment_id)
+                .map(|entry| entry.key().clone())
+                .collect();
+            for key in keys {
+                let Some(pointer) = self.skipmap.get(&key).map(|entry| *entry.value()) else {
+                    continue;
+                };
+                if let Ok(record) = self.read_record(pointer) {
+                    let guard = self.timestamp_indexes.lock().unwrap();
+                    if let Some(index) = guard.get(&record.stream_name)
+                        && index.remove(record.timestamp, record.sequence_id)
+                    {
+                        self.index_ram_bytes
+                            .fetch_sub(TIMESTAMP_INDEX_NODE_BYTES, Ordering::SeqCst);
+                    }
+                }
+                if self.skipmap.remove(&key).is_some() {
+                    self.index_ram_bytes
+                        .fetch_sub(primary_charge(&key), Ordering::SeqCst);
+                    report.deleted_keys += 1;
+                }
+            }
+
+            self.file_handles.lock().unwrap().remove(&segment_id);
+            fs::remove_file(&path).map_err(LivenError::Io)?;
+            report.deleted_segments += 1;
+            report.freed_bytes += freed_bytes;
+        }
+
+        if report.deleted_segments > 0 {
+            sync_data_dir(&self.data_dir).map_err(LivenError::Io)?;
+            info!(
+                "Retention: deleted {} segment(s), {} key(s), {} bytes",
+                report.deleted_segments, report.deleted_keys, report.freed_bytes
+            );
+        }
+        Ok(report)
+    }
+}
+
+/// True when every live record in the segment is older than its stream's
+/// retention policy. Conservative: unreadable/torn frames, unknown streams, or
+/// streams with retention disabled keep the segment.
+fn segment_is_fully_expired(
+    path: &Path,
+    now_ms: i64,
+    policy: &RetentionPolicy,
+) -> crate::error::Result<bool> {
+    let mut file = File::open(path).map_err(LivenError::Io)?;
+    let file_len = file.metadata().map_err(LivenError::Io)?.len();
+    let mut offset = 0u64;
+    let mut header = [0u8; 26];
+    let mut saw_live_frame = false;
+
+    while offset + 26 <= file_len {
+        file.seek(SeekFrom::Start(offset)).map_err(LivenError::Io)?;
+        if file.read_exact(&mut header).is_err() {
+            return Ok(false);
+        }
+        let timestamp = i64::from_be_bytes([
+            header[8], header[9], header[10], header[11], header[12], header[13], header[14],
+            header[15],
+        ]);
+        let flags = header[17];
+        let payload_len =
+            u32::from_be_bytes([header[18], header[19], header[20], header[21]]) as u64;
+        if offset + 26 + payload_len > file_len {
+            return Ok(false);
+        }
+        if flags & 0x02 == 0 {
+            saw_live_frame = true;
+            if payload_len < 2 {
+                return Ok(false);
+            }
+            let mut len_buf = [0u8; 2];
+            file.read_exact_at(&mut len_buf, offset + 26)
+                .map_err(LivenError::Io)?;
+            let stream_len = u16::from_be_bytes(len_buf) as u64;
+            if stream_len + 2 > payload_len {
+                return Ok(false);
+            }
+            let mut stream_buf = vec![0u8; stream_len as usize];
+            file.read_exact_at(&mut stream_buf, offset + 28)
+                .map_err(LivenError::Io)?;
+            let Ok(stream_name) = std::str::from_utf8(&stream_buf) else {
+                return Ok(false);
+            };
+            let max_age_ms = policy
+                .streams
+                .get(stream_name)
+                .copied()
+                .unwrap_or(policy.default_max_age_ms);
+            if max_age_ms == 0 {
+                return Ok(false);
+            }
+            let cutoff = now_ms.saturating_sub(max_age_ms as i64);
+            if timestamp >= cutoff {
+                return Ok(false);
+            }
+        }
+        offset += 26 + payload_len;
+    }
+
+    // Empty segments and tombstone-only segments carry no live data.
+    Ok(saw_live_frame || offset == 0)
 }
 
 impl Drop for StorageEngine {

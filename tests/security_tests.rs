@@ -117,6 +117,8 @@ async fn test_auth_key_handshake_lifecycle() {
             max_index_ram_mb: 10,
             max_segment_size_mb: 10,
             max_scan_results: 100_000,
+
+            index_high_water_percent: 90,
         },
         security: SecurityConfig {
             mode: "auth_key".to_string(),
@@ -127,6 +129,8 @@ async fn test_auth_key_handshake_lifecycle() {
             master_key: Some(master_key_str.to_string()),
             ztna: None,
         },
+
+        retention: Default::default(),
     };
 
     // Spin up storage engine
@@ -239,6 +243,8 @@ async fn test_rest_auth_key_challenge_login_lifecycle() {
             max_index_ram_mb: 10,
             max_segment_size_mb: 10,
             max_scan_results: 100_000,
+
+            index_high_water_percent: 90,
         },
         security: SecurityConfig {
             mode: "auth_key".to_string(),
@@ -249,6 +255,8 @@ async fn test_rest_auth_key_challenge_login_lifecycle() {
             master_key: Some(master_key_str.to_string()),
             ztna: None,
         },
+
+        retention: Default::default(),
     };
 
     // Spin up storage engine
@@ -652,6 +660,8 @@ async fn test_session_role_downgrade_takes_effect_immediately() {
             max_index_ram_mb: 10,
             max_segment_size_mb: 10,
             max_scan_results: 100_000,
+
+            index_high_water_percent: 90,
         },
         security: SecurityConfig {
             mode: "auth_key".to_string(),
@@ -662,6 +672,8 @@ async fn test_session_role_downgrade_takes_effect_immediately() {
                 allow_local_auto_generation: true,
             }),
         },
+
+        retention: Default::default(),
     };
 
     let engine =
