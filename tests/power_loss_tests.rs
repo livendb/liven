@@ -1,3 +1,4 @@
+#![cfg(debug_assertions)]
 //! Simulated power-loss tests.
 //!
 //! The child process enables the test-only tracker (`LIVEN_POWER_LOSS=1`),
@@ -6,8 +7,10 @@
 //! its written length, and reverts directory operations that were not followed
 //! by a directory fsync. The parent reopens the directory and checks that every
 //! previously acknowledged write is still present and no deleted key returns.
+use liven::executor::execute_query;
 use liven::storage::{RecoveryMode, StorageEngine};
 use liven::types::DataValue;
+use liven::types::Query;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -174,6 +177,17 @@ fn child() {
             let e = StorageEngine::new(&dir, SEG).unwrap();
             let _ = e.append(STREAM, "new", DataValue::String("n".into()), false);
         }
+        "insert_batch" => {
+            let e = StorageEngine::new(&dir, SEG).unwrap();
+            let batch = (0..20)
+                .map(|i| (format!("b{i}"), serde_json::json!(format!("bv{i}"))))
+                .collect();
+            let q = Query::InsertBatch {
+                stream_name: STREAM.to_string(),
+                batch,
+            };
+            let _ = execute_query(&e, &q);
+        }
         "batch" => {
             let e = StorageEngine::new(&dir, SEG).unwrap();
             let batch: Vec<(String, String, DataValue)> = (0..10)
@@ -308,6 +322,60 @@ fn single_and_group_commit_appends_survive_power_loss() {
 }
 
 #[test]
+fn insert_batch_after_ack_is_fully_durable() {
+    for seed in 0..5u64 {
+        let dir = tempfile::tempdir().unwrap();
+        setup_basic(dir.path());
+        let status = spawn(dir.path(), "insert_batch", "flush_after_ack", seed, false);
+        assert!(!status.success(), "insert_batch/{seed} point not reached");
+        let e = open_default(dir.path(), SEG);
+        for i in 0..20 {
+            assert!(
+                e.get(STREAM, &format!("b{i}")).unwrap().is_some(),
+                "insert_batch/{seed}: acknowledged b{i} lost"
+            );
+        }
+    }
+}
+
+#[test]
+fn insert_batch_before_ack_is_prefix_consistent() {
+    for seed in 0..5u64 {
+        let dir = tempfile::tempdir().unwrap();
+        setup_basic(dir.path());
+        let status = spawn(dir.path(), "insert_batch", "flush_after_write", seed, false);
+        assert!(!status.success(), "insert_batch/{seed} point not reached");
+        let e = open_default(dir.path(), SEG);
+
+        // Unacknowledged batch: a prefix of whole records may survive, never a
+        // hole or a torn record.
+        let mut seen_missing = false;
+        for i in 0..20 {
+            match e.get(STREAM, &format!("b{i}")).unwrap() {
+                Some(rec) => {
+                    assert!(
+                        !seen_missing,
+                        "insert_batch/{seed}: b{i} present after a missing record"
+                    );
+                    assert_eq!(
+                        rec.value,
+                        DataValue::String(format!("bv{i}")),
+                        "insert_batch/{seed}: b{i} corrupted"
+                    );
+                }
+                None => seen_missing = true,
+            }
+        }
+        for i in 0..5 {
+            assert!(
+                e.get(STREAM, &format!("k{i}")).unwrap().is_some(),
+                "insert_batch/{seed}: pre-existing k{i} lost"
+            );
+        }
+    }
+}
+
+#[test]
 fn replace_survives_power_loss() {
     for point in ["replace_after_write", "replace_after_sync"] {
         for seed in 0..5u64 {
@@ -414,6 +482,154 @@ fn retention_unlink_survives_power_loss() {
                     "retention/{point}/{seed}: keep p{i} lost"
                 );
             }
+        }
+    }
+}
+
+fn sweep_case(op: &str, point: &str, seed: u64) {
+    let dir = tempfile::tempdir().unwrap();
+    match op {
+        "append" => setup_basic(dir.path()),
+        "insert_batch" => setup_basic(dir.path()),
+        "replace" => setup_basic(dir.path()),
+        "rollover" => setup_small(dir.path(), 5),
+        "compact" => setup_compaction(dir.path()),
+        "retention" => setup_retention(dir.path()),
+        "repair" => setup_repair(dir.path()),
+        _ => unreachable!(),
+    }
+    let status = spawn(dir.path(), op, point, seed, false);
+    assert!(
+        !status.success(),
+        "sweep {op}/{point}/seed={seed}: crash point not reached"
+    );
+
+    if op == "repair" {
+        let _ = StorageEngine::repair(dir.path(), SMALL, RecoveryMode::Repair).unwrap();
+    }
+    let e = open_default(
+        dir.path(),
+        if op == "rollover" || op == "compact" || op == "retention" || op == "repair" {
+            SMALL
+        } else {
+            SEG
+        },
+    );
+    match op {
+        "append" => {
+            for i in 0..5 {
+                assert!(
+                    e.get(STREAM, &format!("k{i}")).unwrap().is_some(),
+                    "sweep {op}/{point}/seed={seed}: k{i} lost"
+                );
+            }
+            if point == "flush_after_ack" {
+                assert!(e.get(STREAM, "new").unwrap().is_some());
+            }
+        }
+        "insert_batch" => {
+            let mut seen_missing = false;
+            for i in 0..20 {
+                match e.get(STREAM, &format!("b{i}")).unwrap() {
+                    Some(_) => assert!(
+                        !seen_missing,
+                        "sweep {op}/{point}/seed={seed}: non-prefix b{i}"
+                    ),
+                    None => seen_missing = true,
+                }
+            }
+            if point == "flush_after_ack" {
+                assert!(
+                    !seen_missing,
+                    "sweep {op}/{point}/seed={seed}: acked batch split"
+                );
+            }
+        }
+        "replace" => match e.get(STREAM, "k0").unwrap().unwrap().value {
+            DataValue::String(s) if s == "v" || s == "v2" => {}
+            other => panic!("sweep {op}/{point}/seed={seed}: k0={other:?}"),
+        },
+        "rollover" => {
+            for i in 0..5 {
+                assert!(
+                    e.get(STREAM, &format!("k{i}")).unwrap().is_some(),
+                    "sweep {op}/{point}/seed={seed}: k{i} lost"
+                );
+            }
+        }
+        "compact" => {
+            for i in 0..5 {
+                assert!(
+                    e.get(STREAM, &format!("k{i}")).unwrap().is_some(),
+                    "sweep {op}/{point}/seed={seed}: k{i} lost"
+                );
+            }
+            assert!(e.get(STREAM, "k5").unwrap().is_none());
+        }
+        "retention" => {
+            for i in 0..5 {
+                assert!(
+                    e.get("keep", &format!("p{i}")).unwrap().is_some(),
+                    "sweep {op}/{point}/seed={seed}: p{i} lost"
+                );
+            }
+        }
+        "repair" => {
+            for i in 0..4 {
+                assert!(
+                    e.get(STREAM, &format!("k{i}")).unwrap().is_some(),
+                    "sweep {op}/{point}/seed={seed}: k{i} lost"
+                );
+            }
+            for i in 0..3 {
+                assert!(
+                    e.get(STREAM, &format!("stranded{i}")).unwrap().is_some(),
+                    "sweep {op}/{point}/seed={seed}: stranded{i} lost"
+                );
+            }
+            assert!(e.get(STREAM, "k5").unwrap().is_none());
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+#[ignore = "300 seeds per crash point; run explicitly"]
+fn power_loss_sweep_300_seeds() {
+    let cases = [
+        ("append", "flush_after_write"),
+        ("append", "flush_after_sync"),
+        ("append", "flush_after_ack"),
+        ("insert_batch", "flush_after_write"),
+        ("insert_batch", "flush_after_ack"),
+        ("replace", "replace_after_write"),
+        ("replace", "replace_after_sync"),
+        ("rollover", "rollover_after_old_sync"),
+        ("rollover", "rollover_after_create"),
+        ("rollover", "rollover_after_dir_sync"),
+        ("rollover", "rollover_after_write"),
+        ("rollover", "rollover_after_sync"),
+        ("compact", "after_create"),
+        ("compact", "after_write"),
+        ("compact", "after_sync_data"),
+        ("compact", "after_sync_dir"),
+        ("compact", "after_pointer_swap"),
+        ("compact", "before_unlink"),
+        ("compact", "after_first_unlink"),
+        ("compact", "after_unlinks"),
+        ("compact", "after_final_sync"),
+        ("retention", "retention_before_unlink"),
+        ("retention", "retention_after_unlink"),
+        ("retention", "retention_after_dir_sync"),
+        ("repair", "repair_after_backup"),
+        ("repair", "repair_after_salvage_write"),
+        ("repair", "repair_after_salvage_dir_sync"),
+        ("repair", "repair_after_salvage"),
+        ("repair", "repair_after_truncate"),
+    ];
+    for (op, point) in cases {
+        for seed in 0..300u64 {
+            sweep_case(op, point, seed);
         }
     }
 }
