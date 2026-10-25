@@ -34,8 +34,12 @@ struct State {
 
 static STATE: OnceLock<Mutex<State>> = OnceLock::new();
 
+/// The tracker stays in release builds so the harness can drive a real binary,
+/// but the environment is read once: after the first call every hook is a
+/// cached boolean check plus an early return.
 fn enabled() -> bool {
-    std::env::var_os("LIVEN_POWER_LOSS").is_some()
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("LIVEN_POWER_LOSS").is_some())
 }
 
 fn state() -> &'static Mutex<State> {
