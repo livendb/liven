@@ -158,6 +158,56 @@ client_ca_path = "/etc/liven/ca.crt"
     assert_eq!(ztna.client_ca_path.as_deref(), Some("/etc/liven/ca.crt"));
 }
 
+#[cfg(feature = "server")]
+#[test]
+fn test_systemd_013_layout_keeps_admin_auth_key() {
+    // 0.1.0-0.1.3 under systemd ran with CWD = /, so the master key landed at
+    // /liven.key while the data directory stayed at /var/lib/liven.
+    let tmp = tempdir().unwrap();
+    let data_dir = tmp.path().join("var/lib/liven");
+    let fake_root = tmp.path().join("root");
+    let fake_cwd = tmp.path().join("cwd");
+    std::fs::create_dir_all(&fake_root).unwrap();
+    std::fs::create_dir_all(&fake_cwd).unwrap();
+    std::fs::write(fake_root.join("liven.key"), "013-master-key\n").unwrap();
+
+    // State left behind by 0.1.3: a default-admin whose auth hash came from the
+    // key at the legacy root.
+    {
+        let engine = StorageEngine::new(&data_dir, 1024 * 1024).unwrap();
+        liven::server::bootstrap_auth_keys_table(&engine, Some("013-master-key")).unwrap();
+        assert_eq!(engine.list_keys("auth_keys").len(), 1);
+    }
+
+    // 0.1.4 upgrade: the legacy root is a lookup candidate, so the same key is
+    // reused and no replacement key is written next to the data.
+    let (key, source) = liven::config::resolve_master_key(
+        &data_dir,
+        &[fake_cwd.join("liven.key"), fake_root.join("liven.key")],
+        None,
+        None,
+    );
+    assert_eq!(key, "013-master-key");
+    assert_eq!(
+        source,
+        liven::config::MasterKeySource::Legacy(fake_root.join("liven.key"))
+    );
+    assert!(!data_dir.join("liven.key").exists());
+
+    // The existing auth_keys stream is untouched: bootstrap finds the admin and
+    // does not mint a replacement.
+    let engine = StorageEngine::new(&data_dir, 1024 * 1024).unwrap();
+    let before = engine.get("auth_keys", "default-admin").unwrap().unwrap();
+    liven::server::bootstrap_auth_keys_table(&engine, Some(&key)).unwrap();
+    let after = engine.get("auth_keys", "default-admin").unwrap().unwrap();
+    assert_eq!(
+        engine.list_keys("auth_keys"),
+        vec!["default-admin".to_string()]
+    );
+    assert_eq!(before.value, after.value);
+    assert!(matches!(after.value, liven::types::DataValue::String(_)));
+}
+
 #[test]
 fn test_index_ram_limit_error_message() {
     let temp_dir = tempdir().unwrap();

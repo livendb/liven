@@ -335,6 +335,12 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
             // The engine creates and fsyncs the data directory before the
             // first segment is acknowledged.
             let data_directory = &config.storage.data_directory;
+            if let Some(warning) = liven::config::legacy_data_dir_warning(
+                Path::new(data_directory),
+                Path::new("/data"),
+            ) {
+                warn!("{}", warning);
+            }
 
             // Save PID of the current process
             let current_pid = std::process::id();

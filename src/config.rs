@@ -366,14 +366,27 @@ impl AppConfig {
             .filter(|s| !s.is_empty())
             .map(str::to_string);
 
-        let (key, source) = resolve_master_key(&data_dir, cwd.as_deref(), env_key, configured_key);
+        let (key, source) = {
+            let key_path = data_dir.join("liven.key");
+            let mut legacy = Vec::new();
+            if let Some(cwd) = cwd.as_deref() {
+                let candidate = cwd.join("liven.key");
+                if candidate != key_path {
+                    legacy.push(candidate);
+                }
+            }
+            // 0.1.0-0.1.3 ran under systemd with CWD = /, which put the key at
+            // /liven.key even when the data directory was elsewhere.
+            let root = PathBuf::from("/liven.key");
+            if root != key_path && !legacy.contains(&root) {
+                legacy.push(root);
+            }
+            resolve_master_key(&data_dir, &legacy, env_key, configured_key)
+        };
         match source {
-            MasterKeySource::Legacy => tracing::warn!(
+            MasterKeySource::Legacy(ref path) => tracing::warn!(
                 "using legacy master key at {}; move it to {} (and remove the old file)",
-                cwd.as_deref()
-                    .unwrap_or_else(|| Path::new("."))
-                    .join("liven.key")
-                    .display(),
+                path.display(),
                 data_dir.join("liven.key").display()
             ),
             MasterKeySource::DataDir => tracing::warn!(
@@ -524,12 +537,14 @@ fn resolve_path(base: &Path, value: &str) -> String {
     out.to_string_lossy().into_owned()
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum MasterKeySource {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MasterKeySource {
     Env,
     Config,
+    /// `<data_directory>/liven.key`.
     DataDir,
-    Legacy,
+    /// A legacy location (old CWD or `/liven.key`). The path is the file used.
+    Legacy(PathBuf),
     Generated,
 }
 
@@ -546,13 +561,47 @@ fn generate_master_key() -> String {
     key_bytes.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
-/// Resolves the master key without consulting the process CWD for the primary
-/// location: the key lives next to the data directory (which itself is resolved
-/// against the config file's directory). A key left in the CWD by an older
-/// version is used only as a fallback, so upgrades keep working.
-fn resolve_master_key(
+/// True when `dir` exists and holds at least one `.liven` segment.
+pub fn contains_segments(dir: &Path) -> bool {
+    std::fs::read_dir(dir)
+        .map(|entries| {
+            entries
+                .filter_map(Result::ok)
+                .any(|entry| entry.path().extension().and_then(|e| e.to_str()) == Some("liven"))
+        })
+        .unwrap_or(false)
+}
+
+/// 0.1.3 Docker images ignored the volume mount point and always wrote to
+/// `/data`. If the configured directory has no segments but the legacy Docker
+/// path does, the operator is about to start on an empty database. Returns the
+/// warning to log, or `None` when the layout looks intentional.
+pub fn legacy_data_dir_warning(configured: &Path, legacy: &Path) -> Option<String> {
+    if configured == legacy || contains_segments(configured) || !contains_segments(legacy) {
+        return None;
+    }
+    Some(format!(
+        "data directory {} contains no .liven segments but {} does. The 0.1.3 Docker image \
+         always wrote to /data regardless of where the volume was mounted. Set \
+         storage.data_directory = \"{}\" or mount the volume at the configured path before \
+         starting, or the server will start on an empty database. See \"Upgrading Docker from \
+         0.1.3\" in docs/operations.md.",
+        configured.display(),
+        legacy.display(),
+        legacy.display()
+    ))
+}
+
+/// Resolves the master key without consulting the process CWD implicitly: the
+/// primary location is next to the data directory (itself resolved against the
+/// config file's directory). `legacy_candidates` are tried in order after that,
+/// so an upgrade keeps the key that already hashed the stored admin keys.
+///
+/// If nothing is found a new key is generated and persisted to
+/// `<data_directory>/liven.key`; a write failure is logged but not fatal.
+pub fn resolve_master_key(
     data_dir: &Path,
-    cwd: Option<&Path>,
+    legacy_candidates: &[PathBuf],
     env_key: Option<String>,
     configured_key: Option<String>,
 ) -> (String, MasterKeySource) {
@@ -567,15 +616,14 @@ fn resolve_master_key(
     if let Some(key) = read_key_file(&key_path) {
         return (key, MasterKeySource::DataDir);
     }
-    if let Some(cwd) = cwd {
-        let legacy = cwd.join("liven.key");
-        if legacy != key_path
-            && let Some(key) = read_key_file(&legacy)
-        {
-            return (key, MasterKeySource::Legacy);
+    for candidate in legacy_candidates {
+        if candidate == &key_path {
+            continue;
+        }
+        if let Some(key) = read_key_file(candidate) {
+            return (key, MasterKeySource::Legacy(candidate.clone()));
         }
     }
-
     let generated = generate_master_key();
     if let Err(e) = write_master_key_to_keyfile(&key_path, &generated) {
         tracing::error!(
@@ -630,7 +678,12 @@ mod path_resolution_tests {
         let cwd = tmp.path().join("cwd");
         std::fs::create_dir_all(&cwd).unwrap();
 
-        let (key, source) = resolve_master_key(&data, Some(&cwd), None, None);
+        let (key, source) = resolve_master_key(
+            &data,
+            &[cwd.join("liven.key"), tmp.path().join("root/liven.key")],
+            None,
+            None,
+        );
 
         assert_eq!(source, MasterKeySource::Generated);
         let written = read_key_file(&data.join("liven.key")).unwrap();
@@ -646,10 +699,33 @@ mod path_resolution_tests {
         std::fs::create_dir_all(&cwd).unwrap();
         std::fs::write(cwd.join("liven.key"), "legacy-key\n").unwrap();
 
-        let (key, source) = resolve_master_key(&data, Some(&cwd), None, None);
+        let (key, source) = resolve_master_key(&data, &[cwd.join("liven.key")], None, None);
 
-        assert_eq!(source, MasterKeySource::Legacy);
+        assert_eq!(source, MasterKeySource::Legacy(cwd.join("liven.key")));
         assert_eq!(key, "legacy-key");
+        assert!(!data.join("liven.key").exists());
+    }
+
+    #[test]
+    fn legacy_root_key_is_used_when_cwd_has_none() {
+        // 0.1.3 under systemd: CWD was `/`, so the key landed at `/liven.key`
+        // while the data directory lived elsewhere.
+        let tmp = tempdir().unwrap();
+        let data = tmp.path().join("var/lib/liven");
+        let root = tmp.path().join("root");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("liven.key"), "root-legacy-key\n").unwrap();
+
+        let (key, source) = resolve_master_key(
+            &data,
+            &[tmp.path().join("cwd/liven.key"), root.join("liven.key")],
+            None,
+            None,
+        );
+
+        assert_eq!(source, MasterKeySource::Legacy(root.join("liven.key")));
+        assert_eq!(key, "root-legacy-key");
+        // No replacement key is generated next to the data.
         assert!(!data.join("liven.key").exists());
     }
 
@@ -663,7 +739,12 @@ mod path_resolution_tests {
         std::fs::write(data.join("liven.key"), "new-key\n").unwrap();
         std::fs::write(cwd.join("liven.key"), "legacy-key\n").unwrap();
 
-        let (key, source) = resolve_master_key(&data, Some(&cwd), None, None);
+        let (key, source) = resolve_master_key(
+            &data,
+            &[cwd.join("liven.key"), tmp.path().join("root/liven.key")],
+            None,
+            None,
+        );
 
         assert_eq!(source, MasterKeySource::DataDir);
         assert_eq!(key, "new-key");
@@ -678,19 +759,48 @@ mod path_resolution_tests {
     }
 
     #[test]
+    fn docker_legacy_data_dir_is_reported_when_configured_dir_is_empty() {
+        let tmp = tempdir().unwrap();
+        let configured = tmp.path().join("var/lib/liven");
+        let legacy = tmp.path().join("data");
+        std::fs::create_dir_all(&configured).unwrap();
+        std::fs::create_dir_all(&legacy).unwrap();
+        std::fs::write(legacy.join("00000000000000000001.liven"), b"x").unwrap();
+
+        let warning = legacy_data_dir_warning(&configured, &legacy)
+            .expect("stranded Docker data must be reported");
+        assert!(warning.contains(&configured.display().to_string()));
+        assert!(warning.contains(&legacy.display().to_string()));
+    }
+
+    #[test]
+    fn docker_legacy_warning_is_silent_when_configured_dir_has_data() {
+        let tmp = tempdir().unwrap();
+        let configured = tmp.path().join("configured");
+        let legacy = tmp.path().join("data");
+        std::fs::create_dir_all(&configured).unwrap();
+        std::fs::create_dir_all(&legacy).unwrap();
+        std::fs::write(configured.join("00000000000000000001.liven"), b"x").unwrap();
+        std::fs::write(legacy.join("00000000000000000002.liven"), b"x").unwrap();
+
+        assert!(legacy_data_dir_warning(&configured, &legacy).is_none());
+        assert!(legacy_data_dir_warning(&configured, &configured).is_none());
+    }
+
+    #[test]
     fn env_and_config_keys_take_priority_and_write_nothing() {
         let tmp = tempdir().unwrap();
         let data = tmp.path().join("data");
 
         let (key, source) = resolve_master_key(
             &data,
-            None,
+            &[],
             Some("env-key".to_string()),
             Some("config-key".to_string()),
         );
         assert_eq!((key.as_str(), source), ("env-key", MasterKeySource::Env));
 
-        let (key, source) = resolve_master_key(&data, None, None, Some("config-key".to_string()));
+        let (key, source) = resolve_master_key(&data, &[], None, Some("config-key".to_string()));
         assert_eq!(
             (key.as_str(), source),
             ("config-key", MasterKeySource::Config)
