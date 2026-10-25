@@ -42,6 +42,17 @@ pub enum LivenError {
     )]
     IndexRamLimitExceeded { max_bytes: u64, current_bytes: u64 },
 
+    /// A batch was rejected atomically because one new key would exceed the
+    /// index budget. No records in the batch were applied.
+    #[error(
+        "Index RAM limit reached while inserting key '{key}' ({current_bytes} bytes used of {max_bytes} bytes). Batch rejected; no records applied."
+    )]
+    BatchIndexRamLimitExceeded {
+        key: String,
+        max_bytes: u64,
+        current_bytes: u64,
+    },
+
     /// A stream with the given name was not found.
     #[error("stream not found: {name}")]
     StreamNotFound { name: String },
@@ -143,9 +154,17 @@ impl From<crate::storage::ring_buffer::AckError> for LivenError {
             crate::storage::ring_buffer::AckError::IndexRam {
                 max_bytes,
                 current_bytes,
-            } => LivenError::IndexRamLimitExceeded {
-                max_bytes,
-                current_bytes,
+                key,
+            } => match key {
+                Some(key) => LivenError::BatchIndexRamLimitExceeded {
+                    key,
+                    max_bytes,
+                    current_bytes,
+                },
+                None => LivenError::IndexRamLimitExceeded {
+                    max_bytes,
+                    current_bytes,
+                },
             },
             crate::storage::ring_buffer::AckError::Message(m) => LivenError::Storage(m),
         }

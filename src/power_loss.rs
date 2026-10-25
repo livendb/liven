@@ -159,7 +159,11 @@ pub fn materialize() {
     }
     // Creates without a directory fsync disappear.
     for path in guard.creates.drain() {
-        let _ = fs::remove_file(path);
+        if path.is_dir() {
+            let _ = fs::remove_dir_all(path);
+        } else {
+            let _ = fs::remove_file(path);
+        }
     }
     // Renames without a directory fsync are reverted.
     for (from, to) in guard.renames.drain(..) {

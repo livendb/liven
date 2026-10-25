@@ -7,6 +7,21 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::SystemTime;
 
+/// Clears in-flight insert reservations on every exit path, including errors
+/// and unwinding, so a failed insert never leaves a key permanently "pending".
+struct PendingInsertGuard<'a> {
+    engine: &'a StorageEngine,
+    keys: Vec<String>,
+}
+
+impl Drop for PendingInsertGuard<'_> {
+    fn drop(&mut self) {
+        for key in &self.keys {
+            self.engine.clear_insert_pending(key);
+        }
+    }
+}
+
 /// Validates that a key does not exceed the 32-byte limit.
 fn validate_key_length(key: &str) -> crate::error::Result<()> {
     if key.len() > 32 {
@@ -1399,7 +1414,7 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> crate::error::Res
             // ack wait happens after the guard is dropped, so concurrent callers
             // can share a group-commit batch. The pending set preserves insert
             // uniqueness while an earlier insert is in flight.
-            let rx = {
+            let (rx, pending) = {
                 let _guard = engine.write_lock.lock().unwrap();
                 if engine.get(stream_name, key)?.is_some()
                     || !engine.mark_insert_pending(&compound_key)
@@ -1409,19 +1424,20 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> crate::error::Res
                         key, stream_name
                     )));
                 }
+                let pending = PendingInsertGuard {
+                    engine,
+                    keys: vec![compound_key.clone()],
+                };
                 match engine.append_async(stream_name, key, json_to_datavalue(value.clone()), false)
                 {
-                    Ok(rx) => rx,
-                    Err(e) => {
-                        engine.clear_insert_pending(&compound_key);
-                        return Err(e);
-                    }
+                    Ok(rx) => (rx, pending),
+                    Err(e) => return Err(e),
                 }
             };
             let result = rx.recv().map_err(|e| {
                 LivenError::Internal(format!("LogRingBuffer coordination error: {}", e))
             })?;
-            engine.clear_insert_pending(&compound_key);
+            drop(pending);
             Ok(vec![result?])
         }
         Query::InsertBatch { stream_name, batch } => {
@@ -1430,26 +1446,50 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> crate::error::Res
                 validate_key_length(key)?;
             }
 
-            // Acquire the write lock to atomically check all keys and queue appends.
-            // This prevents other concurrent InsertBatch operations from interleaving
-            // between the existence check and the ring buffer enqueue.
-            let _guard = engine.write_lock.lock().unwrap();
-
-            for (key, _) in batch {
-                if engine.get(stream_name, key)?.is_some() {
-                    return Err(LivenError::Query(format!(
-                        "Key '{}' already exists in stream '{}' (batch insertion aborted)",
-                        key, stream_name
-                    )));
+            // Validate and reserve every key under the lock, enqueue one
+            // all-or-nothing batch, then wait for the ack outside the lock.
+            let (rx, pending) = {
+                let _guard = engine.write_lock.lock().unwrap();
+                let mut pending = PendingInsertGuard {
+                    engine,
+                    keys: Vec::with_capacity(batch.len()),
+                };
+                for (key, _) in batch {
+                    if engine.get(stream_name, key)?.is_some() {
+                        return Err(LivenError::Query(format!(
+                            "Key '{}' already exists in stream '{}' (batch insertion aborted)",
+                            key, stream_name
+                        )));
+                    }
+                    let compound_key = format!("{}:{}", stream_name, key);
+                    if !engine.mark_insert_pending(&compound_key) {
+                        return Err(LivenError::Query(format!(
+                            "Key '{}' already exists in stream '{}' (batch insertion aborted)",
+                            key, stream_name
+                        )));
+                    }
+                    pending.keys.push(compound_key);
                 }
-            }
-            let mut inserted = Vec::new();
-            for (key, val) in batch {
-                let record =
-                    engine.append(stream_name, key, json_to_datavalue(val.clone()), false)?;
-                inserted.push(record);
-            }
-            Ok(inserted)
+                let records: Vec<(String, String, DataValue)> = batch
+                    .iter()
+                    .map(|(key, val)| {
+                        (
+                            stream_name.clone(),
+                            key.clone(),
+                            json_to_datavalue(val.clone()),
+                        )
+                    })
+                    .collect();
+                match engine.append_batch_async(records) {
+                    Ok(rx) => (rx, pending),
+                    Err(e) => return Err(e),
+                }
+            };
+            let result = rx.recv().map_err(|e| {
+                LivenError::Internal(format!("LogRingBuffer coordination error: {}", e))
+            })?;
+            drop(pending);
+            result.map_err(Into::into)
         }
         Query::Upsert {
             stream_name,
@@ -2509,4 +2549,40 @@ pub fn execute_query_stream(
                 vec[0].clone()
             }),
     )
+}
+
+#[cfg(test)]
+mod pending_tests {
+    use super::*;
+
+    #[test]
+    fn pending_insert_guard_clears_on_drop() {
+        let dir = tempfile::tempdir().unwrap();
+        let engine = StorageEngine::new(dir.path(), 1024 * 1024).unwrap();
+        assert!(engine.mark_insert_pending("s:k"));
+        assert_eq!(engine.pending_insert_count(), 1);
+        {
+            let _guard = PendingInsertGuard {
+                engine: &engine,
+                keys: vec!["s:k".to_string()],
+            };
+        }
+        assert_eq!(engine.pending_insert_count(), 0);
+    }
+
+    #[test]
+    fn pending_insert_guard_clears_on_panic() {
+        let dir = tempfile::tempdir().unwrap();
+        let engine = StorageEngine::new(dir.path(), 1024 * 1024).unwrap();
+        assert!(engine.mark_insert_pending("s:k"));
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = PendingInsertGuard {
+                engine: &engine,
+                keys: vec!["s:k".to_string()],
+            };
+            panic!("simulated caller panic");
+        }));
+        assert!(result.is_err());
+        assert_eq!(engine.pending_insert_count(), 0);
+    }
 }

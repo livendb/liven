@@ -8,7 +8,12 @@ use std::sync::mpsc::SyncSender;
 /// instead of degrading to a `Storage(String)`.
 #[derive(Debug, Clone)]
 pub enum AckError {
-    IndexRam { max_bytes: u64, current_bytes: u64 },
+    IndexRam {
+        max_bytes: u64,
+        current_bytes: u64,
+        /// Set for a batch-level rejection so the caller can name the key.
+        key: Option<String>,
+    },
     Message(String),
 }
 
@@ -28,6 +33,13 @@ pub enum LogEntry {
     TombstoneBatch {
         stream_name: String,
         keys: Vec<StreamKey>,
+        response_tx: SyncSender<Result<Vec<Record>, AckError>>,
+    },
+    /// All-or-nothing active-record batch. The flusher validates every new key
+    /// against the index budget before writing any frame, so a single
+    /// over-budget key rejects the whole batch and nothing is applied.
+    Batch {
+        records: Vec<(String, StreamKey, DataValue)>,
         response_tx: SyncSender<Result<Vec<Record>, AckError>>,
     },
     /// One-frame replacement of an existing key. A single active frame (no

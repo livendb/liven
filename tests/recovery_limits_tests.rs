@@ -120,24 +120,15 @@ fn index_above_limit_reopens_and_rejects_only_new_keys() {
 }
 
 #[test]
-fn over_limit_mixed_batch_rejects_only_the_new_key() {
+fn over_limit_mixed_batch_is_rejected_atomically_and_names_the_key() {
     let dir = tempdir().unwrap();
     let sname = "b".repeat(60);
     let key = |i: u32| format!("k{i:031}");
     build_old_accounting_dataset(dir.path(), &sname);
 
     let e = open(dir.path(), 1024, 16).unwrap();
-
-    // Replace an existing key.
-    e.replace(&sname, &key(0), DataValue::String("replaced".into()))
-        .unwrap();
-    // Delete an existing key.
-    e.append_tombstone_batch(&sname, &[key(1)]).unwrap();
-
-    // Existing + one new key: only the new key is rejected; the existing
-    // entry in the same batch is still applied.
-    let err = e
-        .append_batch(vec![
+    let batch = || {
+        vec![
             (
                 sname.clone(),
                 key(2),
@@ -148,21 +139,65 @@ fn over_limit_mixed_batch_rejects_only_the_new_key() {
                 "brand-new".to_string(),
                 DataValue::String("n".into()),
             ),
-        ])
-        .expect_err("the new key must be rejected");
-    assert!(
-        matches!(err, LivenError::IndexRamLimitExceeded { .. }),
-        "expected typed IndexRamLimitExceeded, got: {err:?}"
-    );
+        ]
+    };
+
+    // All-or-nothing: the existing key is not applied either.
+    let err = e
+        .append_batch(batch())
+        .expect_err("the new key must reject the whole batch");
+    match err {
+        LivenError::BatchIndexRamLimitExceeded { key, .. } => {
+            assert!(key.contains("brand-new"), "error must name the key: {key}");
+        }
+        other => panic!("expected BatchIndexRamLimitExceeded, got: {other:?}"),
+    }
     assert_eq!(
         e.get(&sname, &key(2)).unwrap().unwrap().value,
-        DataValue::String("batch-value".into()),
-        "existing key in the mixed batch must be applied"
+        DataValue::String("x".into()),
+        "existing key must not be applied by a rejected batch"
     );
+    assert!(e.get(&sname, "brand-new").unwrap().is_none());
+
+    // Client retry of the same batch gets the same typed result and still
+    // applies nothing.
+    let retry = e
+        .append_batch(batch())
+        .expect_err("retry must be rejected too");
+    assert!(matches!(
+        retry,
+        LivenError::BatchIndexRamLimitExceeded { .. }
+    ));
+    assert_eq!(
+        e.get(&sname, &key(2)).unwrap().unwrap().value,
+        DataValue::String("x".into())
+    );
+}
+
+#[test]
+fn rejected_insert_does_not_leak_a_pending_reservation() {
+    let dir = tempdir().unwrap();
+    let sname = "b".repeat(60);
+    let key = |i: u32| format!("k{i:031}");
+    build_old_accounting_dataset(dir.path(), &sname);
+    let e = open(dir.path(), 1024, 16).unwrap();
+
+    let q = liven::types::Query::insert(&sname, "brand-new", serde_json::json!("x"));
+    let first = liven::executor::execute_query(&e, &q).unwrap_err();
+    assert!(matches!(first, LivenError::IndexRamLimitExceeded { .. }));
+    let second = liven::executor::execute_query(&e, &q).unwrap_err();
     assert!(
-        e.get(&sname, "brand-new").unwrap().is_none(),
-        "new key must not be applied"
+        !second.to_string().contains("already exists"),
+        "a budget rejection leaked a pending insert: {second}"
     );
+    assert!(e.get(&sname, "brand-new").unwrap().is_none());
+
+    // Validation failure (existing key) also leaves no reservation.
+    let existing = liven::types::Query::insert(&sname, key(0), serde_json::json!("y"));
+    let a = liven::executor::execute_query(&e, &existing).unwrap_err();
+    let b = liven::executor::execute_query(&e, &existing).unwrap_err();
+    assert!(a.to_string().contains("already exists"));
+    assert!(b.to_string().contains("already exists"));
 }
 
 #[test]

@@ -642,6 +642,49 @@ fn spawn_crash_child(dir: &Path, point: &str) {
 }
 
 #[test]
+fn repair_orders_salvage_dir_sidecar_before_truncate() {
+    let has_sidecar = |dir: &Path| {
+        fs::read_dir(dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .any(|e| e.file_name().to_string_lossy().contains(".torn-"))
+    };
+    let segment_count = |dir: &Path| segment_files(dir).len();
+
+    // 1. After salvage + directory fsync, the salvage segment exists and the
+    //    sidecar does not; the source is still torn.
+    let dir = tempfile::tempdir().unwrap();
+    let (seg, _offset, _torn) = make_stranded_fixture(dir.path(), 5, 3);
+    let original_len = fs::metadata(&seg).unwrap().len();
+    spawn_crash_child(dir.path(), "repair_after_salvage_dir_sync");
+    assert!(segment_count(dir.path()) >= 2, "salvage segment missing");
+    assert!(!has_sidecar(dir.path()), "sidecar written before salvage");
+    assert_eq!(fs::metadata(&seg).unwrap().len(), original_len);
+
+    // 2. After the sidecar (and its directory fsync), both exist and the
+    //    source is still intact.
+    let dir = tempfile::tempdir().unwrap();
+    let (seg, _offset, _torn) = make_stranded_fixture(dir.path(), 5, 3);
+    let original_len = fs::metadata(&seg).unwrap().len();
+    spawn_crash_child(dir.path(), "repair_after_backup");
+    assert!(segment_count(dir.path()) >= 2, "salvage segment missing");
+    assert!(has_sidecar(dir.path()), "sidecar missing");
+    assert_eq!(fs::metadata(&seg).unwrap().len(), original_len);
+
+    // 3. Only after both are durable is the source truncated.
+    let dir = tempfile::tempdir().unwrap();
+    let (seg, _offset, _torn) = make_stranded_fixture(dir.path(), 5, 3);
+    let original_len = fs::metadata(&seg).unwrap().len();
+    spawn_crash_child(dir.path(), "repair_after_truncate");
+    assert!(segment_count(dir.path()) >= 2);
+    assert!(has_sidecar(dir.path()));
+    assert!(
+        fs::metadata(&seg).unwrap().len() < original_len,
+        "source was not truncated after salvage + sidecar"
+    );
+}
+
+#[test]
 fn repair_recoverable_after_crash_at_each_step() {
     for point in [
         "repair_after_backup",

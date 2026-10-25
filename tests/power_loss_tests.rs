@@ -272,6 +272,21 @@ fn fresh_database_first_append_survives_power_loss() {
 }
 
 #[test]
+fn fresh_nested_data_directory_survives_power_loss() {
+    for seed in 0..3u64 {
+        let root = tempfile::tempdir().unwrap();
+        let db = root.path().join("nested").join("db");
+        let status = spawn(&db, "fresh", "flush_after_ack", seed, false);
+        assert!(!status.success(), "freshdir/{seed} point not reached");
+        let e = open_default(&db, SEG);
+        assert!(
+            e.get(STREAM, "fresh").unwrap().is_some(),
+            "freshdir/{seed}: acknowledged first append lost"
+        );
+    }
+}
+
+#[test]
 fn single_and_group_commit_appends_survive_power_loss() {
     for op in ["append", "batch"] {
         for point in ["flush_after_write", "flush_after_sync"] {

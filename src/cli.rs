@@ -332,9 +332,9 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
 
             let config = load_config(&args)?;
 
-            // Create data directory if it doesn't exist
+            // The engine creates and fsyncs the data directory before the
+            // first segment is acknowledged.
             let data_directory = &config.storage.data_directory;
-            fs::create_dir_all(data_directory)?;
 
             // Save PID of the current process
             let current_pid = std::process::id();

@@ -404,7 +404,7 @@ impl StorageEngine {
         commit_max_batch_size: usize,
     ) -> crate::error::Result<Self> {
         let path = data_dir.as_ref().to_path_buf();
-        fs::create_dir_all(&path).map_err(LivenError::Io)?;
+        ensure_data_dir(&path)?;
 
         let sync_mode: String = "always".to_string();
         let max_scan_results: usize = 100_000;
@@ -612,7 +612,7 @@ impl StorageEngine {
         mode: RecoveryMode,
     ) -> crate::error::Result<RecoveryReport> {
         let path = data_dir.as_ref().to_path_buf();
-        fs::create_dir_all(&path).map_err(LivenError::Io)?;
+        ensure_data_dir(&path)?;
 
         // Minimal engine construction — only what recover() needs.
         let skipmap = Arc::new(SkipMap::new());
@@ -1348,6 +1348,13 @@ impl StorageEngine {
                 });
             }
 
+            // Order matters: write and fsync the salvage segment, fsync its
+            // directory entry, then write and fsync the torn-region sidecar
+            // (and its directory). Only then may the caller truncate.
+            let (target_id, marker) =
+                self.write_salvage_segment(path, file, tear_offset, &stranded, report)?;
+            test_crash_point("repair_after_salvage");
+
             let backup = backup_torn_region(path, tear_offset)?;
             info!(
                 "Torn-tail backup for segment {}: {}",
@@ -1358,9 +1365,6 @@ impl StorageEngine {
             report.had_issues = true;
             test_crash_point("repair_after_backup");
 
-            let (target_id, marker) =
-                self.write_salvage_segment(path, file, tear_offset, &stranded, report)?;
-            test_crash_point("repair_after_salvage");
             info!(
                 "Salvaged {} stranded frame(s) from segment {} into segment {}",
                 stranded.len(),
@@ -1628,6 +1632,11 @@ impl StorageEngine {
         self.pending_inserts.lock().unwrap().remove(compound_key);
     }
 
+    #[cfg(test)]
+    pub(crate) fn pending_insert_count(&self) -> usize {
+        self.pending_inserts.lock().unwrap().len()
+    }
+
     /// Enqueues an append and returns the receiver for its acknowledgement.
     /// The caller can release application locks before waiting for fsync.
     pub(crate) fn append_async(
@@ -1743,11 +1752,24 @@ impl StorageEngine {
             .map_err(Into::into)
     }
 
-    /// Appends a batch of records to the storage engine with high performance
+    /// Appends a batch of records to the storage engine with high performance.
     pub fn append_batch(
         &self,
         batch: Vec<(String, String, DataValue)>,
     ) -> crate::error::Result<Vec<Record>> {
+        let rx = self.append_batch_async(batch)?;
+        rx.recv()
+            .map_err(|e| LivenError::Internal(format!("LogRingBuffer coordination error: {}", e)))?
+            .map_err(Into::into)
+    }
+
+    /// Enqueues an all-or-nothing batch and returns the acknowledgement
+    /// receiver. Callers can release application locks before waiting.
+    pub(crate) fn append_batch_async(
+        &self,
+        batch: Vec<(String, String, DataValue)>,
+    ) -> crate::error::Result<std::sync::mpsc::Receiver<Result<Vec<Record>, ring_buffer::AckError>>>
+    {
         self.ensure_writable()?;
         // Validate the stream budget up front. Index-RAM decisions are left to
         // the flusher's per-entry authoritative check so a mixed batch (existing
@@ -1777,50 +1799,18 @@ impl StorageEngine {
             }
         }
 
-        let mut rx_channels = Vec::with_capacity(batch.len());
-
+        let mut records = Vec::with_capacity(batch.len());
         for (stream_name, key, value) in batch {
             let stream_key = crate::storage::key::StreamKey::from_str(&key)?;
-            let (response_tx, rx) = std::sync::mpsc::sync_channel(1);
-            let entry = ring_buffer::LogEntry::Single {
-                stream_name,
-                key: stream_key,
-                value,
-                is_tombstone: false,
-                response_tx,
-            };
-            self.ring_buffer.tx_send(entry)?;
-            rx_channels.push(rx);
+            records.push((stream_name, stream_key, value));
         }
 
-        // Wait for every acknowledgement before returning, so entries that fit
-        // the budget are applied even when another entry in the same batch is
-        // rejected by the flusher's per-entry index-RAM check.
-        let mut results = Vec::with_capacity(rx_channels.len());
-        let mut first_error: Option<LivenError> = None;
-        for rx in rx_channels {
-            match rx.recv() {
-                Ok(Ok(record)) => results.push(record),
-                Ok(Err(e)) => {
-                    if first_error.is_none() {
-                        first_error = Some(e.into());
-                    }
-                }
-                Err(e) => {
-                    if first_error.is_none() {
-                        first_error = Some(LivenError::Internal(format!(
-                            "LogRingBuffer coordination error: {}",
-                            e
-                        )));
-                    }
-                }
-            }
-        }
-        if let Some(e) = first_error {
-            return Err(e);
-        }
-
-        Ok(results)
+        let (response_tx, rx) = std::sync::mpsc::sync_channel(1);
+        self.ring_buffer.tx_send(ring_buffer::LogEntry::Batch {
+            records,
+            response_tx,
+        })?;
+        Ok(rx)
     }
 
     /// Appends a batch of tombstones to the storage engine with high performance (O(1) disk syncs)
@@ -2641,6 +2631,32 @@ fn pl_dir_sync(dir: &Path) {
     let _ = dir;
 }
 
+/// Create the data directory and, when it is new, persist its entry in the
+/// parent directory before any segment can be acknowledged.
+fn ensure_data_dir(path: &Path) -> crate::error::Result<()> {
+    // Record every missing level so each new directory entry can be made
+    // durable in its parent, not just the leaf.
+    let mut missing = Vec::new();
+    let mut cursor = path;
+    while !cursor.exists() {
+        missing.push(cursor.to_path_buf());
+        match cursor.parent() {
+            Some(parent) if !parent.as_os_str().is_empty() => cursor = parent,
+            _ => break,
+        }
+    }
+    fs::create_dir_all(path).map_err(LivenError::Io)?;
+    for dir in missing.iter().rev() {
+        pl_create(dir);
+        let parent = dir
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        sync_data_dir(parent).map_err(LivenError::Io)?;
+    }
+    Ok(())
+}
+
 /// Flushes a directory entry so freshly created or removed segment files are
 /// durable. No-op on platforms where directories cannot be opened as files.
 fn sync_data_dir(dir: &Path) -> std::io::Result<()> {
@@ -3335,6 +3351,10 @@ fn run_flusher_loop(
                         let _ =
                             response_tx.send(Err(ring_buffer::AckError::Message(err_str.clone())));
                     }
+                    ring_buffer::LogEntry::Batch { response_tx, .. } => {
+                        let _ =
+                            response_tx.send(Err(ring_buffer::AckError::Message(err_str.clone())));
+                    }
                     ring_buffer::LogEntry::Shutdown => {
                         // Shutdown sentinel, no response needed
                     }
@@ -3409,7 +3429,7 @@ fn execute_batch_append(
 
     SERIALIZATION_BUFFER.with(|buf_cell| {
         let mut local_buf = buf_cell.borrow_mut();
-        for entry in batch.iter() {
+        'entries: for entry in batch.iter() {
             match entry {
                 ring_buffer::LogEntry::Single {
                     stream_name,
@@ -3430,6 +3450,7 @@ fn execute_batch_append(
                                 let _ = response_tx.send(Err(ring_buffer::AckError::IndexRam {
                                     max_bytes: max_index_ram_bytes,
                                     current_bytes: projected,
+                                    key: None,
                                 }));
                                 continue;
                             }
@@ -3509,6 +3530,7 @@ fn execute_batch_append(
                             let _ = response_tx.send(Err(ring_buffer::AckError::IndexRam {
                                 max_bytes: max_index_ram_bytes,
                                 current_bytes: projected,
+                                key: None,
                             }));
                             continue;
                         }
@@ -3616,6 +3638,83 @@ fn execute_batch_append(
                         };
 
                         batch_records_to_add.push((record, frame_len, true, false));
+                        count += 1;
+                    }
+                    pending_completes.push(PendingComplete::Batch {
+                        response_tx: response_tx.clone(),
+                        count,
+                    });
+                }
+                ring_buffer::LogEntry::Batch {
+                    records,
+                    response_tx,
+                } => {
+                    // Validate the whole batch before writing any frame. If one
+                    // new key does not fit, reject all of it atomically.
+                    let mut projected =
+                        index_ram_bytes.load(Ordering::SeqCst) + projected_new_bytes;
+                    let mut local_new: HashSet<String> = HashSet::new();
+                    let mut offending: Option<(String, u64)> = None;
+                    for (stream_name, key, _) in records.iter() {
+                        let compound_key = format!("{}:{}", stream_name, key.as_str());
+                        if skipmap.contains_key(&compound_key)
+                            || batch_new_keys.contains(&compound_key)
+                            || local_new.contains(&compound_key)
+                        {
+                            continue;
+                        }
+                        let size = primary_charge(&compound_key) + TIMESTAMP_INDEX_NODE_BYTES;
+                        if projected + size > max_index_ram_bytes {
+                            offending = Some((compound_key, projected + size));
+                            break;
+                        }
+                        projected += size;
+                        local_new.insert(compound_key);
+                    }
+                    if let Some((key, current_bytes)) = offending {
+                        let _ = response_tx.send(Err(ring_buffer::AckError::IndexRam {
+                            max_bytes: max_index_ram_bytes,
+                            current_bytes,
+                            key: Some(key),
+                        }));
+                        continue 'entries;
+                    }
+                    projected_new_bytes =
+                        projected.saturating_sub(index_ram_bytes.load(Ordering::SeqCst));
+                    batch_new_keys.extend(local_new);
+
+                    let mut count = 0;
+                    for (stream_name, key, value) in records {
+                        let seq_id = current_seq;
+                        current_seq += 1;
+                        let timestamp = SystemTime::now()
+                            .duration_since(SystemTime::UNIX_EPOCH)
+                            .map_err(|e| LivenError::Internal(e.to_string()))?
+                            .as_millis() as i64;
+                        let type_tag = value.type_tag();
+                        serialize_payload_into(stream_name, key.as_str(), value, &mut local_buf);
+                        let payload_len = local_buf.len() as u32;
+                        let crc32 = crc32fast::hash(&local_buf);
+                        let start_idx = frame_buf.len() as u64;
+                        frame_buf.extend_from_slice(&seq_id.to_be_bytes());
+                        frame_buf.extend_from_slice(&timestamp.to_be_bytes());
+                        frame_buf.push(type_tag);
+                        frame_buf.push(0x01);
+                        frame_buf.extend_from_slice(&payload_len.to_be_bytes());
+                        frame_buf.extend_from_slice(&crc32.to_be_bytes());
+                        frame_buf.extend_from_slice(&local_buf);
+                        let end_idx = frame_buf.len() as u64;
+                        let frame_len = end_idx - start_idx;
+                        let record = Record {
+                            sequence_id: seq_id,
+                            timestamp,
+                            type_tag,
+                            flags: 0x01,
+                            stream_name: stream_name.clone(),
+                            key: *key,
+                            value: value.clone(),
+                        };
+                        batch_records_to_add.push((record, frame_len, false, false));
                         count += 1;
                     }
                     pending_completes.push(PendingComplete::Batch {
