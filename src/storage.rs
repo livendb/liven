@@ -2550,15 +2550,15 @@ impl StorageEngine {
 }
 
 /// Test-only crash injection point for the compaction crash-consistency test.
-/// Active only in debug builds; a matching env var aborts the process without
-/// running destructors, simulating a hard crash.
+/// Compiled only with the `test-hooks` feature; a matching env var aborts the
+/// process without running destructors, simulating a hard crash.
 #[inline]
 fn test_should_fail_sync() -> bool {
-    #[cfg(debug_assertions)]
+    #[cfg(feature = "test-hooks")]
     {
         std::env::var_os("LIVEN_TEST_FAIL_SYNC").is_some()
     }
-    #[cfg(not(debug_assertions))]
+    #[cfg(not(feature = "test-hooks"))]
     {
         false
     }
@@ -2566,7 +2566,7 @@ fn test_should_fail_sync() -> bool {
 
 #[inline]
 fn test_crash_point(point: &str) {
-    #[cfg(debug_assertions)]
+    #[cfg(feature = "test-hooks")]
     {
         if let Ok(value) = std::env::var("LIVEN_TEST_CRASH_POINT")
             && value == point
@@ -2577,7 +2577,7 @@ fn test_crash_point(point: &str) {
             std::process::abort();
         }
     }
-    #[cfg(not(debug_assertions))]
+    #[cfg(not(feature = "test-hooks"))]
     {
         let _ = point;
     }
@@ -2585,49 +2585,49 @@ fn test_crash_point(point: &str) {
 
 #[inline]
 fn pl_create(path: &Path) {
-    #[cfg(debug_assertions)]
+    #[cfg(feature = "test-hooks")]
     crate::power_loss::record_create(path);
-    #[cfg(not(debug_assertions))]
+    #[cfg(not(feature = "test-hooks"))]
     let _ = path;
 }
 
 #[inline]
 fn pl_write(path: &Path, start: u64, end: u64) {
-    #[cfg(debug_assertions)]
+    #[cfg(feature = "test-hooks")]
     crate::power_loss::record_write(path, start, end);
-    #[cfg(not(debug_assertions))]
+    #[cfg(not(feature = "test-hooks"))]
     let _ = (path, start, end);
 }
 
 #[inline]
 fn pl_sync(path: &Path, offset: u64) {
-    #[cfg(debug_assertions)]
+    #[cfg(feature = "test-hooks")]
     crate::power_loss::record_sync(path, offset);
-    #[cfg(not(debug_assertions))]
+    #[cfg(not(feature = "test-hooks"))]
     let _ = (path, offset);
 }
 
 #[inline]
 fn pl_truncate_sync(path: &Path, len: u64) {
-    #[cfg(debug_assertions)]
+    #[cfg(feature = "test-hooks")]
     crate::power_loss::record_truncate_sync(path, len);
-    #[cfg(not(debug_assertions))]
+    #[cfg(not(feature = "test-hooks"))]
     let _ = (path, len);
 }
 
 #[inline]
 fn pl_unlink(path: &Path) {
-    #[cfg(debug_assertions)]
+    #[cfg(feature = "test-hooks")]
     crate::power_loss::record_unlink(path);
-    #[cfg(not(debug_assertions))]
+    #[cfg(not(feature = "test-hooks"))]
     let _ = path;
 }
 
 #[inline]
 fn pl_dir_sync(dir: &Path) {
-    #[cfg(debug_assertions)]
+    #[cfg(feature = "test-hooks")]
     crate::power_loss::record_dir_sync(dir);
-    #[cfg(not(debug_assertions))]
+    #[cfg(not(feature = "test-hooks"))]
     let _ = dir;
 }
 
@@ -2660,7 +2660,7 @@ fn ensure_data_dir(path: &Path) -> crate::error::Result<()> {
 /// Flushes a directory entry so freshly created or removed segment files are
 /// durable. No-op on platforms where directories cannot be opened as files.
 fn sync_data_dir(dir: &Path) -> std::io::Result<()> {
-    #[cfg(debug_assertions)]
+    #[cfg(feature = "test-hooks")]
     if std::env::var_os("LIVEN_TEST_SKIP_DIR_SYNC").is_some() {
         return Ok(());
     }

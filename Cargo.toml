@@ -38,6 +38,11 @@ path = "src/main.rs"
 [features]
 default = ["full"]
 full = ["server", "tui"]
+# Test-only crash injection and power-loss simulation hooks. OFF in release
+# binaries: without it, no env reads and no hot-path checks are compiled in.
+# Enabled automatically for `cargo test` and `cargo bench` through the self
+# dev-dependency below.
+test-hooks = []
 server = [
     "dep:axum",
     "dep:tower-http",
@@ -97,6 +102,9 @@ panic = "abort"   # Drop stack unwinding metadata strings
 strip = true      # Automatically strip out all symbol arrays and debug paths
 
 [dev-dependencies]
+# Enables the test-hooks feature for `cargo test`/`cargo bench` without leaking
+# it into `cargo build`/`cargo build --release` for the shipped binary.
+liven = { path = ".", features = ["test-hooks"] }
 criterion = { version = "0.5", features = ["html_reports"] }
 hdrhistogram = "7.5"
 proptest = "1.5.0"

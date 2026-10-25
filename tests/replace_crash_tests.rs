@@ -1,3 +1,4 @@
+#![cfg(feature = "test-hooks")]
 //! Subprocess crash test for the one-frame upsert/replace path.
 //!
 //! The child is re-executed with `LIVEN_TEST_CRASH_POINT` set. The flusher

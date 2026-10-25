@@ -1,3 +1,4 @@
+#![cfg(feature = "test-hooks")]
 //! Crash-injection tests for compaction.
 //!
 //! The child test is re-executed as a subprocess with `LIVEN_TEST_CRASH_POINT`

@@ -39,7 +39,7 @@ pub mod error;
 pub mod executor;
 pub mod import_export;
 pub mod parser;
-#[cfg(debug_assertions)]
+#[cfg(feature = "test-hooks")]
 mod power_loss;
 pub mod query;
 pub mod security;

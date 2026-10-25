@@ -629,6 +629,7 @@ fn salvage_repair_child() {
     repair_child();
 }
 
+#[cfg(feature = "test-hooks")]
 fn spawn_crash_child(dir: &Path, point: &str) {
     let exe = std::env::current_exe().unwrap();
     let status = Command::new(exe)
@@ -641,6 +642,7 @@ fn spawn_crash_child(dir: &Path, point: &str) {
     assert!(!status.success(), "crash point {point} was not reached");
 }
 
+#[cfg(feature = "test-hooks")]
 #[test]
 fn repair_orders_salvage_dir_sidecar_before_truncate() {
     let has_sidecar = |dir: &Path| {
@@ -684,6 +686,7 @@ fn repair_orders_salvage_dir_sidecar_before_truncate() {
     );
 }
 
+#[cfg(feature = "test-hooks")]
 #[test]
 fn repair_recoverable_after_crash_at_each_step() {
     for point in [

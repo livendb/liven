@@ -1,4 +1,4 @@
-#![cfg(debug_assertions)]
+#![cfg(feature = "test-hooks")]
 //! Simulated power-loss tests.
 //!
 //! The child process enables the test-only tracker (`LIVEN_POWER_LOSS=1`),

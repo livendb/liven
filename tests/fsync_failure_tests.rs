@@ -1,3 +1,4 @@
+#![cfg(feature = "test-hooks")]
 //! Fault injection for the durable-write failure path.
 //!
 //! This binary intentionally runs a single test so the process-wide env hook
