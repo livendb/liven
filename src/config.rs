@@ -1,6 +1,7 @@
 use config::{Config, ConfigError, Environment, File};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 /// Auto-detect system RAM and calculate appropriate budget
 fn auto_detect_index_ram_budget() -> u64 {
@@ -270,28 +271,22 @@ impl AppConfig {
 
         if !was_explicitly_set {
             // Auto-switch based on environment
-            match config.server.environment.as_str() {
-                "development" | "test" => {
-                    config.security.mode = "none".to_string();
-                    tracing::info!(
-                        "🔓 Security auto-configured for {} environment: authentication disabled",
-                        config.server.environment
-                    );
-                }
-                "production" => {
-                    config.security.mode = "auth_key".to_string();
-                    tracing::info!(
-                        "🔒 Security auto-configured for production environment: auth_key mode enabled"
-                    );
-                }
-                _ => {
-                    // Unknown environment - default to secure mode
-                    config.security.mode = "auth_key".to_string();
-                    tracing::warn!(
-                        "Unknown environment '{}', defaulting to secure auth_key mode",
-                        config.server.environment
-                    );
-                }
+            let mode = auto_security_mode(&config.server.environment);
+            config.security.mode = mode.to_string();
+            if mode == "none" {
+                tracing::info!(
+                    "🔓 Security auto-configured for {} environment: authentication disabled",
+                    config.server.environment
+                );
+            } else if config.server.environment == "production" {
+                tracing::info!(
+                    "🔒 Security auto-configured for production environment: auth_key mode enabled"
+                );
+            } else {
+                tracing::warn!(
+                    "Unknown environment '{}', defaulting to secure auth_key mode",
+                    config.server.environment
+                );
             }
         } else {
             tracing::info!(
@@ -324,66 +319,70 @@ impl AppConfig {
             );
         }
 
+        // Resolve relative paths against the directory containing the loaded
+        // config file, never the process CWD. Under systemd the CWD is often `/`.
+        let base_dir = match path {
+            Some(p) => {
+                let abs = if p.is_absolute() {
+                    p.to_path_buf()
+                } else {
+                    std::env::current_dir()
+                        .map_err(|e| ConfigError::Message(e.to_string()))?
+                        .join(p)
+                };
+                abs.parent()
+                    .map(|d| d.to_path_buf())
+                    .unwrap_or_else(|| PathBuf::from("."))
+            }
+            None => std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+        };
+        config.storage.data_directory = resolve_path(&base_dir, &config.storage.data_directory);
+        if let Some(ztna) = config.security.ztna.as_mut() {
+            for slot in [
+                &mut ztna.cert_path,
+                &mut ztna.key_path,
+                &mut ztna.client_ca_path,
+            ] {
+                if let Some(value) = slot.as_mut() {
+                    *value = resolve_path(&base_dir, value);
+                }
+            }
+        }
+
         // Key resolution order:
-        // 1. Environment variable LIVEN_SECURITY_MASTER_KEY (already populated by config crate)
-        // 2. liven.toml / liven.conf config file
-        // 3. ./liven.key file
-        // 4. Generate new key and write to ./liven.key
+        // 1. LIVEN_SECURITY_MASTER_KEY
+        // 2. security.master_key in the config file
+        // 3. <data_directory>/liven.key
+        // 4. legacy <CWD>/liven.key (migration warning)
+        // 5. generate a new key at <data_directory>/liven.key
+        let data_dir = PathBuf::from(&config.storage.data_directory);
+        let cwd = std::env::current_dir().ok();
         let env_key = std::env::var("LIVEN_SECURITY_MASTER_KEY").ok();
-        let key_file_key = std::fs::read_to_string("./liven.key")
-            .ok()
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty());
+        let configured_key = config
+            .security
+            .master_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
 
-        let key_from_env = env_key.is_some();
-        let key_from_file = key_file_key
-            .as_ref()
-            .and_then(|k| if !k.is_empty() { Some(k.clone()) } else { None });
-
-        if let Some(ref env_val) = env_key {
-            // Env var takes highest priority — use it, do not modify any file.
-            config.security.master_key = Some(env_val.clone());
-        } else if let Some(ref existing) = config.security.master_key {
-            if !existing.trim().is_empty() {
-                // Key from liven.toml — use as-is, no file modification.
-            } else if let Some(kf) = key_from_file {
-                config.security.master_key = Some(kf);
-            } else {
-                // Empty key in config, no env var, no key file — generate new one.
-                let mut key_bytes = [0u8; 32];
-                rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut key_bytes);
-                let generated_mkey = key_bytes
-                    .iter()
-                    .map(|b| format!("{:02x}", b))
-                    .collect::<String>();
-                let _ = write_master_key_to_keyfile("./liven.key", &generated_mkey);
-                config.security.master_key = Some(generated_mkey);
-            }
-        } else if let Some(kf) = key_from_file {
-            config.security.master_key = Some(kf);
-        } else {
-            // No key found anywhere — generate a new one and persist to key file.
-            let mut key_bytes = [0u8; 32];
-            rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut key_bytes);
-            let generated_mkey = key_bytes
-                .iter()
-                .map(|b| format!("{:02x}", b))
-                .collect::<String>();
-            let _ = write_master_key_to_keyfile("./liven.key", &generated_mkey);
-            config.security.master_key = Some(generated_mkey);
+        let (key, source) = resolve_master_key(&data_dir, cwd.as_deref(), env_key, configured_key);
+        match source {
+            MasterKeySource::Legacy => tracing::warn!(
+                "using legacy master key at {}; move it to {} (and remove the old file)",
+                cwd.as_deref()
+                    .unwrap_or_else(|| Path::new("."))
+                    .join("liven.key")
+                    .display(),
+                data_dir.join("liven.key").display()
+            ),
+            MasterKeySource::DataDir => tracing::warn!(
+                "master key loaded from {} — set LIVEN_SECURITY_MASTER_KEY env var for production deployments",
+                data_dir.join("liven.key").display()
+            ),
+            MasterKeySource::Env | MasterKeySource::Config | MasterKeySource::Generated => {}
         }
-
-        if !key_from_env {
-            // Log a warning if the key is coming from a file rather than env var (production best practice)
-            if let Some(path) = std::env::current_dir().ok().map(|p| p.join("./liven.key"))
-                && path.exists()
-            {
-                tracing::warn!(
-                    "master key loaded from {:?} — set LIVEN_SECURITY_MASTER_KEY env var for production deployments",
-                    path
-                );
-            }
-        }
+        config.security.master_key = Some(key);
 
         Ok(config)
     }
@@ -485,6 +484,14 @@ impl AppConfig {
     }
 }
 
+fn auto_security_mode(environment: &str) -> &'static str {
+    match environment {
+        "development" | "test" => "none",
+        // Production and unknown environments default to the secure mode.
+        _ => "auth_key",
+    }
+}
+
 fn file_mentions(path: &std::path::Path, needle: &str) -> bool {
     std::fs::read_to_string(path)
         .map(|content| content.contains(needle))
@@ -496,8 +503,97 @@ fn is_loopback_host(host: &str) -> bool {
     matches!(host, "127.0.0.1" | "::1" | "localhost")
 }
 
-fn write_master_key_to_keyfile(path: &str, mkey: &str) -> std::io::Result<()> {
+/// Resolves a path from the config file against the config file's directory.
+/// Absolute paths are kept verbatim; empty values are left untouched.
+fn resolve_path(base: &Path, value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return value.to_string();
+    }
+    let path = Path::new(trimmed);
+    if path.is_absolute() {
+        return value.to_string();
+    }
+    let mut out = PathBuf::new();
+    for component in base.join(path).components() {
+        match component {
+            std::path::Component::CurDir => {}
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out.to_string_lossy().into_owned()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MasterKeySource {
+    Env,
+    Config,
+    DataDir,
+    Legacy,
+    Generated,
+}
+
+fn read_key_file(path: &Path) -> Option<String> {
+    std::fs::read_to_string(path)
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+fn generate_master_key() -> String {
+    let mut key_bytes = [0u8; 32];
+    rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut key_bytes);
+    key_bytes.iter().map(|b| format!("{:02x}", b)).collect()
+}
+
+/// Resolves the master key without consulting the process CWD for the primary
+/// location: the key lives next to the data directory (which itself is resolved
+/// against the config file's directory). A key left in the CWD by an older
+/// version is used only as a fallback, so upgrades keep working.
+fn resolve_master_key(
+    data_dir: &Path,
+    cwd: Option<&Path>,
+    env_key: Option<String>,
+    configured_key: Option<String>,
+) -> (String, MasterKeySource) {
+    if let Some(key) = env_key {
+        return (key, MasterKeySource::Env);
+    }
+    if let Some(key) = configured_key {
+        return (key, MasterKeySource::Config);
+    }
+
+    let key_path = data_dir.join("liven.key");
+    if let Some(key) = read_key_file(&key_path) {
+        return (key, MasterKeySource::DataDir);
+    }
+    if let Some(cwd) = cwd {
+        let legacy = cwd.join("liven.key");
+        if legacy != key_path
+            && let Some(key) = read_key_file(&legacy)
+        {
+            return (key, MasterKeySource::Legacy);
+        }
+    }
+
+    let generated = generate_master_key();
+    if let Err(e) = write_master_key_to_keyfile(&key_path, &generated) {
+        tracing::error!(
+            "could not persist master key at {}: {}",
+            key_path.display(),
+            e
+        );
+    }
+    (generated, MasterKeySource::Generated)
+}
+
+fn write_master_key_to_keyfile(path: &Path, mkey: &str) -> std::io::Result<()> {
     use std::io::Write;
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent)?;
+    }
     let mut file = std::fs::File::create(path)?;
 
     // Set permissions to 0600 on Unix — only the owner can read the key file.
@@ -511,4 +607,95 @@ fn write_master_key_to_keyfile(path: &str, mkey: &str) -> std::io::Result<()> {
     file.write_all(b"\n")?;
     file.sync_all()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod path_resolution_tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn resolve_path_joins_relative_and_keeps_absolute() {
+        let base = Path::new("/etc/liven");
+        assert_eq!(resolve_path(base, "data"), "/etc/liven/data");
+        assert_eq!(resolve_path(base, "./data"), "/etc/liven/data");
+        assert_eq!(resolve_path(base, "/var/lib/liven"), "/var/lib/liven");
+        assert_eq!(resolve_path(base, ""), "");
+    }
+
+    #[test]
+    fn generated_key_is_written_next_to_data_not_cwd() {
+        let tmp = tempdir().unwrap();
+        let data = tmp.path().join("data");
+        let cwd = tmp.path().join("cwd");
+        std::fs::create_dir_all(&cwd).unwrap();
+
+        let (key, source) = resolve_master_key(&data, Some(&cwd), None, None);
+
+        assert_eq!(source, MasterKeySource::Generated);
+        let written = read_key_file(&data.join("liven.key")).unwrap();
+        assert_eq!(written, key);
+        assert!(!cwd.join("liven.key").exists());
+    }
+
+    #[test]
+    fn legacy_cwd_key_is_used_when_data_dir_has_none() {
+        let tmp = tempdir().unwrap();
+        let data = tmp.path().join("data");
+        let cwd = tmp.path().join("cwd");
+        std::fs::create_dir_all(&cwd).unwrap();
+        std::fs::write(cwd.join("liven.key"), "legacy-key\n").unwrap();
+
+        let (key, source) = resolve_master_key(&data, Some(&cwd), None, None);
+
+        assert_eq!(source, MasterKeySource::Legacy);
+        assert_eq!(key, "legacy-key");
+        assert!(!data.join("liven.key").exists());
+    }
+
+    #[test]
+    fn data_dir_key_wins_over_legacy_cwd_key() {
+        let tmp = tempdir().unwrap();
+        let data = tmp.path().join("data");
+        let cwd = tmp.path().join("cwd");
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::create_dir_all(&cwd).unwrap();
+        std::fs::write(data.join("liven.key"), "new-key\n").unwrap();
+        std::fs::write(cwd.join("liven.key"), "legacy-key\n").unwrap();
+
+        let (key, source) = resolve_master_key(&data, Some(&cwd), None, None);
+
+        assert_eq!(source, MasterKeySource::DataDir);
+        assert_eq!(key, "new-key");
+    }
+
+    #[test]
+    fn auto_security_mode_follows_environment() {
+        assert_eq!(auto_security_mode("development"), "none");
+        assert_eq!(auto_security_mode("test"), "none");
+        assert_eq!(auto_security_mode("production"), "auth_key");
+        assert_eq!(auto_security_mode("staging"), "auth_key");
+    }
+
+    #[test]
+    fn env_and_config_keys_take_priority_and_write_nothing() {
+        let tmp = tempdir().unwrap();
+        let data = tmp.path().join("data");
+
+        let (key, source) = resolve_master_key(
+            &data,
+            None,
+            Some("env-key".to_string()),
+            Some("config-key".to_string()),
+        );
+        assert_eq!((key.as_str(), source), ("env-key", MasterKeySource::Env));
+
+        let (key, source) = resolve_master_key(&data, None, None, Some("config-key".to_string()));
+        assert_eq!(
+            (key.as_str(), source),
+            ("config-key", MasterKeySource::Config)
+        );
+
+        assert!(!data.join("liven.key").exists());
+    }
 }

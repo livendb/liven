@@ -5,6 +5,11 @@ After=network.target
 [Service]
 Type=simple
 User=root
+# Relative paths in liven.toml (data_directory, cert paths) resolve against the
+# directory containing the config file, not the process CWD. WorkingDirectory is
+# still set so that the legacy <CWD>/liven.key fallback finds the key file left
+# there by older versions during the upgrade.
+WorkingDirectory=/etc/liven
 ExecStart=/usr/local/bin/liven start --config /etc/liven/liven.toml
 Restart=on-failure
 

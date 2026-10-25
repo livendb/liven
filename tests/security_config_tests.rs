@@ -83,50 +83,79 @@ fn test_unsupported_sync_mode_is_rejected() {
 }
 
 #[test]
-fn test_auto_security_mode_development() {
-    // Test that development environment auto-sets security.mode to "none"
+fn test_relative_paths_resolve_against_config_directory() {
     let temp_dir = tempdir().unwrap();
-    let test_toml = temp_dir.path().join("liven.toml");
-
-    // Create a minimal config without explicit security.mode
-    let config_content = r#"
+    let config_dir = temp_dir.path();
+    let path = config_dir.join("liven.toml");
+    std::fs::write(
+        &path,
+        r#"
 [server]
 environment = "development"
 [storage]
-data_directory = "./data"
-"#;
+data_directory = "./var/liven-data"
+"#,
+    )
+    .unwrap();
 
-    std::fs::write(&test_toml, config_content).unwrap();
+    let config = AppConfig::load_from(Some(&path)).unwrap();
 
-    // Load config - should auto-set security.mode to "none" for development
-    let config = AppConfig::load().unwrap();
-
-    // Note: This test verifies the logic exists, but the actual auto-detection
-    // depends on whether the file detection works in test environment
-    assert!(config.security.mode == "auth_key" || config.security.mode == "none");
+    // Relative to the config file, not the process CWD.
+    assert_eq!(
+        config.storage.data_directory,
+        config_dir.join("var/liven-data").to_string_lossy()
+    );
+    assert!(
+        std::path::Path::new(&config.storage.data_directory).is_absolute(),
+        "resolved data directory must be absolute: {}",
+        config.storage.data_directory
+    );
 }
 
 #[test]
-fn test_auto_security_mode_production() {
-    // Test that production environment auto-sets security.mode to "auth_key"
+fn test_ztna_paths_resolve_against_config_directory() {
     let temp_dir = tempdir().unwrap();
-    let test_toml = temp_dir.path().join("liven.toml");
-
-    // Create a minimal config without explicit security.mode
-    let config_content = r#"
+    let config_dir = temp_dir.path();
+    let path = config_dir.join("liven.toml");
+    std::fs::write(
+        &path,
+        r#"
 [server]
 environment = "production"
 [storage]
 data_directory = "./data"
-"#;
+[security.ztna]
+enabled = true
+cert_path = "./certs/server.crt"
+key_path = "./certs/server.key"
+client_ca_path = "/etc/liven/ca.crt"
+"#,
+    )
+    .unwrap();
 
-    std::fs::write(&test_toml, config_content).unwrap();
+    let config = AppConfig::load_from(Some(&path)).unwrap();
+    let ztna = config.security.ztna.expect("ztna config present");
 
-    // Load config - should auto-set security.mode to "auth_key" for production
-    let config = AppConfig::load().unwrap();
-
-    // Should default to auth_key for production
-    assert_eq!(config.security.mode, "auth_key");
+    assert_eq!(
+        ztna.cert_path.as_deref(),
+        Some(
+            config_dir
+                .join("certs/server.crt")
+                .to_string_lossy()
+                .as_ref()
+        )
+    );
+    assert_eq!(
+        ztna.key_path.as_deref(),
+        Some(
+            config_dir
+                .join("certs/server.key")
+                .to_string_lossy()
+                .as_ref()
+        )
+    );
+    // Absolute paths are left untouched.
+    assert_eq!(ztna.client_ca_path.as_deref(), Some("/etc/liven/ca.crt"));
 }
 
 #[test]
