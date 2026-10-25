@@ -1428,11 +1428,13 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> crate::error::Res
                     engine,
                     keys: vec![compound_key.clone()],
                 };
-                match engine.append_async(stream_name, key, json_to_datavalue(value.clone()), false)
-                {
-                    Ok(rx) => (rx, pending),
-                    Err(e) => return Err(e),
-                }
+                let rx = engine.append_async(
+                    stream_name,
+                    key,
+                    json_to_datavalue(value.clone()),
+                    false,
+                )?;
+                (rx, pending)
             };
             let result = rx.recv().map_err(|e| {
                 LivenError::Internal(format!("LogRingBuffer coordination error: {}", e))
@@ -1480,10 +1482,8 @@ pub fn execute_query(engine: &StorageEngine, query: &Query) -> crate::error::Res
                         )
                     })
                     .collect();
-                match engine.append_batch_async(records) {
-                    Ok(rx) => (rx, pending),
-                    Err(e) => return Err(e),
-                }
+                let rx = engine.append_batch_async(records)?;
+                (rx, pending)
             };
             let result = rx.recv().map_err(|e| {
                 LivenError::Internal(format!("LogRingBuffer coordination error: {}", e))
