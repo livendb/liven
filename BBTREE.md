@@ -103,6 +103,25 @@ are gated off for `experiment-btree` with a job-level
 `if: github.ref_name != 'experiment-btree' && github.head_ref != 'experiment-btree'`,
 so the 1M job is the only CI signal on this branch.
 
+### First CI result
+
+GitHub Actions run
+[40389750076](https://github.com/livendb/liven/actions/runs/40389750076)
+on `ubuntu-24.04` passed in 4m09s:
+
+| Phase                             | Result                                                         |
+| --------------------------------- | -------------------------------------------------------------- |
+| Insert 1,000,000 records          | 250,184 ops/s · 32.02 MB/s logical · 1 segment / 189,000,000 B |
+| Batch latency                     | p50 1.91 ms · p99 3.16 ms · p99.9 6.11 ms                      |
+| Recovery / index rebuild          | 3.443 s · `skipmap_len=1000000`                                |
+| RSS after insert → after recovery | 663,957,504 B → 667,697,152 B (633 → 637 MiB)                  |
+| Read, 1 thread                    | 463,129 ops/s · p50 1.79 µs · p99 2.35 µs · 0 mismatches       |
+| Read, 4 threads                   | 1,440,303 ops/s · p50 2.27 µs · p99 3.23 µs · 0 mismatches     |
+| Read, 8 threads                   | 1,412,276 ops/s · p50 2.29 µs · p99 3.23 µs · 0 mismatches     |
+
+All three read phases verified every returned value; the workflow's assertion
+confirmed the index held exactly 1,000,000 entries after recovery.
+
 ## End-to-end benchmark
 
 Reproduced with the in-repo load harness:
