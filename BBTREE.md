@@ -122,6 +122,40 @@ on `ubuntu-24.04` passed in 4m09s:
 All three read phases verified every returned value; the workflow's assertion
 confirmed the index held exactly 1,000,000 entries after recovery.
 
+### 1M CI A/B comparison
+
+The skiplist baseline was run on `main` at `5909b6e` through the existing
+`Load Benchmark (Linux)` workflow
+([run 40390931206](https://github.com/livendb/liven/actions/runs/40390931206)),
+dispatched with the same 1M records / 1M reads / threads 1,4,8 parameters.
+Each implementation was measured once on a separate GitHub-hosted
+`ubuntu-24.04` runner, so the deltas are indicative rather than controlled.
+
+| Metric                  |    crossbeam-skiplist |                bbtree |             Change |
+| ----------------------- | --------------------: | --------------------: | -----------------: |
+| Insert throughput       |         233,299 ops/s |         250,184 ops/s |          **+7.2%** |
+| Insert batch p50        |               1.59 ms |               1.91 ms |             +20.1% |
+| Insert batch p99        |              15.42 ms |               3.16 ms |         **−79.5%** |
+| Insert batch p99.9      |              92.34 ms |               6.11 ms |         **−93.4%** |
+| Recovery / rebuild      |               3.478 s |               3.443 s |              −1.0% |
+| Read, 1 thread          |         265,101 ops/s |         463,129 ops/s |         **+74.7%** |
+| Read, 4 threads         |         938,357 ops/s |       1,440,303 ops/s |         **+53.5%** |
+| Read, 8 threads         |         940,495 ops/s |       1,412,276 ops/s |         **+50.2%** |
+| Read p50, 1/4/8 threads | 3.29 / 3.62 / 3.60 µs | 1.79 / 2.27 / 2.29 µs | −46% / −37% / −36% |
+| RSS after insert        |             418.6 MiB |             633.2 MiB |             +51.2% |
+| RSS after recovery      |             647.0 MiB |             636.8 MiB |              −1.6% |
+
+At 1M keys the read advantage is much larger than at 100k: every phase is
+roughly 1.5–1.75× faster and the median latency drops by more than a third.
+Insert throughput improves modestly, but the more useful result is the tail:
+bbtree's p99.9 batch latency is 6.11 ms versus 92.34 ms for the skiplist.
+
+RSS during the insert phase is the remaining concern: bbtree peaks at
+633 MiB versus 419 MiB for the skiplist. After recovery the two are close
+(637 vs 647 MiB). Note that recovery RSS includes pages from the dropped
+engine that the allocator has not returned to the OS, so the insert-phase
+number is the more meaningful comparison for steady-state memory use.
+
 ## End-to-end benchmark
 
 Reproduced with the in-repo load harness:
