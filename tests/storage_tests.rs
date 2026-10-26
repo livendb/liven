@@ -271,16 +271,8 @@ fn test_file_descriptor_limits() {
         .unwrap(); // segment 3
 
     // Let's force load a file handle
-    let ptr1 = engine
-        .skipmap
-        .get(&"s1:k1".to_string())
-        .map(|e| *e.value())
-        .unwrap();
-    let ptr2 = engine
-        .skipmap
-        .get(&"s1:k2".to_string())
-        .map(|e| *e.value())
-        .unwrap();
+    let ptr1 = engine.skipmap.get(&"s1:k1".to_string()).unwrap();
+    let ptr2 = engine.skipmap.get(&"s1:k2".to_string()).unwrap();
 
     // Accessing ptr1 will load segment into cache
     let _ = engine.read_record(ptr1).unwrap();
@@ -421,7 +413,7 @@ fn test_recovery_excludes_fully_tombstoned_streams() {
                 false,
             )
             .unwrap();
-        // Compact — active frames for keys no longer in SkipMap are not copied.
+        // Compact — active frames for keys no longer in the index are not copied.
         // After compaction, only active_stream remains in segment files.
         engine.compact().unwrap();
     }

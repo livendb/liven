@@ -1,0 +1,143 @@
+name: B-tree 1M Record Test
+
+# Stress the bbtree-backed live index with one million records.
+# Runs only for the experiment branch (and on demand); all other workflows
+# are gated off for `experiment-btree` so this is the only CI signal.
+on:
+  push:
+    branches: [experiment-btree]
+  workflow_dispatch:
+    inputs:
+      records:
+        description: "Records to insert"
+        required: false
+        default: "1000000"
+      reads:
+        description: "Point reads per phase"
+        required: false
+        default: "1000000"
+      threads:
+        description: "Read thread counts, comma-separated"
+        required: false
+        default: "1,4,8"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: btree-1m-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  btree-1m:
+    name: Insert, recover, and read 1M records
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    env:
+      CARGO_TERM_COLOR: always
+      RUST_BACKTRACE: 1
+      # Match the load-bench workflow so results are comparable.
+      RUSTFLAGS: "-C target-cpu=x86-64-v2"
+      RECORDS: ${{ inputs.records || '1000000' }}
+      READS: ${{ inputs.reads || '1000000' }}
+      THREADS: ${{ inputs.threads || '1,4,8' }}
+      TAG: ci-1m-btree
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: "11.8.0"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: "pnpm"
+          cache-dependency-path: "ui/pnpm-lock.yaml"
+
+      # The default feature set embeds ui/dist through rust-embed.
+      - name: Build Web UI assets
+        working-directory: ui
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: btree-1m
+
+      - name: Build benchmark (release)
+        run: cargo bench --bench load_bench --no-run
+
+      - name: Run 1M-record load test
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p bench-results
+          cargo bench --bench load_bench -- \
+            --records "$RECORDS" \
+            --reads "$READS" \
+            --value-size 128 \
+            --key-len 16 \
+            --mode embedded \
+            --threads "$THREADS" \
+            --batch 500 \
+            --read-pattern uniform \
+            --warm hot \
+            --seed 42 \
+            --segment-mb 256 \
+            --max-fds 64 \
+            --max-index-ram-mb 2048 \
+            --tag "$TAG" \
+            2>&1 | tee "bench-results/${TAG}.log"
+
+      - name: Assert the full index was built and reads matched
+        shell: bash
+        run: |
+          set -euo pipefail
+          LOG="bench-results/${TAG}.log"
+          grep -q "skipmap_len=${RECORDS}" "$LOG"
+          grep -q "mismatches 0" "$LOG"
+          echo "PASS: ${RECORDS} records indexed; all read phases reported zero mismatches"
+
+      - name: Upload benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: btree-1m-${{ github.run_id }}
+          path: |
+            bench-results/${{ env.TAG }}.log
+            bench-results/*${{ env.TAG }}*.json
+            bench-results/*${{ env.TAG }}*.md
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Write job summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## B-tree 1M record test"
+            echo ""
+            echo "- commit: \`${GITHUB_SHA}\`"
+            echo "- records: \`${RECORDS}\`, reads: \`${READS}\`, threads: \`${THREADS}\`"
+            echo ""
+            if [ -f "bench-results/${TAG}.log" ]; then
+              echo '```'
+              grep -E '^(INSERT|RECOVER|READ)' "bench-results/${TAG}.log" || true
+              echo '```'
+            fi
+            for f in bench-results/*"${TAG}"*.md; do
+              [ -e "$f" ] || continue
+              cat "$f"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"

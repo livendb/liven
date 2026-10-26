@@ -64,6 +64,8 @@ concurrency:
 jobs:
   load-bench:
     name: Load benchmark (Linux)
+    # The btree experiment is covered by btree-1m.yml.
+    if: github.ref_name != 'experiment-btree' && github.head_ref != 'experiment-btree'
     runs-on: ubuntu-24.04
     timeout-minutes: 90
 

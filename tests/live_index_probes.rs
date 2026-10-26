@@ -1,4 +1,4 @@
-//! Probes for Step 4b verification: what the skipmap actually holds.
+//! Probes for Step 4b verification: what the primary index actually holds.
 use liven::storage::StorageEngine;
 use liven::types::DataValue;
 use tempfile::tempdir;
@@ -6,7 +6,7 @@ use tempfile::tempdir;
 fn count_prefix(e: &StorageEngine, prefix: &str) -> usize {
     e.skipmap
         .iter()
-        .filter(|x| x.key().starts_with(prefix))
+        .filter(|(key, _)| key.starts_with(prefix))
         .count()
 }
 

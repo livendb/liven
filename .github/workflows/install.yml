@@ -27,6 +27,8 @@ jobs:
   # ── Shell syntax check (fast, no sudo needed) ──
   lint:
     name: ShellCheck
+    # The btree experiment is covered by btree-1m.yml.
+    if: github.ref_name != 'experiment-btree' && github.head_ref != 'experiment-btree'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -42,6 +44,7 @@ jobs:
   # ── Detection-only test (no download, no sudo) ──
   detect:
     name: Detection (${{ matrix.os }})
+    if: github.ref_name != 'experiment-btree' && github.head_ref != 'experiment-btree'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 5
     strategy:
@@ -85,6 +88,7 @@ jobs:
   # ── Full install test (Linux x86_64) ──
   install-linux:
     name: Install (Linux x86_64)
+    if: github.ref_name != 'experiment-btree' && github.head_ref != 'experiment-btree'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -176,6 +180,7 @@ jobs:
   # ── Full install test (macOS ARM64) ──
   install-macos:
     name: Install (macOS ARM64)
+    if: github.ref_name != 'experiment-btree' && github.head_ref != 'experiment-btree'
     runs-on: macos-latest
     timeout-minutes: 15
     steps:
@@ -247,6 +252,7 @@ jobs:
   # ── Windows: validate detection and instructions ──
   install-windows:
     name: Install (Windows x86_64)
+    if: github.ref_name != 'experiment-btree' && github.head_ref != 'experiment-btree'
     runs-on: windows-latest
     timeout-minutes: 10
     defaults:

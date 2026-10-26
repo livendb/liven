@@ -1071,10 +1071,13 @@ fn test_delete_key_write_lock_serialization() {
     // Just verify no panic and the result is coherent
     let in_skipmap = engine.skipmap.contains_key("test:k1");
     match final_state {
-        Some(_) => assert!(in_skipmap, "If get() returns Some, key must be in SkipMap"),
+        Some(_) => assert!(
+            in_skipmap,
+            "If get() returns Some, key must be in B-tree index"
+        ),
         None => assert!(
             !in_skipmap,
-            "If get() returns None, key must not be in SkipMap"
+            "If get() returns None, key must not be in B-tree index"
         ),
     }
 

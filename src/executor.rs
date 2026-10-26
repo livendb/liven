@@ -747,7 +747,7 @@ pub fn execute_explain(engine: &StorageEngine, query: &Query) -> Vec<Record> {
                 engine
                     .skipmap
                     .iter()
-                    .filter(|e| e.key().starts_with(&prefix))
+                    .filter(|(key, _)| key.starts_with(&prefix))
                     .count()
             });
 
@@ -757,7 +757,7 @@ pub fn execute_explain(engine: &StorageEngine, query: &Query) -> Vec<Record> {
                     "scan",
                     "O(log n)",
                     &format!(
-                        "Key equality detected — uses SkipMap point lookup. Total index keys: {}",
+                        "Key equality detected — uses B-tree index point lookup. Total index keys: {}",
                         total_keys
                     ),
                 ));
@@ -811,7 +811,7 @@ pub fn execute_explain(engine: &StorageEngine, query: &Query) -> Vec<Record> {
                 "existence_check",
                 "O(log n)",
                 &format!(
-                    "SkipMap lookup for key '{}' in stream '{}'",
+                    "B-tree index lookup for key '{}' in stream '{}'",
                     key, stream_name
                 ),
             ));
@@ -825,7 +825,7 @@ pub fn execute_explain(engine: &StorageEngine, query: &Query) -> Vec<Record> {
                 2,
                 "index_update",
                 "O(log n)",
-                "SkipMap insert after flusher confirms write.",
+                "B-tree index insert after flusher confirms write.",
             ));
         }
 
@@ -841,7 +841,7 @@ pub fn execute_explain(engine: &StorageEngine, query: &Query) -> Vec<Record> {
                 "existence_check",
                 "O(k log n)",
                 &format!(
-                    "{} SkipMap lookups for stream '{}'",
+                    "{} B-tree index lookups for stream '{}'",
                     batch.len(),
                     stream_name
                 ),
@@ -859,7 +859,7 @@ pub fn execute_explain(engine: &StorageEngine, query: &Query) -> Vec<Record> {
                 3,
                 "index_update",
                 "O(k log n)",
-                "SkipMap insert for each record after flusher confirms.",
+                "B-tree index insert for each record after flusher confirms.",
             ));
         }
 
@@ -882,7 +882,7 @@ pub fn execute_explain(engine: &StorageEngine, query: &Query) -> Vec<Record> {
                 1,
                 "index_update",
                 "O(log n)",
-                "SkipMap pointer updated to new segment offset.",
+                "B-tree index pointer updated to new segment offset.",
             ));
         }
 
@@ -900,7 +900,7 @@ pub fn execute_explain(engine: &StorageEngine, query: &Query) -> Vec<Record> {
                 1,
                 "index_update",
                 "O(k log n)",
-                "SkipMap upsert for each record after flusher confirms.",
+                "B-tree index upsert for each record after flusher confirms.",
             ));
         }
 
@@ -909,13 +909,13 @@ pub fn execute_explain(engine: &StorageEngine, query: &Query) -> Vec<Record> {
                 0,
                 "existence_check",
                 "O(log n)",
-                &format!("SkipMap lookup for '{}:{}'", stream_name, key),
+                &format!("B-tree index lookup for '{}:{}'", stream_name, key),
             ));
             steps.push(make_step(
                 1,
                 "tombstone",
                 "O(1)",
-                "Append tombstone frame. SkipMap entry removed.",
+                "Append tombstone frame. B-tree index entry removed.",
             ));
         }
 
@@ -924,7 +924,7 @@ pub fn execute_explain(engine: &StorageEngine, query: &Query) -> Vec<Record> {
             let key_count = engine
                 .skipmap
                 .iter()
-                .filter(|e| e.key().starts_with(&prefix))
+                .filter(|(key, _)| key.starts_with(&prefix))
                 .count();
             steps.push(make_step(
                 0,
@@ -1043,7 +1043,7 @@ fn describe_stage(stage: &PipelineStage, engine: &StorageEngine) -> (String, Str
             let count = engine
                 .skipmap
                 .iter()
-                .filter(|e| e.key().starts_with(&prefix))
+                .filter(|(key, _)| key.starts_with(&prefix))
                 .count();
             (
                 "from".to_string(),
@@ -1134,7 +1134,7 @@ ordered by ascending sequence_id. Full segment scan: cost is proportional to the
             "chain".to_string(),
             "O(n log m)".to_string(),
             format!(
-                "Left join to stream '{}' on key '{}'. Each record does one SkipMap lookup. No secondary scan.",
+                "Left join to stream '{}' on key '{}'. Each record does one B-tree index lookup. No secondary scan.",
                 target_stream, join_key
             ),
         ),
@@ -1145,7 +1145,7 @@ ordered by ascending sequence_id. Full segment scan: cost is proportional to the
             "enrich".to_string(),
             "O(n log m)".to_string(),
             format!(
-                "Enrich from stream '{}' on key '{}'. One SkipMap point lookup per record. No secondary scan.",
+                "Enrich from stream '{}' on key '{}'. One B-tree index point lookup per record. No secondary scan.",
                 source_stream, join_key
             ),
         ),

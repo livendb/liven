@@ -1,6 +1,6 @@
 use crate::error::LivenError;
+use crate::storage::index::IndexMap;
 use crate::types::{DataValue, LogPointer, Record};
-use crossbeam_skiplist::SkipMap;
 use fs2::FileExt;
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File, OpenOptions};
@@ -55,6 +55,7 @@ pub struct RecoveryReport {
 }
 
 #[allow(unsafe_code)]
+pub mod index;
 pub mod key;
 pub mod ring_buffer;
 pub mod timestamp_index;
@@ -159,7 +160,10 @@ pub struct StorageEngine {
     // We protect the active file handle and its size using a Mutex to serialize append operations
     active_file: Arc<Mutex<Option<File>>>,
     active_size: Arc<Mutex<u64>>,
-    pub skipmap: Arc<SkipMap<String, LogPointer>>,
+    /// Primary in-memory index: compound `"stream:key"` → live `LogPointer`.
+    /// Backed by a concurrent B+-tree (`bbtree`); the field keeps its old
+    /// name for compatibility with the previous skiplist-backed API.
+    pub skipmap: Arc<IndexMap<String>>,
     broadcast_tx: broadcast::Sender<Record>,
     file_handles: Arc<Mutex<HashMap<u64, Arc<File>>>>,
     ring_buffer: ring_buffer::LogRingBuffer,
@@ -251,12 +255,12 @@ thread_local! {
 /// full payload. Stream names are the first field of every payload.
 const STREAM_PEEK_CAP: usize = 128;
 
-/// Charged bytes for one primary-index node (`String` + `LogPointer` + skiplist
-/// tower/allocator). The compound key length is added separately.
+/// Charged bytes for one primary-index entry (`String` + `LogPointer` +
+/// B-tree node overhead). The compound key length is added separately.
 const PRIMARY_INDEX_NODE_BYTES: u64 = 64;
 
 /// Charged bytes for one timestamp-index entry
-/// (`(i64, u64)` key + `LogPointer` + skiplist tower/allocator).
+/// (encoded key + `LogPointer` + B-tree node overhead).
 const TIMESTAMP_INDEX_NODE_BYTES: u64 = 64;
 
 /// Decode the fixed 26-byte on-disk frame header.
@@ -385,7 +389,7 @@ impl StorageEngine {
         let active_segment_id = Arc::new(AtomicU64::new(1));
         let active_file = Arc::new(Mutex::new(None));
         let active_size = Arc::new(Mutex::new(0));
-        let skipmap = Arc::new(SkipMap::new());
+        let skipmap = Arc::new(IndexMap::new());
         let file_handles = Arc::new(Mutex::new(HashMap::new()));
         let is_running = Arc::new(std::sync::atomic::AtomicBool::new(true));
         let failed = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -584,7 +588,7 @@ impl StorageEngine {
         ensure_data_dir(&path)?;
 
         // Minimal engine construction — only what recover() needs.
-        let skipmap = Arc::new(SkipMap::new());
+        let skipmap = Arc::new(IndexMap::new());
         let index_ram_bytes = Arc::new(AtomicU64::new(0));
         let streams_set = Arc::new(Mutex::new(HashSet::new()));
         let file_handles = Arc::new(Mutex::new(HashMap::new()));
@@ -685,7 +689,7 @@ impl StorageEngine {
         Ok(file_ref)
     }
 
-    /// Scans the directory and rebuilds the concurrent SkipMap index
+    /// Scans the directory and rebuilds the concurrent B-tree index
     fn recover(&mut self) -> crate::error::Result<()> {
         let mut segments = Vec::new();
 
@@ -728,7 +732,7 @@ impl StorageEngine {
 
         let mut highest_seq = 0;
         // Highest sequence ID seen for each key during this replay, including
-        // tombstones. A tombstone removes the SkipMap entry, so without this
+        // tombstones. A tombstone removes the index entry, so without this
         // watermark an older frame replayed later (for example from a compacted
         // segment) would see `current = None` and resurrect a deleted key.
         let mut seq_watermarks: HashMap<String, u64> = HashMap::new();
@@ -881,7 +885,7 @@ impl StorageEngine {
                         let current_seq = seq_watermarks
                             .get(&compound_key)
                             .copied()
-                            .or_else(|| self.skipmap.get(&compound_key).map(|e| e.value().seq_id));
+                            .or_else(|| self.skipmap.get(&compound_key).map(|p| p.seq_id));
                         let is_newer = current_seq.is_none_or(|cur| seq_id > cur);
                         if is_newer {
                             seq_watermarks.insert(compound_key.clone(), seq_id);
@@ -889,7 +893,7 @@ impl StorageEngine {
 
                         if flags & 0x02 != 0 {
                             // Tombstone — drop the timestamp-index entry, then remove
-                            // from skipmap only; do not add stream to streams_set
+                            // from the index only; do not add stream to streams_set
                             if is_newer {
                                 self.prune_timestamp_index(stream_name, key);
                                 if self.skipmap.remove(&compound_key).is_some() {
@@ -1143,7 +1147,10 @@ impl StorageEngine {
                     match tear.kind {
                         TearKind::Header => warn!(
                             "Torn header at offset {} in segment {} ({} bytes discarded). Truncating to {}.",
-                            tear.offset, tear.segment_id, tear.file_len - tear.offset, t
+                            tear.offset,
+                            tear.segment_id,
+                            tear.file_len - tear.offset,
+                            t
                         ),
                         TearKind::Payload => warn!(
                             "Torn payload at offset {} in segment {} (declared {} bytes, {} available). Truncating to {}.",
@@ -1155,15 +1162,24 @@ impl StorageEngine {
                         ),
                         TearKind::Crc => warn!(
                             "CRC mismatch at offset {} in segment {} - torn write assumed. Truncating to offset {} ({} bytes discarded).",
-                            tear.offset, tear.segment_id, t, tear.file_len - t
+                            tear.offset,
+                            tear.segment_id,
+                            t,
+                            tear.file_len - t
                         ),
                         TearKind::Parse => warn!(
                             "Unparseable payload at offset {} in segment {} - torn write assumed. Truncating to {} ({} bytes discarded).",
-                            tear.offset, tear.segment_id, t, tear.file_len - t
+                            tear.offset,
+                            tear.segment_id,
+                            t,
+                            tear.file_len - t
                         ),
                         TearKind::Trailing => warn!(
                             "Trailing bytes after last frame in segment {} (offset {}, {} bytes discarded). Truncating to {}.",
-                            tear.segment_id, tear.offset, tear.file_len - tear.offset, t
+                            tear.segment_id,
+                            tear.offset,
+                            tear.file_len - tear.offset,
+                            t
                         ),
                     }
                     report
@@ -1188,7 +1204,7 @@ impl StorageEngine {
                         let approx_keys = self
                             .skipmap
                             .iter()
-                            .filter(|e| e.value().segment_id == tear.segment_id)
+                            .filter(|(_, ptr)| ptr.segment_id == tear.segment_id)
                             .count();
                         if tear.kind == TearKind::Crc {
                             warn!(
@@ -1215,8 +1231,8 @@ impl StorageEngine {
                 let keys_to_remove: Vec<String> = self
                     .skipmap
                     .iter()
-                    .filter(|e| e.value().segment_id == tear.segment_id)
-                    .map(|e| e.key().clone())
+                    .filter(|(_, ptr)| ptr.segment_id == tear.segment_id)
+                    .map(|(key, _)| key)
                     .collect();
                 for key in &keys_to_remove {
                     if self.skipmap.remove(key).is_some() {
@@ -1827,7 +1843,7 @@ impl StorageEngine {
     /// the deleted or superseded record from a stale index entry.
     fn prune_timestamp_index(&self, stream_name: &str, key: &str) {
         let compound_key = format!("{}:{}", stream_name, key);
-        let Some(ptr) = self.skipmap.get(&compound_key).map(|e| *e.value()) else {
+        let Some(ptr) = self.skipmap.get(&compound_key) else {
             return;
         };
         let guard = self.timestamp_indexes.lock().unwrap();
@@ -1967,15 +1983,15 @@ impl StorageEngine {
             &format!("{}:{}", stream_name, key)
         };
 
-        if let Some(entry) = self.skipmap.get(lookup_key) {
-            let record = self.read_record(*entry.value())?;
+        if let Some(pointer) = self.skipmap.get(lookup_key) {
+            let record = self.read_record(pointer)?;
             Ok(Some(record))
         } else {
             Ok(None)
         }
     }
 
-    /// Lists all streams currently indexed in the skipmap
+    /// Lists all streams currently indexed in the primary index
     pub fn list_streams(&self) -> Vec<String> {
         let guard = self.streams_set.lock().unwrap();
         guard.iter().cloned().collect()
@@ -1985,9 +2001,9 @@ impl StorageEngine {
     pub fn list_keys(&self, stream_name: &str) -> Vec<String> {
         let prefix = format!("{}:", stream_name);
         let mut keys = Vec::new();
-        for entry in self.skipmap.iter() {
-            if entry.key().starts_with(&prefix) {
-                keys.push(entry.key()[prefix.len()..].to_string());
+        for (key, _) in self.skipmap.iter() {
+            if key.starts_with(&prefix) {
+                keys.push(key[prefix.len()..].to_string());
             }
         }
         keys
@@ -2041,7 +2057,7 @@ impl StorageEngine {
     }
 
     /// Default read path: return the live records of one stream by ranging over the
-    /// in-memory key index (the skipmap holds one live `LogPointer` per key) and
+    /// in-memory key index (the index holds one live `LogPointer` per key) and
     /// reading each record with a positional read.
     ///
     /// Cost is proportional to the number of live keys in `stream_name`, **not** to
@@ -2058,27 +2074,24 @@ impl StorageEngine {
         let prefix = format!("{}:", stream_name);
 
         let mut records: Vec<Record> = Vec::new();
-        for entry in self
+        for (key, mut pointer) in self
             .skipmap
             .range::<str, _>((Bound::Included(prefix.as_str()), Bound::Unbounded))
         {
-            if !entry.key().starts_with(prefix.as_str()) {
+            if !key.starts_with(prefix.as_str()) {
                 break; // past this stream's key range
             }
             if records.len() >= effective_limit {
                 break;
             }
-
-            let key = entry.key();
-            let mut pointer = *entry.value();
             self.frames_read.fetch_add(1, Ordering::Relaxed);
             let record = match self.read_record(pointer) {
                 Ok(r) => Some(r),
                 Err(_) => {
                     // Compaction may have relocated the record; retry once with a
                     // fresh pointer, and give up if it is now gone.
-                    pointer = match self.skipmap.get(key) {
-                        Some(e) => *e.value(),
+                    pointer = match self.skipmap.get(&key) {
+                        Some(p) => p,
                         None => continue,
                     };
                     self.frames_read.fetch_add(1, Ordering::Relaxed);
@@ -2325,12 +2338,11 @@ impl StorageEngine {
             return Ok(());
         }
 
-        // Identify all keys in the SkipMap that point to an inactive segment
+        // Identify all keys in the index that point to an inactive segment
         let mut active_pointers_to_rewrite = Vec::new();
-        for entry in self.skipmap.iter() {
-            let pointer = *entry.value();
+        for (key, pointer) in self.skipmap.iter() {
             if pointer.segment_id != active_id {
-                active_pointers_to_rewrite.push((entry.key().clone(), pointer));
+                active_pointers_to_rewrite.push((key, pointer));
             }
         }
 
@@ -2469,7 +2481,7 @@ impl StorageEngine {
                 let should_update = self
                     .skipmap
                     .get(&compound_key)
-                    .is_some_and(|cur| *cur.value() == old_ptr);
+                    .is_some_and(|cur| cur == old_ptr);
 
                 if should_update {
                     // Re-point the timestamp index at the compacted frame before the old
@@ -2814,7 +2826,7 @@ fn validate_frame_at(
 /// Scan forward from `start` for a credible resync point. Two consecutive valid
 /// frames are required. For normal-range segments the sequence IDs must also
 /// increase past `min_seq`; compacted segments are exempt because compaction
-/// rewrites records in SkipMap order, not sequence order.
+/// rewrites records in index (key) order, not sequence order.
 fn find_resync(
     file: &File,
     file_len: u64,
@@ -3045,13 +3057,13 @@ fn primary_charge(compound_key: &str) -> u64 {
 /// releases its charge. Used by the flusher so a failed write never mutates the
 /// index before the frame is durable.
 fn prune_timestamp_entry(
-    skipmap: &Arc<SkipMap<String, LogPointer>>,
+    skipmap: &Arc<IndexMap<String>>,
     timestamp_indexes: &Arc<Mutex<HashMap<String, Arc<timestamp_index::TimestampIndex>>>>,
     stream_name: &str,
     compound_key: &str,
     index_ram_bytes: &Arc<AtomicU64>,
 ) {
-    let Some(pointer) = skipmap.get(compound_key).map(|entry| *entry.value()) else {
+    let Some(pointer) = skipmap.get(compound_key) else {
         return;
     };
     let guard = timestamp_indexes.lock().unwrap();
@@ -3196,7 +3208,7 @@ impl StorageEngine {
                         // supersede/delete (belt-and-braces with the index
                         // maintenance in append/compact).
                         let compound = format!("{}:{}", rec.stream_name, rec.key.as_str());
-                        if self.skipmap.get(&compound).map(|e| *e.value()) != Some(ptr) {
+                        if self.skipmap.get(&compound) != Some(ptr) {
                             continue;
                         }
                         let dedup_key = (rec.stream_name.clone(), rec.key.to_string());
@@ -3229,7 +3241,7 @@ fn run_flusher_loop(
     segment_id_counter: Arc<AtomicU64>,
     active_file: Arc<Mutex<Option<File>>>,
     active_size: Arc<Mutex<u64>>,
-    skipmap: Arc<SkipMap<String, LogPointer>>,
+    skipmap: Arc<IndexMap<String>>,
     broadcast_tx: broadcast::Sender<Record>,
     file_handles: Arc<Mutex<HashMap<u64, Arc<File>>>>,
     sync_mode: String,
@@ -3361,7 +3373,7 @@ fn execute_batch_append(
     segment_id_counter: &Arc<AtomicU64>,
     active_file: &Arc<Mutex<Option<File>>>,
     active_size: &Arc<Mutex<u64>>,
-    skipmap: &Arc<SkipMap<String, LogPointer>>,
+    skipmap: &Arc<IndexMap<String>>,
     broadcast_tx: &broadcast::Sender<Record>,
     file_handles: &Arc<Mutex<HashMap<u64, Arc<File>>>>,
     sync_mode: &str,
@@ -4213,11 +4225,11 @@ impl StorageEngine {
             let keys: Vec<String> = self
                 .skipmap
                 .iter()
-                .filter(|entry| entry.value().segment_id == segment_id)
-                .map(|entry| entry.key().clone())
+                .filter(|(_, ptr)| ptr.segment_id == segment_id)
+                .map(|(key, _)| key)
                 .collect();
             for key in keys {
-                let Some(pointer) = self.skipmap.get(&key).map(|entry| *entry.value()) else {
+                let Some(pointer) = self.skipmap.get(&key) else {
                     continue;
                 };
                 if let Ok(record) = self.read_record(pointer) {
@@ -4355,7 +4367,7 @@ mod ack_tests {
         let id_counter = Arc::new(AtomicU64::new(2));
         let file = Arc::new(Mutex::new(Some(active)));
         let size = Arc::new(Mutex::new(0u64));
-        let skipmap = Arc::new(SkipMap::new());
+        let skipmap = Arc::new(IndexMap::new());
         let (broadcast_tx, _) = broadcast::channel(16);
         let handles = Arc::new(Mutex::new(HashMap::new()));
         let failed = Arc::new(AtomicBool::new(false));
